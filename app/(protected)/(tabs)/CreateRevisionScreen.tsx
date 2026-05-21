@@ -1,150 +1,193 @@
 import React from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import { styled } from 'nativewind';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import { StackNavigationProp } from '@react-navigation/stack';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
+import {
+  useCreateRevisionCard,
+  useUpdateRevisionCard,
+  useGetRevisionCard,
+} from '@/hooks/useRevisionCards';
+import { useGetFolders } from '@/hooks/useFolders';
+import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
+import RevisionForm from './RevisionForm';
+import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 
-import { useCreateRevisionCard, useUpdateRevisionCard, IPopulatedRevisionCard } from './useRevisionCards';
-import { DifficultyLevels } from '../../../src/types/revision';
-import RevisionForm from '../components/forms/RevisionForm';
-
-// Styled components
-const StyledView = styled(View);
-const StyledText = styled(Text);
-const StyledScrollView = styled(ScrollView);
-const StyledTouchableOpacity = styled(TouchableOpacity);
-
-// --- Navigation Types ---
-// Adjust this to your actual navigation setup (e.g., RootStackParamList)
-type AppStackParamList = {
-  CreateRevision: { card?: IPopulatedRevisionCard };
-  Reels: undefined; // Assuming Reels screen exists
-  // ... other screens
-};
-type CreateRevisionScreenRouteProp = RouteProp<AppStackParamList, 'CreateRevision'>;
-type CreateRevisionScreenNavigationProp = StackNavigationProp<AppStackParamList, 'CreateRevision'>;
-
-// --- Zod Schema for Form Validation ---
 const cardFormSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters.'),
   topic: z.string().min(2, 'Topic is required.'),
   explanation: z.string().min(10, 'Explanation must be at least 10 characters.'),
   code: z.string().optional(),
   image: z.string().url('Please enter a valid URL.').optional().or(z.literal('')),
-  tags: z.string().optional(), // Handled as a comma-separated string in the UI
+  tags: z.string().optional(),
+  examples: z.string().optional(),
   difficulty: z.enum(DifficultyLevels),
+  complexity: z.enum(ComplexityLevels).optional(),
+  folderId: z.string().min(1, 'Select a folder'),
 });
 
 export type CardFormData = z.infer<typeof cardFormSchema>;
 
-// --- Main Screen Component ---
-const CreateRevisionScreen = () => {
-  const navigation = useNavigation<CreateRevisionScreenNavigationProp>();
-  const route = useRoute<CreateRevisionScreenRouteProp>();
+export default function CreateRevisionScreen() {
+  useAppBackHandler();
+  const router = useRouter();
+  const { cardId, folderId: defaultFolderId } = useLocalSearchParams<{
+    cardId?: string;
+    folderId?: string;
+  }>();
 
-  const cardToEdit = route.params?.card;
-  const isEditMode = !!cardToEdit;
+  const { data: cardToEdit, isLoading: loadingCard } = useGetRevisionCard(cardId);
+  const { data: foldersData } = useGetFolders({ limit: 100 });
+  const folders = foldersData?.results ?? [];
+  const isEditMode = !!cardId && !!cardToEdit;
+
+  const resolvedFolderId =
+    (typeof cardToEdit?.folderId === 'object'
+      ? cardToEdit.folderId._id
+      : cardToEdit?.folderId) ||
+    defaultFolderId ||
+    folders[0]?._id ||
+    '';
 
   const {
     control,
     handleSubmit,
     formState: { errors, isSubmitting },
+    reset,
   } = useForm<CardFormData>({
     resolver: zodResolver(cardFormSchema),
     defaultValues: {
-      title: cardToEdit?.title || '',
-      topic: cardToEdit?.topic || '',
-      explanation: cardToEdit?.explanation || '',
-      code: cardToEdit?.code ?? '',
-      image: cardToEdit?.image ?? '',
-      tags: cardToEdit?.tags?.join(', ') || '',
-      difficulty: cardToEdit?.difficulty || 'Easy',
+      title: '',
+      topic: '',
+      explanation: '',
+      code: '',
+      image: '',
+      tags: '',
+      examples: '',
+      difficulty: 'Easy',
+      folderId: resolvedFolderId,
     },
   });
+
+  React.useEffect(() => {
+    if (cardToEdit) {
+      reset({
+        title: cardToEdit.title,
+        topic: cardToEdit.topic,
+        explanation: cardToEdit.explanation,
+        code: cardToEdit.code ?? '',
+        image: cardToEdit.image ?? '',
+        tags: cardToEdit.tags?.join(', ') || '',
+        examples: cardToEdit.examples?.join('\n') || '',
+        difficulty: cardToEdit.difficulty,
+        complexity: cardToEdit.complexity,
+        folderId:
+          typeof cardToEdit.folderId === 'object'
+            ? cardToEdit.folderId._id
+            : String(cardToEdit.folderId),
+      });
+    } else if (resolvedFolderId) {
+      reset((prev) => ({ ...prev, folderId: resolvedFolderId }));
+    }
+  }, [cardToEdit, resolvedFolderId, reset]);
 
   const createMutation = useCreateRevisionCard();
   const updateMutation = useUpdateRevisionCard();
 
+  const parseList = (raw?: string) =>
+    raw
+      ? raw
+          .split(/[\n,]/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+
   const onSubmit = (data: CardFormData) => {
     const submissionData = {
-      ...data,
-      // Ensure empty optional fields are not sent if they are empty strings
+      title: data.title,
+      topic: data.topic,
+      explanation: data.explanation,
       code: data.code || undefined,
       image: data.image || undefined,
-      tags: data.tags ? data.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
+      tags: parseList(data.tags),
+      examples: parseList(data.examples),
+      difficulty: data.difficulty,
+      complexity: data.complexity,
+      folderId: data.folderId,
+    };
+
+    const onDone = () => {
+      Toast.show({ type: 'success', text1: isEditMode ? 'Card updated' : 'Card created' });
+      router.back();
     };
 
     if (isEditMode && cardToEdit) {
       updateMutation.mutate(
         { cardId: cardToEdit._id, updateData: submissionData },
-        {
-          onSuccess: () => {
-            Toast.show({
-              type: 'success',
-              text1: 'Card Updated!',
-              text2: 'Your changes have been saved.',
-            });
-            navigation.goBack();
-          },
-          onError: (error) => {
-            Toast.show({
-              type: 'error',
-              text1: 'Update Failed',
-              text2: error.message || 'An unexpected error occurred.',
-            });
-          },
-        }
+        { onSuccess: onDone, onError: (e) => Toast.show({ type: 'error', text1: e.message }) }
       );
     } else {
       createMutation.mutate(submissionData, {
-        onSuccess: () => {
-          Toast.show({
-            type: 'success',
-            text1: 'Card Created!',
-            text2: 'Your new card is ready.',
-          });
-          navigation.goBack();
-        },
-        onError: (error) => {
-          Toast.show({
-            type: 'error',
-            text1: 'Creation Failed',
-            text2: error.message || 'An unexpected error occurred.',
-          });
-        },
+        onSuccess: onDone,
+        onError: (e) => Toast.show({ type: 'error', text1: e.message }),
       });
     }
   };
 
-  const isLoading = createMutation.isPending || updateMutation.isPending || isSubmitting;
+  const isLoading =
+    createMutation.isPending || updateMutation.isPending || isSubmitting || loadingCard;
+
+  if (cardId && loadingCard) {
+    return (
+      <View className="flex-1 bg-[#0c0c0e] justify-center items-center">
+        <ActivityIndicator color="#a78bfa" size="large" />
+      </View>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 bg-zinc-900">
-      <StyledScrollView className="p-4" contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <StyledText className="text-white text-3xl font-bold mb-6 pt-12">
-          {isEditMode ? 'Edit Revision Card' : 'Create New Card'}
-        </StyledText>
-
-        <RevisionForm control={control} errors={errors} />
-
-        <StyledTouchableOpacity
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      className="flex-1 bg-[#0c0c0e]"
+    >
+      <ScrollView
+        className="p-5"
+        contentContainerStyle={{ paddingBottom: 48 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text className="text-zinc-100 text-2xl font-bold mb-6 pt-12">
+          {isEditMode ? 'Edit card' : 'New revision card'}
+        </Text>
+        <RevisionForm control={control} errors={errors} folders={folders} />
+        <TouchableOpacity
           onPress={handleSubmit(onSubmit)}
-          disabled={isLoading}
-          className="bg-blue-600 py-4 rounded-lg items-center mt-4 disabled:opacity-50"
+          disabled={isLoading || folders.length === 0}
+          className="bg-violet-600 py-4 rounded-xl items-center mt-4 disabled:opacity-50"
         >
           {isLoading ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <StyledText className="text-white font-bold text-lg">{isEditMode ? 'Save Changes' : 'Create Card'}</StyledText>
+            <Text className="text-white font-bold text-lg">
+              {isEditMode ? 'Save changes' : 'Create card'}
+            </Text>
           )}
-        </StyledTouchableOpacity>
-      </StyledScrollView>
+        </TouchableOpacity>
+        {folders.length === 0 && (
+          <Text className="text-amber-400/90 text-center mt-4">
+            Create a folder in Learn before adding cards.
+          </Text>
+        )}
+      </ScrollView>
     </KeyboardAvoidingView>
   );
-};
-
-export default CreateRevisionScreen;
+}

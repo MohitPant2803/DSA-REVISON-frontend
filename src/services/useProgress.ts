@@ -4,7 +4,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
 import * as progressService from '../services/progressService';
-import { PaginatedRevisionCards, IPopulatedRevisionCard } from '../app/(protected)/(tabs)/useRevisionCards';
+import { PaginatedRevisionCards, IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 
 const REVISION_CARDS_QUERY_KEY = 'revisionCards';
 
@@ -27,9 +27,9 @@ export const useUpdateCardProgress = () => {
 
     onMutate: async ({ cardId, action, value }) => {
       await queryClient.cancelQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
-      const previousQueries = queryClient.getQueriesData<PaginatedRevisionCards>([REVISION_CARDS_QUERY_KEY]);
+      const previousQueries = queryClient.getQueriesData<PaginatedRevisionCards>({ queryKey: [REVISION_CARDS_QUERY_KEY] });
 
-      queryClient.setQueriesData<PaginatedRevisionCards>([REVISION_CARDS_QUERY_KEY], (oldData) => {
+      queryClient.setQueriesData<PaginatedRevisionCards>({ queryKey: [REVISION_CARDS_QUERY_KEY] }, (oldData) => {
         if (!oldData) return;
 
         const newResults = oldData.results.map((card) => {
@@ -37,6 +37,7 @@ export const useUpdateCardProgress = () => {
             const updatedCard: OptimisticCard = { ...card };
             if (action === 'favorite') updatedCard.isFavorite = value;
             if (action === 'difficult') updatedCard.isDifficult = value;
+            if (action === 'archived') updatedCard.isArchived = value;
             return updatedCard;
           }
           return card;
@@ -60,8 +61,9 @@ export const useUpdateCardProgress = () => {
     },
 
     onSettled: () => {
-      // Refetch to ensure client state is in sync with the server.
       queryClient.invalidateQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+      queryClient.invalidateQueries({ queryKey: ['personalLibrary'] });
     },
   });
 };

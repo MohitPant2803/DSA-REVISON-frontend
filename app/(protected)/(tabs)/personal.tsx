@@ -1,23 +1,40 @@
 import React from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useAppStore } from '../../../src/store/useAppStore';
 import { SheetCard } from '../../../src/components/SheetCard';
-import { Search, Plus, FolderHeart, Sparkles, ListMusic } from 'lucide-react-native';
+import { Search, Plus, FolderHeart, Sparkles, ListMusic, LogOut } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useBookmarkStore } from '../../../src/store/useBookmarkStore';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export default function PersonalScreen() {
   const router = useRouter();
-  const sheets = useAppStore(state => state.sheets);
+  const sheets = useAppStore(state => state.sheets) || [];
   const searchQuery = useAppStore(state => state.searchQuery);
   const setSearchQuery = useAppStore(state => state.setSearchQuery);
-  const playlists = useBookmarkStore(state => state.playlists);
+  const playlists = useBookmarkStore(state => state.playlists) || [];
   const setActivePlaylistId = useBookmarkStore(state => state.setActivePlaylistId);
+  const { user, logout } = useAuthStore();
 
-  const filteredSheets = sheets.filter(sheet => 
-    sheet.title.toLowerCase().includes(searchQuery.toLowerCase())
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to leave your peaceful space?',
+      [
+        { text: 'Stay here', style: 'cancel' },
+        { 
+          text: 'Logout', 
+          style: 'destructive', 
+          onPress: () => logout?.()
+        },
+      ]
+    );
+  };
+
+  const filteredSheets = (sheets || []).filter(sheet => 
+    (sheet.title || '').toLowerCase().includes((searchQuery || '').toLowerCase())
   );
 
   return (
@@ -28,6 +45,15 @@ export default function PersonalScreen() {
           <View className="absolute -top-32 -right-12 w-80 h-80 bg-fuchsia-500/30 rounded-full blur-3xl" />
           <View className="absolute top-10 -left-20 w-72 h-72 bg-violet-500/20 rounded-full blur-3xl" />
 
+          <TouchableOpacity 
+            onPress={handleLogout}
+            activeOpacity={0.7}
+            className="absolute top-8 right-6 bg-red-500 px-4 py-2 rounded-full flex-row items-center z-50 shadow-lg shadow-red-900/40"
+          >
+            <LogOut color="#fff" size={16} />
+            <Text className="text-white font-bold text-xs ml-2">Logout</Text>
+          </TouchableOpacity>
+
           <View className="flex-row items-center justify-between mb-2 z-10">
             <View className="flex-1">
               <Animated.View entering={FadeInDown.delay(100)} className="flex-row items-center mb-3">
@@ -35,6 +61,9 @@ export default function PersonalScreen() {
                   <Sparkles color="#e879f9" size={14} />
                   <Text className="text-fuchsia-300 text-[11px] font-black uppercase tracking-widest ml-1.5">Personal Space</Text>
                 </View>
+                {user?.email === 'mohit.pant@1828@gmail.com' && (
+                  <Text className="ml-2 text-[10px] text-amber-400 font-bold uppercase">Superadmin</Text>
+                )}
               </Animated.View>
               <Text className="text-white text-[38px] font-black tracking-tight mb-2">Your Library</Text>
               <Text className="text-slate-400 text-[16px] font-medium leading-relaxed max-w-[280px]">Curate, organize, and track your specialized study sheets.</Text>

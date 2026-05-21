@@ -4,18 +4,14 @@
 
 import { useQuery, useMutation, UseQueryResult, UseMutationResult } from '@tanstack/react-query';
 import * as progressService from '../services/progressService';
-import { IUserProgress } from '../types/progress';
 
 export const USER_PROGRESS_QUERY_KEY = 'userProgress';
 
-/**
- * Hook to fetch the current user's complete progress profile.
- * @returns The result of the query from React Query.
- */
-export const useGetUserProgress = (): UseQueryResult<IUserProgress, Error> => {
+/** @deprecated Use useDashboard for stats */
+export const useGetUserProgress = () => {
   return useQuery({
     queryKey: [USER_PROGRESS_QUERY_KEY],
-    queryFn: progressService.getUserProgress,
+    queryFn: progressService.getDashboardStats,
   });
 };
 
@@ -23,11 +19,7 @@ export const useGetUserProgress = (): UseQueryResult<IUserProgress, Error> => {
  * Hook to create a mutation for updating the user's last viewed card.
  * This is designed to be a lightweight, "fire-and-forget" mutation.
  */
-export const useUpdateLastViewedCard = (): UseMutationResult<
-  { message: string },
-  Error,
-  string
-> => {
+export const useUpdateLastViewedCard = (): UseMutationResult<void, Error, string> => {
   return useMutation({
     mutationFn: (cardId: string) => progressService.updateLastViewedCard(cardId),
     onError: (error) => {

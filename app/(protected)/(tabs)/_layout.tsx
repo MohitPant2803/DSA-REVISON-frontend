@@ -1,9 +1,12 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Home, BookOpen, Clapperboard, User, FolderHeart } from 'lucide-react-native';
+import { BookOpen, Clapperboard, User, FolderHeart } from 'lucide-react-native';
 import { theme } from '../../../src/theme';
+import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 
-export default function TabLayout() {
+function TabLayoutInner() {
+  useAppBackHandler();
+
   return (
     <Tabs
       screenOptions={{
@@ -28,13 +31,6 @@ export default function TabLayout() {
         },
       }}
     >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <Home color={color} size={24} />,
-        }}
-      />
       <Tabs.Screen
         name="learn"
         options={{
@@ -63,6 +59,14 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <FolderHeart color={color} size={24} />,
         }}
       />
+      <Tabs.Screen name="ReelsScreen" options={{ href: null }} />
+      <Tabs.Screen name="CreateRevisionScreen" options={{ href: null }} />
+      <Tabs.Screen name="RevisionCard" options={{ href: null }} />
+      <Tabs.Screen name="RevisionForm" options={{ href: null }} />
     </Tabs>
   );
+}
+
+export default function TabLayout() {
+  return <TabLayoutInner />;
 }

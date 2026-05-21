@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, ActivityIndicator, Text, TouchableOpacity, FlatList, RefreshControl, Dimensions } from 'react-native';
-import { styled } from 'nativewind';
 import { useNavigation } from '@react-navigation/native';
-import { StackNavigationProp } from '@react-navigation/stack';
 import { Plus } from 'lucide-react-native';
-import { useGetRevisionCards, IPopulatedRevisionCard } from './useRevisionCards';
-import { RevisionCard } from '../components/revision/RevisionCard';
-import { useUpdateLastViewedCard } from '../../../src/hooks/useUserProgress';
+import { useGetRevisionCards, IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
+import { RevisionCard } from './RevisionCard';
+import { useUpdateLastViewedCard } from '../../../src/services/useUserProgress';
+import { useRole } from '@/hooks/useRole';
 
+// Styled components polyfill for NativeWind v4 compatibility
+const styled = (Component: any) => Component;
 const StyledView = styled(View);
 const StyledText = styled(Text);
 const StyledTouchableOpacity = styled(TouchableOpacity);
@@ -44,27 +45,28 @@ type AppStackParamList = {
   Reels: undefined;
   CreateRevision: { card?: IPopulatedRevisionCard };
 };
-type ReelsScreenNavigationProp = StackNavigationProp<AppStackParamList, 'Reels'>;
+type ReelsScreenNavigationProp = any;
 
 const ReelsScreen = () => {
   const navigation = useNavigation<ReelsScreenNavigationProp>();
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
   const { data, isLoading, isError, error, refetch, isRefetching } = useGetRevisionCards({
-    page: String(page),
-    limit: '5',
+    page,
+    limit: 5,
   });
   const { mutate: updateLastViewed } = useUpdateLastViewedCard();
+  const { canManageContent } = useRole();
 
   useEffect(() => {
-    if (data?.results) {
+    if (data && Array.isArray(data.results)) {
       if (page === 1) {
         setAllCards(data.results);
       } else {
         setAllCards((prevCards) => {
-          const existingIds = new Set(prevCards.map((c) => c._id));
-          const newCards = data.results.filter((c) => !existingIds.has(c._id));
-          return [...prevCards, ...newCards];
+          const existingIds = new Set((prevCards || []).map((c) => c._id));
+          const newCards = (data.results || []).filter((c: IPopulatedRevisionCard) => !existingIds.has(c._id));
+          return [...(prevCards || []), ...newCards];
         });
       }
     }
@@ -152,12 +154,14 @@ const ReelsScreen = () => {
       />
 
       {/* --- Floating Action Button to Create Card --- */}
-      <StyledTouchableOpacity
-        className="absolute bottom-8 right-6 bg-blue-600 w-16 h-16 rounded-full justify-center items-center shadow-lg"
-        onPress={() => navigation.navigate('CreateRevision', {})}
-      >
-        <Plus color="#ffffff" size={32} />
-      </StyledTouchableOpacity>
+      {canManageContent && (
+        <StyledTouchableOpacity
+          className="absolute bottom-8 right-6 bg-blue-600 w-16 h-16 rounded-full justify-center items-center shadow-lg"
+          onPress={() => navigation.navigate('CreateRevision', {})}
+        >
+          <Plus color="#ffffff" size={32} />
+        </StyledTouchableOpacity>
+      )}
     </StyledView>
   );
 };

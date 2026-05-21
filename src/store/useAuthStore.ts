@@ -8,6 +8,7 @@ export interface User {
   name: string;
   email: string;
   avatarUrl?: string; // backend returns profilePicture
+  role?: 'user' | 'admin' | 'superadmin';
 }
 
 interface AuthState {
@@ -94,6 +95,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         name: String(user?.name || ''),
         email: String(user?.email || ''),
         avatarUrl: user.avatarUrl ? String(user.avatarUrl) : undefined,
+        role: user.role || 'user',
       };
       await SecureStorage.setUser(safeUser);
       

@@ -1,10 +1,18 @@
-import { Stack } from "expo-router";
+import { Stack } from 'expo-router';
+import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 
-export default function ProtectedLayout() {
+function StackWithBack() {
+  useAppBackHandler();
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="folder/[folderId]" />
+      <Stack.Screen name="admin" />
       <Stack.Screen name="domains/[id]" />
     </Stack>
   );
+}
+
+export default function ProtectedLayout() {
+  return <StackWithBack />;
 }

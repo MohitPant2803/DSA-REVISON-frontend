@@ -22,20 +22,37 @@ export default function LoginScreen() {
     try {
       setIsAuthenticating(true);
       await GoogleSignin.hasPlayServices();
-      const userInfo = await GoogleSignin.signIn();
-      const { idToken } = userInfo.data;
       
-      const res = await api.post('/auth/google', { idToken });
-      const { token, user: rawUser } = res.data.data;  // ← fix nested data
+      // Force account selection by clearing any existing Google session
+      try {
+        await GoogleSignin.signOut();
+      } catch (e) {
+        // Ignore if no one was signed in
+      }
 
-      const user = {
-        id: rawUser._id,
-        name: rawUser.name,
-        email: rawUser.email,
-        avatarUrl: rawUser.profilePicture,
-      };
+      const userInfo = await GoogleSignin.signIn();
+      
+      if (userInfo.type === 'success') {
+        const { idToken } = userInfo.data;
+        if (!idToken) {
+          throw new Error('Google Sign-In failed: No ID Token returned.');
+        }
+        
+        const res = await api.post('/auth/google', { idToken });
+        const { token, user: rawUser } = res.data.data;  // ← fix nested data
 
-      await login(token, user);
+        const user = {
+          id: rawUser._id,
+          name: rawUser.name,
+          email: rawUser.email,
+          avatarUrl: rawUser.profilePicture,
+          role: rawUser.role,
+        };
+
+        await login(token, user);
+      } else {
+        setIsAuthenticating(false);
+      }
       
     } catch (error: any) {
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {

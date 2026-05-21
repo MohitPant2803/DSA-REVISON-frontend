@@ -1,23 +1,28 @@
-/**
- * @file Centralized TypeScript types for Revision Cards.
- * @description This file defines the core data structures for revision cards,
- * including the main interface and DTOs (Data Transfer Objects) for
- * creating and updating cards. This promotes type safety and consistency
- * across the application.
- */
+import type { PopulatedUser } from './folder';
 
-// Defines the possible difficulty levels for a card.
-// Using `as const` creates a readonly tuple, allowing us to derive a string literal type from it.
 export const DifficultyLevels = ['Easy', 'Medium', 'Hard'] as const;
-
-// The `Difficulty` type is a union of the string literals from `DifficultyLevels`.
-// This ensures that `difficulty` can only be one of these three values.
 export type Difficulty = (typeof DifficultyLevels)[number];
 
-/**
- * Represents the complete structure of a Revision Card as stored in the database
- * and returned from the API.
- */
+export const ComplexityLevels = [
+  'O(1)',
+  'O(log n)',
+  'O(n)',
+  'O(n log n)',
+  'O(n²)',
+  'O(n³)',
+  'O(2^n)',
+] as const;
+export type Complexity = (typeof ComplexityLevels)[number];
+
+export type CardVisibility = 'public' | 'private';
+
+export interface FolderRef {
+  _id: string;
+  title: string;
+  icon?: string;
+  color?: string;
+}
+
 export interface IRevisionCard {
   _id: string;
   title: string;
@@ -27,20 +32,45 @@ export interface IRevisionCard {
   image?: string;
   tags: string[];
   difficulty: Difficulty;
-  createdBy: string; // Should be a user's ID (e.g., MongoDB ObjectId string)
-  createdAt: string; // ISO 8601 date string
-  updatedAt: string; // ISO 8601 date string
+  complexity?: Complexity;
+  examples: string[];
+  folderId: string | FolderRef;
+  createdBy: string;
+  visibility: CardVisibility;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
-/**
- * Data Transfer Object (DTO) for creating a new revision card.
- * It omits database-generated fields like _id, createdAt, and updatedAt.
- * `createdBy` is also omitted as it's typically added on the server from the authenticated user's session.
- */
-export type CreateRevisionCardDTO = Omit<IRevisionCard, '_id' | 'createdAt' | 'updatedAt' | 'createdBy'>;
+export interface IPopulatedRevisionCard extends Omit<IRevisionCard, 'createdBy' | 'folderId'> {
+  createdBy: PopulatedUser;
+  folderId: FolderRef | string;
+  isFavorite?: boolean;
+  isDifficult?: boolean;
+  isArchived?: boolean;
+}
 
-/**
- * Data Transfer Object (DTO) for updating an existing revision card.
- * All fields are made optional, as an update operation might only modify a subset of the card's properties.
- */
+export type CreateRevisionCardDTO = {
+  title: string;
+  topic: string;
+  explanation: string;
+  code?: string;
+  image?: string;
+  tags: string[];
+  difficulty: Difficulty;
+  complexity?: Complexity;
+  examples: string[];
+  folderId: string;
+  visibility?: CardVisibility;
+  order?: number;
+};
+
 export type UpdateRevisionCardDTO = Partial<CreateRevisionCardDTO>;
+
+export interface PaginatedRevisionCards {
+  results: IPopulatedRevisionCard[];
+  page: number;
+  limit: number;
+  totalPages: number;
+  totalResults: number;
+}

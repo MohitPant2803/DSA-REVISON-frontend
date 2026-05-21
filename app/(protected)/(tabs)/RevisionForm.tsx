@@ -1,33 +1,26 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { styled } from 'nativewind';
 import { Controller, Control, FieldError } from 'react-hook-form';
 import { CardFormData } from './CreateRevisionScreen';
-import { DifficultyLevels } from '../../../src/types/revision';
+import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
+import type { IFolder } from '@/types/folder';
 
-// Styled components
-const StyledView = styled(View);
-const StyledText = styled(Text);
-const StyledTextInput = styled(TextInput);
-const StyledTouchableOpacity = styled(TouchableOpacity);
-
-// --- Reusable Form Input Component ---
 interface FormInputProps {
   name: keyof CardFormData;
   label: string;
   control: Control<CardFormData>;
   error?: FieldError;
-  [key: string]: any; // for other TextInput props
+  [key: string]: unknown;
 }
 
 const FormInput = ({ name, label, control, error, ...props }: FormInputProps) => (
-  <StyledView className="mb-5">
-    <StyledText className="text-zinc-400 text-base mb-2 font-semibold">{label}</StyledText>
+  <View className="mb-5">
+    <Text className="text-zinc-400 text-base mb-2 font-semibold">{label}</Text>
     <Controller
       control={control}
       name={name}
       render={({ field: { onChange, onBlur, value } }) => (
-        <StyledTextInput
+        <TextInput
           className={`bg-zinc-800 border ${
             error ? 'border-red-500' : 'border-zinc-700'
           } text-white p-4 rounded-lg text-base`}
@@ -39,55 +32,133 @@ const FormInput = ({ name, label, control, error, ...props }: FormInputProps) =>
         />
       )}
     />
-    {error && <StyledText className="text-red-500 mt-1">{error.message}</StyledText>}
-  </StyledView>
+    {error && <Text className="text-red-500 mt-1">{error.message}</Text>}
+  </View>
 );
 
-// --- Difficulty Selector Component ---
-interface DifficultySelectorProps {
-  control: Control<CardFormData>;
-  name: 'difficulty';
-}
-
-const DifficultySelector = ({ control, name }: DifficultySelectorProps) => (
-  <StyledView className="mb-5">
-    <StyledText className="text-zinc-400 text-base mb-2 font-semibold">Difficulty</StyledText>
+const DifficultySelector = ({ 
+  control, 
+  folders 
+}: { 
+  control: Control<CardFormData>; 
+  folders: IFolder[] 
+}) => (
+  <View className="mb-5">
+    <Text className="text-zinc-400 text-base mb-2 font-semibold">Difficulty</Text>
     <Controller
       control={control}
-      name={name}
+      name="difficulty"
       render={({ field: { onChange, value } }) => (
-        <StyledView className="flex-row">
+        <View className="flex-row">
           {DifficultyLevels.map((level) => (
-            <StyledTouchableOpacity
+            <TouchableOpacity
               key={level}
               onPress={() => onChange(level)}
-              className={`flex-1 py-3 rounded-lg items-center mr-2 last:mr-0 ${
-                value === level ? 'bg-blue-600' : 'bg-zinc-800'
+              className={`flex-1 py-3 rounded-lg items-center mr-2 ${
+                value === level ? 'bg-violet-600' : 'bg-zinc-800'
               }`}
             >
-              <StyledText className={`font-bold ${value === level ? 'text-white' : 'text-zinc-400'}`}>
+              <Text className={`font-bold ${value === level ? 'text-white' : 'text-zinc-400'}`}>
                 {level}
-              </StyledText>
-            </StyledTouchableOpacity>
+              </Text>
+            </TouchableOpacity>
           ))}
-        </StyledView>
+            {folders.length === 0 && (
+              <Text className="text-amber-500 text-sm mt-1">No folders found. Create a folder in the Learn tab first.</Text>
+            )}
+        </View>
       )}
     />
-  </StyledView>
+  </View>
 );
 
-// --- Main Form Component ---
+const FolderSelector = ({
+  control,
+  folders,
+  error,
+}: {
+  control: Control<CardFormData>;
+  folders: IFolder[];
+  error?: FieldError;
+}) => (
+  <View className="mb-5">
+    <Text className="text-zinc-400 text-base mb-2 font-semibold">Folder</Text>
+    <Controller
+      control={control}
+      name="folderId"
+      render={({ field: { onChange, value } }) => (
+        <View className="flex-row flex-wrap gap-2">
+          {folders.map((folder) => (
+            <TouchableOpacity
+              key={folder._id}
+              onPress={() => onChange(folder._id)}
+              className={`px-4 py-2.5 rounded-full border ${
+                value === folder._id
+                  ? 'border-violet-500 bg-violet-600/30'
+                  : 'border-zinc-700 bg-zinc-800'
+              }`}
+            >
+              <Text className={value === folder._id ? 'text-violet-200' : 'text-zinc-400'}>
+                {folder.title}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    />
+    {error && <Text className="text-red-500 mt-1">{error.message}</Text>}
+  </View>
+);
+
 interface RevisionFormProps {
   control: Control<CardFormData>;
   errors: { [K in keyof CardFormData]?: FieldError };
+  folders: IFolder[];
 }
 
-const RevisionForm = ({ control, errors }: RevisionFormProps) => {
+export default function RevisionForm({ control, errors, folders }: RevisionFormProps) {
   return (
     <>
-      <FormInput name="title" label="Title" control={control} error={errors.title} placeholder="e.g., What is a Binary Tree?" />
-      <FormInput name="topic" label="Topic" control={control} error={errors.topic} placeholder="e.g., Data Structures" />
-      <DifficultySelector control={control} name="difficulty" />
+      <FormInput
+        name="title"
+        label="Title"
+        control={control}
+        error={errors.title}
+        placeholder="e.g. Two Sum pattern"
+      />
+      <FormInput
+        name="topic"
+        label="Topic"
+        control={control}
+        error={errors.topic}
+        placeholder="e.g. Arrays & Hashing"
+      />
+      <FolderSelector control={control} folders={folders} error={errors.folderId} />
+      <DifficultySelector control={control} folders={folders} />
+      <View className="mb-5">
+        <Text className="text-zinc-400 text-base mb-2 font-semibold">Complexity (optional)</Text>
+        <Controller
+          control={control}
+          name="complexity"
+          render={({ field: { onChange, value } }) => (
+            <View className="flex-row flex-wrap gap-2">
+              {ComplexityLevels.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => onChange(value === c ? undefined : c)}
+                  className={`px-3 py-2 rounded-lg border ${
+                    value === c ? 'border-violet-500 bg-violet-600/20' : 'border-zinc-700'
+                  }`}
+                >
+                  <Text className={`text-xs font-mono ${value === c ? 'text-violet-200' : 'text-zinc-500'}`}>
+                    {c}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        />
+      </View>
       <FormInput
         name="explanation"
         label="Explanation"
@@ -99,18 +170,38 @@ const RevisionForm = ({ control, errors }: RevisionFormProps) => {
       />
       <FormInput
         name="code"
-        label="Code Snippet (Optional)"
+        label="Code (optional)"
         control={control}
         error={errors.code}
         multiline
-        placeholder="console.log('Hello, World!');"
-        style={{ height: 150, textAlignVertical: 'top' }}
+        placeholder="// solution"
+        style={{ height: 140, textAlignVertical: 'top' }}
         autoCapitalize="none"
       />
-      <FormInput name="image" label="Image URL (Optional)" control={control} error={errors.image} placeholder="https://example.com/image.png" keyboardType="url" />
-      <FormInput name="tags" label="Tags (Optional, comma-separated)" control={control} error={errors.tags} placeholder="e.g., trees, algorithms, interview" />
+      <FormInput
+        name="image"
+        label="Image URL (optional)"
+        control={control}
+        error={errors.image}
+        placeholder="https://..."
+        keyboardType="url"
+      />
+      <FormInput
+        name="tags"
+        label="Tags (comma-separated)"
+        control={control}
+        error={errors.tags}
+        placeholder="arrays, hashmap"
+      />
+      <FormInput
+        name="examples"
+        label="Examples (one per line)"
+        control={control}
+        error={errors.examples}
+        multiline
+        placeholder={'Input: nums = [2,7]\nOutput: [0,1]'}
+        style={{ height: 100, textAlignVertical: 'top' }}
+      />
     </>
   );
-};
-
-export default RevisionForm;
+}

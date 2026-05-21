@@ -1,31 +1,18 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React from 'react';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppStore } from '../../../src/store/useAppStore';
-import { Search, BookOpen, Target, Activity, ArrowRight, PackageOpen, Clock } from 'lucide-react-native';
-import { SheetCard } from '../../../src/components/SheetCard';
+import { useAuthStore } from '@/store/useAuthStore';
+import { BookOpen, ArrowRight, Sparkles, Leaf } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { useRouter } from 'expo-router';
+import { useDashboard } from '@/hooks/useDashboard';
+import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 
 export default function DashboardScreen() {
-  const user = useAppStore(state => state.user);
-  const sheets = useAppStore(state => state.sheets);
-  const searchQuery = useAppStore(state => state.searchQuery);
-  const setSearchQuery = useAppStore(state => state.setSearchQuery);
-
-  const [quickAccessItems, setQuickAccessItems] = useState<string[]>(['Blind 75', 'Graphs', 'Favorites', 'Revision']);
-  const [isQuickAccessLoading, setIsQuickAccessLoading] = useState(false);
-  const [quickAccessError, setQuickAccessError] = useState<string | null>(null);
-
-  const [reviewAreas, setReviewAreas] = useState([
-    { id: '1', title: 'Dynamic Prog.', type: 'target' as const },
-    { id: '2', title: 'Graphs', type: 'activity' as const }
-  ]);
-  const [isReviewAreasLoading, setIsReviewAreasLoading] = useState(false);
-  const [reviewAreasError, setReviewAreasError] = useState<string | null>(null);
-
-  const filteredSheets = sheets.filter(sheet =>
-    sheet.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  useAppBackHandler();
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const { data: stats, isLoading, isError, refetch } = useDashboard();
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -34,137 +21,156 @@ export default function DashboardScreen() {
     return 'Good evening';
   };
 
-  const activeSheet = sheets[0];
+  // Ensure stats.consistencyByDay is an array before mapping
+  const consistencyByDay = stats?.consistencyByDay || [];
+  const maxConsistency = Math.max(
+    ...(consistencyByDay.map((d) => d.sessions) ?? [1]),
+    1
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-[#F5F5F7]" edges={['top', 'left', 'right']}>
       <ScrollView className="flex-1 px-6 pt-6" showsVerticalScrollIndicator={false}>
-
-        {/* Minimal Header */}
         <Animated.View entering={FadeInDown.duration(400)} className="mb-8">
-          <Text className="text-slate-500 text-[15px] font-semibold tracking-wide mb-1 uppercase">{getGreeting()}, {user?.name || 'Explorer'}</Text>
-          <Text className="text-slate-900 text-3xl font-bold tracking-tight">Continue learning</Text>
+          <View className="flex-row items-center mb-2">
+            <Leaf color="#86efac" size={16} />
+            <Text className="text-slate-500 text-sm font-medium ml-2 tracking-wide">
+              {getGreeting()}, {user?.name?.split(' ')[0] || 'friend'}
+            </Text>
+          </View>
+          <Text className="text-slate-900 text-3xl font-bold tracking-tight">Your learning rhythm</Text>
+          <Text className="text-slate-500 text-base mt-2 leading-relaxed">
+            A quiet space to notice patterns — no rush, no rankings.
+          </Text>
         </Animated.View>
 
-        {/* Primary Continue Card */}
-        {activeSheet && (
-          <Animated.View entering={FadeInUp.duration(500)} className="mb-8">
-            <View className="bg-white rounded-[32px] p-6 shadow-xl shadow-black/5 border border-white/50">
-              <View className="flex-row items-center justify-between mb-8">
-                <View className="flex-row items-center">
-                  <View className="w-14 h-14 bg-zinc-100 rounded-2xl items-center justify-center mr-4">
-                    <BookOpen color="#475569" size={24} />
-                  </View>
-                  <View>
-                    <Text className="text-slate-800 text-xl font-bold mb-1">{activeSheet.title}</Text>
-                    <View className="flex-row items-center">
-                      <Clock color="#94a3b8" size={14} />
-                      <Text className="text-slate-500 text-[15px] ml-1.5 font-medium">In progress</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-              <TouchableOpacity className="bg-slate-900 rounded-2xl w-full py-4 flex-row items-center justify-center" activeOpacity={0.8}>
-                <Text className="text-white font-semibold text-base mr-2">Continue</Text>
-                <ArrowRight size={18} color="white" />
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
+        {isLoading && (
+          <ActivityIndicator color="#7c3aed" className="my-12" />
         )}
 
-        {/* Quick Access Pills */}
-        <Animated.View entering={FadeInUp.duration(600)} className="mb-8">
-          <Text className="text-slate-800 text-[18px] font-bold tracking-tight mb-4">Quick Access</Text>
-          {isQuickAccessLoading ? (
-            <ActivityIndicator size="small" color="#475569" className="self-start" />
-          ) : quickAccessError ? (
-            <Text className="text-red-500 text-[14px]">{quickAccessError}</Text>
-          ) : quickAccessItems.length === 0 ? (
-            <View className="bg-white/40 border border-black/[0.03] rounded-2xl p-4">
-              <Text className="text-[#8E8E93] text-[14px] font-medium italic">
-                No shortcuts established.
-              </Text>
-            </View>
-          ) : (
-            <View className="flex-row flex-wrap gap-3">
-              {quickAccessItems.map((item) => (
-                <TouchableOpacity key={item} className="bg-slate-200/60 px-5 py-3 rounded-full border border-slate-200/50" activeOpacity={0.7}>
-                  <Text className="text-slate-700 font-semibold text-[15px]">{item}</Text>
+        {isError && (
+          <TouchableOpacity onPress={() => refetch()} className="bg-white p-6 rounded-2xl mb-6">
+            <Text className="text-slate-600 text-center">Tap to refresh your insights</Text>
+          </TouchableOpacity>
+        )}
+
+        {stats && (
+          <>
+            <Animated.View entering={FadeInUp.duration(450)} className="mb-6">
+              <View className="bg-white rounded-[28px] p-6 border border-slate-100/80">
+                <Text className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-3">
+                  Gentle streak
+                </Text>
+                <Text className="text-slate-900 text-4xl font-light">
+                  {stats.streakCount}
+                  <Text className="text-xl text-slate-500"> days</Text>
+                </Text>
+                <Text className="text-slate-500 text-sm mt-3 leading-relaxed">
+                  {stats.totalRevisions} cards revisited · {Math.round(stats.totalTimeSpent / 60)} min of focus
+                </Text>
+                <TouchableOpacity
+                  className="bg-slate-900 rounded-2xl py-4 mt-6 flex-row justify-center items-center"
+                  onPress={() => router.push('/(protected)/(tabs)/reels')}
+                >
+                  <Text className="text-white font-semibold mr-2">Continue revising</Text>
+                  <ArrowRight size={18} color="#fff" />
                 </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </Animated.View>
-
-        {/* Compact Weak Areas */}
-        <Animated.View entering={FadeInUp.duration(700)} className="mb-8">
-          <Text className="text-slate-800 text-[18px] font-bold tracking-tight mb-4">Areas to Review</Text>
-          {isReviewAreasLoading ? (
-            <ActivityIndicator size="small" color="#475569" className="self-start" />
-          ) : reviewAreasError ? (
-            <Text className="text-red-500 text-[14px]">{reviewAreasError}</Text>
-          ) : reviewAreas.length === 0 ? (
-            <View className="w-full bg-white/40 border border-black/[0.03] rounded-[24px] p-6 items-center">
-              <Target color="#D1D1D6" size={20} strokeWidth={1.5} />
-              <Text className="text-[#1C1C1E] text-[15px] font-semibold mt-3">
-                Current Progress
-              </Text>
-              <Text className="text-[#8E8E93] text-[13px] mt-1">
-                Your learning trajectory will appear here.
-              </Text>
-            </View>
-          ) : (
-            <View className="flex-row gap-4">
-              {reviewAreas.map(area => (
-                <View key={area.id} className="flex-1 bg-white rounded-[24px] p-5 shadow-sm shadow-black/5 border border-white/50">
-                  <View className={`w-12 h-12 rounded-2xl items-center justify-center mb-4 ${area.type === 'target' ? 'bg-red-50' : 'bg-indigo-50'}`}>
-                    {area.type === 'target' ? (
-                      <Target color="#ef4444" size={20} />
-                    ) : (
-                      <Activity color="#4f46e5" size={20} />
-                    )}
-                  </View>
-                  <Text className="text-slate-800 font-bold text-[16px]">{area.title}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </Animated.View>
-
-        {/* Clean Activity/Search */}
-        <Animated.View entering={FadeInUp.duration(800)} className="mb-8">
-          <Text className="text-slate-800 text-[18px] font-bold tracking-tight mb-4">Recent Activity</Text>
-          
-          <View className="flex-row items-center bg-white rounded-2xl px-5 h-14 mb-6 shadow-sm shadow-black/5 border border-white/50">
-            <Search color="#94A3B8" size={18} />
-            <TextInput
-              className="flex-1 ml-3 text-slate-800 text-[15px] font-medium"
-              placeholder="Search journeys..."
-              placeholderTextColor="#94A3B8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-
-          {filteredSheets.map((sheet, index) => (
-            <Animated.View key={sheet.id} entering={FadeInUp.delay(100 * index)}>
-              <SheetCard sheet={sheet} />
-            </Animated.View>
-          ))}
-
-          {filteredSheets.length === 0 && (
-            <View className="py-16 items-center justify-center bg-white/50 rounded-[32px] border border-black/[0.03]">
-              <View className="mb-4">
-                <PackageOpen color="#D1D1D6" size={28} strokeWidth={1} />
               </View>
-              <Text className="text-[#1C1C1E] font-semibold text-[16px] mb-1">No results</Text>
-              <Text className="text-[#8E8E93] text-[14px]">Refine your search parameters.</Text>
-            </View>
-          )}
-        </Animated.View>
+            </Animated.View>
 
-        {/* Extra padding to avoid content being hidden behind the absolute floating tab bar */}
-        <View className="h-32" />
+            {/* Use the consistencyByDay variable */}
+            {consistencyByDay.length > 0 && (
+              <Animated.View entering={FadeInUp.delay(80).duration(450)} className="mb-6">
+                <Text className="text-slate-800 font-bold text-lg mb-3">This week</Text>
+                <View className="bg-white rounded-[24px] p-5 flex-row items-end justify-between h-28 border border-slate-100">
+                  {consistencyByDay.map((day) => ( // Use consistencyByDay here
+                    <View key={day.date} className="items-center flex-1 mx-0.5">
+                      <View
+                        className="w-full bg-violet-200 rounded-t-md"
+                        style={{
+                          height: Math.max(8, (day.sessions / maxConsistency) * 72),
+                        }}
+                      />
+                      <Text className="text-[9px] text-slate-400 mt-2">
+                        {day.date.slice(5)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </Animated.View>
+            )}
+
+            {/* Ensure weakTopics is an array */}
+            {(stats.weakTopics || []).length > 0 && (
+              <Animated.View entering={FadeInUp.delay(120).duration(450)} className="mb-6">
+                <Text className="text-slate-800 font-bold text-lg mb-3">Topics to revisit</Text>
+                {(stats.weakTopics || []).map((wt) => ( // Use fallback here
+                  <TouchableOpacity
+                    key={wt.topic}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(protected)/(tabs)/reels',
+                        params: { topic: wt.topic },
+                      })
+                    }
+                    className="bg-white rounded-2xl p-4 mb-2 border border-slate-100 flex-row justify-between items-center"
+                  >
+                    <Text className="text-slate-800 font-medium">{wt.topic}</Text>
+                    <Text className="text-slate-400 text-sm">{wt.count} marked difficult</Text>
+                  </TouchableOpacity>
+                ))}
+              </Animated.View>
+            )}
+
+            <Animated.View entering={FadeInUp.delay(160).duration(450)} className="mb-10">
+              <Text className="text-slate-800 font-bold text-lg mb-3">Recently revised</Text>
+              {/* Ensure recentlyRevised is an array */}
+              {(stats.recentlyRevised || []).length === 0 ? (
+                <View className="bg-white/60 rounded-2xl p-6 border border-dashed border-slate-200">
+                  <Text className="text-slate-500 text-center leading-relaxed">
+                    Your revision history will appear here as you swipe through cards.
+                  </Text>
+                </View>
+              ) : (
+                (stats.recentlyRevised || []).slice(0, 5).map((entry) => { // Use fallback here
+                  const c = entry.card as { title?: string; topic?: string; _id?: string };
+                  if (!c?.title) return null;
+                  return (
+                    <TouchableOpacity
+                      key={entry.progressId}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/(protected)/(tabs)/reels',
+                          params: { search: c.title },
+                        })
+                      }
+                      className="bg-white rounded-2xl p-4 mb-2 border border-slate-100"
+                    >
+                      <Text className="text-violet-600 text-[10px] font-bold uppercase tracking-wider mb-1">
+                        {c.topic}
+                      </Text>
+                      <Text className="text-slate-900 font-semibold">{c.title}</Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </Animated.View>
+          </>
+        )}
+
+        <TouchableOpacity
+          onPress={() => router.push('/(protected)/(tabs)/learn')}
+          className="flex-row items-center bg-white rounded-2xl p-5 mb-16 border border-slate-100"
+        >
+          <View className="bg-violet-50 p-3 rounded-xl mr-4">
+            <BookOpen color="#7c3aed" size={22} />
+          </View>
+          <View className="flex-1">
+            <Text className="text-slate-900 font-semibold">Browse folders</Text>
+            <Text className="text-slate-500 text-sm">Folders → cards → revise</Text>
+          </View>
+          <Sparkles color="#a78bfa" size={18} />
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
