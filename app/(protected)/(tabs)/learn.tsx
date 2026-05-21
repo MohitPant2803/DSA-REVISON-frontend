@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BookOpen, Database, Monitor, Network, Settings, Layers, ChevronLeft, ChevronRight, Lock, GitBranch, Zap, Search, Clock, PlayCircle, Heart, Star, ListMusic } from 'lucide-react-native';
+import { BookOpen, Database, Monitor, Network, Settings, Layers, ChevronLeft, ChevronRight, Lock, GitBranch, Zap, Search, Clock, PlayCircle, Heart, Star, ListMusic, Bookmark } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { useAppStore } from '../../store/useAppStore';
-import { useBookmarkStore } from '../../store/useBookmarkStore';
+import { useAppStore } from '../../../src/store/useAppStore';
+import { useBookmarkStore } from '../../../src/store/useBookmarkStore';
 import Animated, { FadeInDown, FadeInRight, FadeIn } from 'react-native-reanimated';
-import { placards as allPlacards } from '../../lib/dummyData';
-import { Placard } from '../../types';
+import { Placard } from '../../../src/types';
 
 const DOMAINS = [
   { id: 'dsa', title: 'DSA', icon: Layers, color: '#7c3aed', bg: '#ede9fe', ready: true },
@@ -28,6 +27,7 @@ const TOPICS = [
 
 export default function LearnScreen() {
   const router = useRouter();
+  const [allPlacards, setAllPlacards] = useState<Placard[]>([]);
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
   const sheets = useAppStore(state => state.sheets);
   const setSelectedSheetId = useAppStore(state => state.setSelectedSheetId);
@@ -39,13 +39,39 @@ export default function LearnScreen() {
   const setActivePlaylistId = useBookmarkStore(state => state.setActivePlaylistId);
   const recentlyViewedIds = useBookmarkStore(state => state.recentlyViewedIds);
   
+  React.useEffect(() => {
+    const fetchPlacards = async () => {
+      try {
+        const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/placards`);
+        const data = await response.json();
+        // Safely extract the array whether it's direct or nested under "data"
+        const placardsArray = Array.isArray(data) ? data : (data?.data || []);
+        setAllPlacards(placardsArray);
+      } catch (error) {
+        console.error("Error fetching placards:", error);
+      }
+    };
+    fetchPlacards();
+  }, []);
+
   const recentlyViewedPlacards = React.useMemo(() => {
+    if (!Array.isArray(allPlacards)) return [];
     return recentlyViewedIds.map(id => allPlacards.find(p => p.id === id)).filter(Boolean) as Placard[];
-  }, [recentlyViewedIds]);
+  }, [recentlyViewedIds, allPlacards]);
+
+  const bookmarkedPlacards = React.useMemo(() => {
+    if (!Array.isArray(allPlacards)) return [];
+    return bookmarkedIds.map(id => allPlacards.find(p => p.id === id)).filter(Boolean) as Placard[];
+  }, [bookmarkedIds, allPlacards]);
 
   const handleNavigation = (sheetId: string) => {
     setActivePlaylistId(null);
     setSelectedSheetId(sheetId);
+    router.push('/reels');
+  };
+
+  const handleBookmarkNavigation = (placard: Placard) => {
+    setActiveBookmark(placard.id);
     router.push('/reels');
   };
 

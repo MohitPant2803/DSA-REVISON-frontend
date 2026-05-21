@@ -1,12 +1,12 @@
 import React from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity } from 'react-native';
-import { useAppStore } from '../../store/useAppStore';
-import { SheetCard } from '../../components/SheetCard';
+import { useAppStore } from '../../../src/store/useAppStore';
+import { SheetCard } from '../../../src/components/SheetCard';
 import { Search, Plus, FolderHeart, Sparkles, ListMusic } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { useBookmarkStore } from '../../store/useBookmarkStore';
+import { useBookmarkStore } from '../../../src/store/useBookmarkStore';
 
 export default function PersonalScreen() {
   const router = useRouter();

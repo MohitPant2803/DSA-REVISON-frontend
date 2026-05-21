@@ -8,19 +8,16 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
     "paths": {
       "@/*": [
-        "./*"
+        "src/*"
       ]
     }
   },
   "include": [
     "app/**/*",
-    "components/**/*",
-    "lib/**/*",
-    "store/**/*",
-    "types/**/*",
-    "constants/**/*",
+    "src/**/*",
     "nativewind-env.d.ts"
   ],
   "exclude": [

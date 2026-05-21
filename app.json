@@ -17,19 +17,38 @@
       "backgroundColor": "#0f172a"
     },
     "android": {
-      "backgroundColor": "#0f172a",
-      "adaptiveIcon": {
-        "backgroundColor": "#0f172a",
-        "foregroundImage": "./assets/android-icon-foreground.png"
-      },
-      "predictiveBackGestureEnabled": false
+      "package": "com.mohit.dsareels",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "dsareels",
+              "host": "auth"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
-      "expo-web-browser"
-    ]
+      "expo-web-browser",
+      "expo-secure-store",
+      "@react-native-google-signin/google-signin"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2a9bc232-b6d9-44f3-abbf-428860c7db19"
+      }
+    }
   }
 }

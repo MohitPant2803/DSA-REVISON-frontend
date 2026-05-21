@@ -1,18 +1,18 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { BookOpen, Clapperboard, User } from 'lucide-react-native';
-// import '../../global.css';
+import { Home, BookOpen, Clapperboard, User, FolderHeart } from 'lucide-react-native';
+import { theme } from '../../../src/theme';
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#7c3aed', // violet-600
-        tabBarInactiveTintColor: '#94a3b8', // slate-400
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.text.muted,
         tabBarStyle: {
-          backgroundColor: '#ffffff',
-          borderTopColor: '#f1f5f9', // slate-100
+          backgroundColor: theme.colors.surface,
+          borderTopColor: theme.colors.border.light,
           paddingTop: 8,
           paddingBottom: 8,
           height: 60,
@@ -28,6 +28,13 @@ export default function TabLayout() {
         },
       }}
     >
+      <Tabs.Screen
+        name="home"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color }) => <Home color={color} size={24} />,
+        }}
+      />
       <Tabs.Screen
         name="learn"
         options={{
@@ -47,6 +54,13 @@ export default function TabLayout() {
         options={{
           title: 'Dashboard',
           tabBarIcon: ({ color }) => <User color={color} size={24} />,
+        }}
+      />
+      <Tabs.Screen
+        name="personal"
+        options={{
+          title: 'Personal',
+          tabBarIcon: ({ color }) => <FolderHeart color={color} size={24} />,
         }}
       />
     </Tabs>
