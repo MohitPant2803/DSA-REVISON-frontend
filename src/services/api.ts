@@ -72,9 +72,14 @@ api.interceptors.response.use(
   },
   async (error: AxiosError) => {
     const normalizedError = normalizeError(error);
-    
-    // Optional: Global handling for 401 Unauthorized (e.g., dispatching a logout event)
-    
+
+    if (error.response?.status === 401) {
+      const { isAuthenticated, logout } = useAuthStore.getState();
+      if (isAuthenticated) {
+        await logout();
+      }
+    }
+
     return Promise.reject(normalizedError);
   }
 );

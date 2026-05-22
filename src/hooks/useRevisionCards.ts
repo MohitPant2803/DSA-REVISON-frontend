@@ -11,11 +11,12 @@ import type {
   CreateRevisionCardDTO,
   IPopulatedRevisionCard,
   UpdateRevisionCardDTO,
+  ISlide,
 } from '@/types/revision';
 import type { QueryRevisionCardsInput } from '@/services/revisionService';
 import type { PaginatedRevisionCards } from '@/types/revision';
 
-export type { IPopulatedRevisionCard, PaginatedRevisionCards };
+export type { IPopulatedRevisionCard, PaginatedRevisionCards, ISlide };
 export type { QueryRevisionCardsInput } from '@/services/revisionService';
 
 const REVISION_CARDS_QUERY_KEY = 'revisionCards';

@@ -1,30 +1,58 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Controller, Control, FieldError } from 'react-hook-form';
-import { CardFormData } from './CreateRevisionScreen';
-import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
+import { z } from 'zod';
+import { DifficultyLevels, ComplexityLevels } from '../../../src/types/revision';
 import type { IFolder } from '@/types/folder';
 
+export const cardFormSchema = z.object({
+  title: z.string().min(3, 'Title must be at least 3 characters.'),
+  topic: z.string().min(2, 'Topic is required.'),
+  explanation: z.string().min(10, 'Explanation must be at least 10 characters.'),
+  code: z.string().optional(),
+  image: z.string().url('Please enter a valid URL.').optional().or(z.literal('')),
+  folderId: z.string().min(1, 'Please select a folder.'),
+  tags: z.string().optional(),
+  difficulty: z.enum(['Easy', 'Medium', 'Hard']),
+  complexity: z.string().optional(),
+  slides: z.array(z.object({
+    type: z.string(),
+    headline: z.string().min(3),
+    body: z.string().min(10),
+    code: z.string().optional(),
+    visualType: z.string().optional(),
+    image: z.string().url('Please enter a valid URL.').optional().or(z.literal('')),
+    accentColor: z.string().optional(),
+    blocks: z.array(z.object({
+      type: z.string(),
+      content: z.string(),
+      meta: z.record(z.any()).optional(),
+    })).optional(),
+  })).optional(),
+});
+
+export type CardFormData = z.infer<typeof cardFormSchema>;
+
 interface FormInputProps {
-  name: keyof CardFormData;
+  name: any; // Using any for robust dynamic react-hook-form paths
   label: string;
-  control: Control<CardFormData>;
+  control: any;
   error?: FieldError;
   [key: string]: unknown;
 }
 
-const FormInput = ({ name, label, control, error, ...props }: FormInputProps) => (
+export const FormInput = ({ name, label, control, error, ...props }: FormInputProps) => (
   <View className="mb-5">
-    <Text className="text-zinc-400 text-base mb-2 font-semibold">{label}</Text>
+    <Text className="text-slate-500 text-sm mb-2 font-semibold uppercase tracking-wider">{label}</Text>
     <Controller
       control={control}
       name={name}
       render={({ field: { onChange, onBlur, value } }) => (
         <TextInput
-          className={`bg-zinc-800 border ${
-            error ? 'border-red-500' : 'border-zinc-700'
-          } text-white p-4 rounded-lg text-base`}
-          placeholderTextColor="#a1a1aa"
+          className={`bg-white border ${
+            error ? 'border-rose-300' : 'border-slate-100'
+          } text-slate-900 p-4 rounded-2xl text-base shadow-sm`}
+          placeholderTextColor="#94a3b8"
           onBlur={onBlur}
           onChangeText={onChange}
           value={value}
@@ -40,7 +68,7 @@ const DifficultySelector = ({
   control, 
   folders 
 }: { 
-  control: Control<CardFormData>; 
+  control: any; 
   folders: IFolder[] 
 }) => (
   <View className="mb-5">
@@ -77,7 +105,7 @@ const FolderSelector = ({
   folders,
   error,
 }: {
-  control: Control<CardFormData>;
+  control: any;
   folders: IFolder[];
   error?: FieldError;
 }) => (
@@ -111,8 +139,8 @@ const FolderSelector = ({
 );
 
 interface RevisionFormProps {
-  control: Control<CardFormData>;
-  errors: { [K in keyof CardFormData]?: FieldError };
+  control: any;
+  errors: any;
   folders: IFolder[];
 }
 
@@ -160,25 +188,6 @@ export default function RevisionForm({ control, errors, folders }: RevisionFormP
         />
       </View>
       <FormInput
-        name="explanation"
-        label="Explanation"
-        control={control}
-        error={errors.explanation}
-        multiline
-        placeholder="Explain the concept clearly..."
-        style={{ height: 120, textAlignVertical: 'top' }}
-      />
-      <FormInput
-        name="code"
-        label="Code (optional)"
-        control={control}
-        error={errors.code}
-        multiline
-        placeholder="// solution"
-        style={{ height: 140, textAlignVertical: 'top' }}
-        autoCapitalize="none"
-      />
-      <FormInput
         name="image"
         label="Image URL (optional)"
         control={control}
@@ -192,15 +201,6 @@ export default function RevisionForm({ control, errors, folders }: RevisionFormP
         control={control}
         error={errors.tags}
         placeholder="arrays, hashmap"
-      />
-      <FormInput
-        name="examples"
-        label="Examples (one per line)"
-        control={control}
-        error={errors.examples}
-        multiline
-        placeholder={'Input: nums = [2,7]\nOutput: [0,1]'}
-        style={{ height: 100, textAlignVertical: 'top' }}
       />
     </>
   );

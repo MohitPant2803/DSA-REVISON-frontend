@@ -7,6 +7,7 @@ function StackWithBack() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="folder/[folderId]" />
+      <Stack.Screen name="playlist/[playlistId]" />
       <Stack.Screen name="admin" />
       <Stack.Screen name="domains/[id]" />
     </Stack>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, FlatList } from 'react-native';
 import { useAppStore } from '../store/useAppStore';
 import { ChevronDown, X, BookMarked } from 'lucide-react-native';
+import type { Sheet } from '../types';
 
 export function SheetSelector() {
   const sheets = useAppStore(state => state.sheets);
@@ -9,7 +10,7 @@ export function SheetSelector() {
   const setSelectedSheetId = useAppStore(state => state.setSelectedSheetId);
   const [modalVisible, setModalVisible] = useState(false);
 
-  const selectedSheet = sheets.find(s => s.id === selectedSheetId);
+  const selectedSheet = sheets.find((s: Sheet) => s.id === selectedSheetId);
 
   const handleSelectSheet = (sheetId: string) => {
     setSelectedSheetId(sheetId);

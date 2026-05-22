@@ -27,9 +27,50 @@ export const updateUserProgress = async (
   return response.data?.data ?? response.data ?? { message: 'Progress updated' };
 };
 
+export const updatePlaylistMembership = async (
+  cardId: string,
+  addToPlaylist?: string,
+  removeFromPlaylist?: string
+) => {
+  const payload: Record<string, unknown> = { revisionCardId: cardId };
+  if (addToPlaylist) payload.addToPlaylist = addToPlaylist;
+  if (removeFromPlaylist) payload.removeFromPlaylist = removeFromPlaylist;
+
+  const response = await api.post('/progress/update', payload);
+  return response.data?.data ?? response.data ?? { message: 'Playlist membership updated' };
+};
+
 export const updateLastViewedCard = async (cardId: string): Promise<void> => {
   await api.post('/progress/update', {
     revisionCardId: cardId,
     timeSpent: 1,
   });
+};
+
+export const registerLoop = async (type: 'folder' | 'playlist', id: string, cardsViewed: number) => {
+  const response = await api.post('/progress/loop', { type, id, cardsViewed });
+  return response.data?.data?.loopStats ?? response.data?.loopStats;
+};
+
+export const getFolderLoops = async () => {
+  const response = await api.get('/progress/folder-loops');
+  return response.data?.data?.loops ?? response.data?.loops ?? [];
+};
+
+export const updateResumeState = async (
+  type: 'folder' | 'playlist',
+  id: string,
+  resumeData: {
+    resumeCardId?: string;
+    resumeIndex?: number;
+    resumeScrollOffset?: number;
+  }
+) => {
+  const response = await api.post('/progress/resume', { type, id, resumeData });
+  return response.data?.data?.result ?? response.data?.result;
+};
+
+export const getResumeStates = async () => {
+  const response = await api.get('/progress/resume');
+  return response.data?.data?.states ?? response.data?.states;
 };

@@ -1,9 +1,11 @@
 export const typography = {
-  h1: 'text-[32px] font-medium tracking-tight',
-  h2: 'text-[24px] font-medium tracking-tight',
-  h3: 'text-[20px] font-medium tracking-tight',
-  h4: 'text-[18px] font-medium',
-  body: 'text-[15px] leading-relaxed',
-  bodySm: 'text-[14px]',
-  caption: 'text-[12px] font-medium tracking-wide uppercase',
+  h1: 'text-[36px] font-normal tracking-tight text-[#0F172A]',
+  h2: 'text-[28px] font-normal tracking-tight text-[#0F172A]',
+  h3: 'text-[22px] font-normal tracking-tight text-[#0F172A]',
+  h4: 'text-[18px] font-normal text-[#0F172A]',
+  section: 'text-[20px] font-normal tracking-tight text-[#0F172A]',
+  body: 'text-[16px] leading-relaxed text-[#64748B]',
+  bodySm: 'text-[15px] leading-relaxed text-[#64748B]',
+  caption: 'text-[13px] text-[#94A3B8]',
+  label: 'text-[12px] text-[#94A3B8]',
 };

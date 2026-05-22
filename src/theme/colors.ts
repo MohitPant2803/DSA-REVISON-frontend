@@ -1,7 +1,9 @@
 export const colors = {
-  background: '#FAFAF8',
-  surface: '#FFFFFF',
-  primary: '#6E61FF',
+  background: '#F8FAFC',
+  surface: 'rgba(255, 255, 255, 0.82)',
+  card: '#FFFFFF',
+  primary: '#8B5CF6',
+  primaryAlt: '#6366F1',
   text: {
     primary: '#0F172A',
     secondary: '#64748B',
@@ -9,7 +11,7 @@ export const colors = {
     inverse: '#FFFFFF',
   },
   border: {
-    light: '#F1F5F9', // slate-100
-    medium: '#E2E8F0', // slate-200
-  }
+    light: '#F1F5F9',
+    medium: '#E2E8F0',
+  },
 };

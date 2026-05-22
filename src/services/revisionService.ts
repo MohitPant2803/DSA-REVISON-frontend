@@ -16,6 +16,7 @@ export interface QueryRevisionCardsInput {
   folderId?: string;
   tags?: string;
   sort?: string;
+  excludeSlides?: string;
 }
 
 export const getRevisionCards = async (
@@ -29,6 +30,7 @@ export const getRevisionCards = async (
     params.topic,
     params.difficulty,
     params.tags,
+    params.excludeSlides,
   ]);
   try {
     const response = await api.get<PaginatedRevisionCards>('/revisions', {
@@ -57,7 +59,7 @@ export const getCardsByFolder = async (
   folderId: string,
   params?: QueryRevisionCardsInput
 ): Promise<PaginatedRevisionCards> => {
-  const key = cacheKey(['cards_folder', folderId, params?.page, params?.search, params?.topic]);
+  const key = cacheKey(['cards_folder', folderId, params?.page, params?.search, params?.topic, params?.excludeSlides]);
   try {
     const response = await api.get<PaginatedRevisionCards>(`/revisions/folder/${folderId}`, {
       params: {
@@ -94,4 +96,10 @@ export const updateRevisionCard = async ({
 
 export const deleteRevisionCard = async (cardId: string) => {
   await api.delete(`/revisions/${cardId}`);
+};
+
+export const getRevisionCardsByIds = async (cardIds: string[]): Promise<IPopulatedRevisionCard[]> => {
+  if (!cardIds || cardIds.length === 0) return [];
+  const response = await api.post<IPopulatedRevisionCard[]>('/revisions/batch', { ids: cardIds });
+  return response.data;
 };

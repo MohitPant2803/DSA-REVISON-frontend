@@ -43,11 +43,12 @@ export function SearchFilterBar({
   }) => (
     <TouchableOpacity
       onPress={onPress}
-      className={`px-4 py-2 rounded-full mr-2 mb-2 border ${
-        active ? 'bg-violet-600 border-violet-600' : 'bg-white border-slate-200'
+      className={`px-3.5 py-1.5 rounded-full mr-2 mb-2 border ${
+        active ? 'bg-violet-50/80 border-violet-100' : 'border-slate-100'
       }`}
+      style={{ backgroundColor: active ? undefined : 'rgba(255,255,255,0.82)' }}
     >
-      <Text className={`text-sm font-medium ${active ? 'text-white' : 'text-slate-600'}`}>
+      <Text className={`text-[14px] font-normal ${active ? 'text-violet-600' : 'text-[#64748B]'}`}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -56,19 +57,22 @@ export function SearchFilterBar({
   const hasFilters = topic || difficulty || tag;
 
   return (
-    <View className="mb-4">
-      <View className="flex-row items-center bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
-        <Search color="#94a3b8" size={20} />
+    <View className="mb-5">
+      <View
+        className="flex-row items-center rounded-2xl px-4 py-3 border border-slate-100/80"
+        style={{ backgroundColor: 'rgba(255, 255, 255, 0.82)' }}
+      >
+        <Search color="#94A3B8" size={18} strokeWidth={2} />
         <TextInput
           value={search}
           onChangeText={onSearchChange}
           placeholder={placeholder}
-          placeholderTextColor="#94a3b8"
-          className="flex-1 ml-3 text-slate-900 text-base"
+          placeholderTextColor="#94A3B8"
+          className="flex-1 ml-3 text-[#0F172A] text-base"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => onSearchChange('')}>
-            <X color="#94a3b8" size={18} />
+            <X color="#94A3B8" size={16} />
           </TouchableOpacity>
         )}
       </View>
@@ -112,9 +116,9 @@ export function SearchFilterBar({
                 onDifficultyChange?.(undefined);
                 onTagChange?.(undefined);
               }}
-              className="px-4 py-2 rounded-full bg-slate-100 mr-2"
+              className="px-3.5 py-1.5 rounded-full bg-slate-50 mr-2"
             >
-              <Text className="text-slate-600 text-sm font-medium">Clear</Text>
+              <Text className="text-slate-500 text-sm font-medium">Clear</Text>
             </TouchableOpacity>
           )}
         </ScrollView>

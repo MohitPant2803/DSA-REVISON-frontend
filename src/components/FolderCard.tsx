@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text } from 'react-native';
+import { SpringPressable } from './SpringPressable';
 import {
   Folder,
   Layers,
@@ -9,10 +10,11 @@ import {
   BookOpen,
   Code,
   Brain,
+  ChevronRight,
 } from 'lucide-react-native';
 import type { IFolder } from '@/types/folder';
 
-const ICON_MAP: Record<string, React.ComponentType<{ color: string; size: number }>> = {
+const ICON_MAP: Record<string, React.ComponentType<{ color: string; size: number; strokeWidth?: number }>> = {
   folder: Folder,
   layers: Layers,
   graphs: GitBranch,
@@ -27,41 +29,61 @@ interface FolderCardProps {
   folder: IFolder;
   onPress: () => void;
   onLongPress?: () => void;
+  completedLoops?: number;
 }
 
-export function FolderCard({ folder, onPress, onLongPress }: FolderCardProps) {
+export function FolderCard({ folder, onPress, onLongPress, completedLoops = 0 }: FolderCardProps) {
   const IconComponent = ICON_MAP[folder.icon] || Folder;
   const cardCount = folder.cardCount ?? 0;
+  const accent = folder.color || '#8B5CF6';
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.85}
+    <SpringPressable
       onPress={onPress}
       onLongPress={onLongPress}
-      className="bg-white rounded-[28px] p-5 border border-slate-100 shadow-sm mb-4"
-      style={{ borderLeftWidth: 4, borderLeftColor: folder.color }}
+      className="rounded-[22px] p-5 border border-slate-100/60 mb-2.5 flex-row items-center"
+      style={{
+        backgroundColor: 'rgba(255, 255, 255, 0.82)',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.02,
+        shadowRadius: 8,
+        elevation: 0,
+      }}
     >
-      <View className="flex-row items-start justify-between">
-        <View
-          className="p-3 rounded-2xl mr-4"
-          style={{ backgroundColor: `${folder.color}18` }}
-        >
-          <IconComponent color={folder.color} size={22} />
-        </View>
-        <View className="flex-1">
-          <Text className="text-slate-900 text-lg font-semibold tracking-tight mb-1">
+      <View
+        className="w-11 h-11 rounded-2xl mr-4 justify-center items-center"
+        style={{ backgroundColor: accent + '10' }}
+      >
+        <IconComponent color={accent} size={18} strokeWidth={1.75} />
+      </View>
+
+      <View className="flex-1 justify-center pr-3">
+        <View className="flex-row items-center gap-2 mb-0.5">
+          <Text className="text-[#0F172A] text-[17px] font-normal tracking-tight" numberOfLines={1}>
             {folder.title}
           </Text>
-          {folder.description ? (
-            <Text className="text-slate-500 text-sm leading-relaxed" numberOfLines={2}>
-              {folder.description}
-            </Text>
-          ) : null}
-          <Text className="text-slate-400 text-xs font-medium mt-3">
+          {completedLoops > 0 && (
+            <View className="bg-violet-100 px-2 py-0.5 rounded-full self-start">
+              <Text className="text-violet-600 text-[9px] font-bold tracking-wider">LOOP {completedLoops}</Text>
+            </View>
+          )}
+        </View>
+        {folder.description ? (
+          <Text className="text-[#64748B] text-sm leading-relaxed" numberOfLines={2}>
+            {folder.description}
+          </Text>
+        ) : (
+          <Text className="text-[#94A3B8] text-sm">{cardCount} {cardCount === 1 ? 'card' : 'cards'}</Text>
+        )}
+        {folder.description ? (
+          <Text className="text-[#94A3B8] text-xs mt-1.5">
             {cardCount} {cardCount === 1 ? 'card' : 'cards'}
           </Text>
-        </View>
+        ) : null}
       </View>
-    </TouchableOpacity>
+
+      <ChevronRight color="#CBD5E1" size={18} strokeWidth={2} />
+    </SpringPressable>
   );
 }

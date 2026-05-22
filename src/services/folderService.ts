@@ -15,7 +15,7 @@ export interface QueryFoldersInput {
 }
 
 export const getFolders = async (params?: QueryFoldersInput): Promise<PaginatedFolders> => {
-  const key = cacheKey(['folders', params?.search, params?.page]);
+  const key = cacheKey(['folders', params?.search, params?.page, params?.parentFolderId]);
   try {
     const response = await api.get<PaginatedFolders>('/folders', {
       params: {
@@ -66,4 +66,9 @@ export const updateFolder = async ({
 
 export const deleteFolder = async (folderId: string): Promise<void> => {
   await api.delete(`/folders/${folderId}`);
+};
+
+export const reorderFolderCards = async (folderId: string, cardIds: string[]): Promise<IFolder> => {
+  const response = await api.put<IFolder>(`/folders/${folderId}/reorder`, { cardIds });
+  return response.data;
 };

@@ -3,8 +3,6 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Placard } from '../types';
 import { HelpCircle, BookOpen, CheckCircle, Sparkles, Lightbulb, ChevronRight, Target, Heart } from 'lucide-react-native';
 import Animated, { FadeInDown, SlideInDown, BounceIn, FadeIn } from 'react-native-reanimated';
-import { useBookmarkStore } from '../store/useBookmarkStore';
-
 interface PlacardCardProps {
   placard: Placard;
   onActionPress: () => void;
@@ -15,8 +13,7 @@ interface PlacardCardProps {
 }
 
 const PlacardCardComponent = ({ placard, onActionPress, onBookmarkPress, onBookmarkLongPress, index, total }: PlacardCardProps) => {
-  const bookmarkedIds = useBookmarkStore(state => state.bookmarkedIds);
-  const isBookmarked = bookmarkedIds.includes(placard.id);
+  const isBookmarked = false;
 
   const difficultyStyles = {
     Easy: {

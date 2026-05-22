@@ -2,12 +2,11 @@ import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-// 1. Type Definitions
 export interface User {
-  id: string;        // backend returns _id
+  id: string;
   name: string;
   email: string;
-  avatarUrl?: string; // backend returns profilePicture
+  avatarUrl?: string;
   role?: 'user' | 'admin' | 'superadmin';
 }
 
@@ -15,34 +14,49 @@ interface AuthState {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
-  isLoading: boolean; // Useful for showing splash screens while restoring session
-  
-  // Actions
+  isLoading: boolean;
   login: (token: string, user: User) => Promise<void>;
   logout: () => Promise<void>;
   restoreSession: () => Promise<void>;
 }
 
-// 2. Scalable Storage Abstraction
-// SecureStore is purely for mobile. For Next.js/Web, we fallback to a web-compatible API
-// without breaking the mobile implementation.
+function sanitizeUser(user: Partial<User> | null | undefined): User | null {
+  if (!user) return null;
+  const id = String(user.id ?? '').trim();
+  if (!id) return null;
+  return {
+    id,
+    name: String(user.name ?? ''),
+    email: String(user.email ?? ''),
+    avatarUrl: user.avatarUrl ? String(user.avatarUrl) : undefined,
+    role: user.role || 'user',
+  };
+}
+
+function safeParseUser(raw: string | null): User | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return sanitizeUser(parsed);
+  } catch {
+    return null;
+  }
+}
+
 const SecureStorage = {
   getToken: async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
-      // Future Web Auth: Can be localStorage or HttpOnly cookies
       return typeof window !== 'undefined' ? localStorage.getItem('jwt_token') : null;
     }
     return await SecureStore.getItemAsync('jwt_token');
   },
-  setToken: async (token: any): Promise<void> => {
-    if (token === undefined || token === null) return;
-    const safeToken = typeof token === 'string' ? token : JSON.stringify(token);
-    if (!safeToken) return;
+  setToken: async (token: string): Promise<void> => {
+    if (!token) return;
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined') localStorage.setItem('jwt_token', safeToken);
+      if (typeof window !== 'undefined') localStorage.setItem('jwt_token', token);
       return;
     }
-    await SecureStore.setItemAsync('jwt_token', safeToken);
+    await SecureStore.setItemAsync('jwt_token', token);
   },
   removeToken: async (): Promise<void> => {
     if (Platform.OS === 'web') {
@@ -54,15 +68,15 @@ const SecureStorage = {
   getUser: async (): Promise<User | null> => {
     if (Platform.OS === 'web') {
       const user = typeof window !== 'undefined' ? localStorage.getItem('user_data') : null;
-      return user ? JSON.parse(user) : null;
+      return safeParseUser(user);
     }
     const user = await SecureStore.getItemAsync('user_data');
-    return user ? JSON.parse(user) : null;
+    return safeParseUser(user);
   },
   setUser: async (user: User): Promise<void> => {
-    if (!user) return;
-    const userStr = JSON.stringify(user);
-    if (!userStr) return;
+    const safe = sanitizeUser(user);
+    if (!safe) return;
+    const userStr = JSON.stringify(safe);
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined') localStorage.setItem('user_data', userStr);
       return;
@@ -75,58 +89,73 @@ const SecureStorage = {
       return;
     }
     await SecureStore.deleteItemAsync('user_data');
-  }
+  },
 };
 
-// 3. Zustand Store Initialization
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isAuthenticated: false,
-  isLoading: true, // Start true while we figure out if they have an active session
+  isLoading: true,
 
   login: async (token: string, user: User) => {
-    try {
-      await SecureStorage.setToken(token);
-      
-      // Sanitize: ensure clean serializable object
-      const safeUser: User = {
-        id: String(user?.id || ''),
-        name: String(user?.name || ''),
-        email: String(user?.email || ''),
-        avatarUrl: user.avatarUrl ? String(user.avatarUrl) : undefined,
-        role: user.role || 'user',
-      };
-      await SecureStorage.setUser(safeUser);
-      
-      set({ token, user: safeUser, isAuthenticated: true });
-    } catch (error) {
-      console.error('Failed to securely store authentication token', error);
-      throw error;
+    const safeUser = sanitizeUser(user);
+    if (!safeUser || token == null) {
+      throw new Error('Invalid login payload');
     }
+    
+    if (token) {
+      await SecureStorage.setToken(token);
+    } else {
+      await SecureStorage.removeToken();
+    }
+    await SecureStorage.setUser(safeUser);
+    set({ token, user: safeUser, isAuthenticated: safeUser.id !== 'guest-user', isLoading: false });
   },
 
   logout: async () => {
     await SecureStorage.removeToken();
     await SecureStorage.removeUser();
-    set({ token: null, user: null, isAuthenticated: false });
+    
+    // Clear resume progress
+    const { useResumeStore } = require('@/store/useResumeStore');
+    useResumeStore.getState().clearAll();
+    
+    set({ token: null, user: null, isAuthenticated: false, isLoading: false });
   },
 
   restoreSession: async () => {
     try {
-      const token = await SecureStorage.getToken();
       const user = await SecureStorage.getUser();
-      
-      if (token) {
-        // Note: Ideally, you should verify this token with your backend (e.g., GET /me)
-        // to fetch fresh user details and ensure it hasn't expired.
-        set({ token, user, isAuthenticated: true, isLoading: false });
-      } else {
-        set({ token: null, user: null, isAuthenticated: false, isLoading: false });
+      if (user?.id === 'guest-user') {
+        set({ token: '', user, isAuthenticated: false, isLoading: false });
+        return;
       }
+
+      const token = await SecureStorage.getToken();
+      if (!token) {
+        set({ token: null, user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
+
+      set({ token, isLoading: true });
+
+      const { getMe } = require('@/services/authService');
+      const freshUser = await getMe();
+      if (!freshUser) {
+        await SecureStorage.removeToken();
+        await SecureStorage.removeUser();
+        set({ token: null, user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
+
+      await SecureStorage.setUser(freshUser);
+      set({ token, user: freshUser, isAuthenticated: true, isLoading: false });
     } catch (error) {
-      console.error('Failed to restore session from SecureStore', error);
+      console.error('Failed to restore session', error);
+      await SecureStorage.removeToken();
+      await SecureStorage.removeUser();
       set({ token: null, user: null, isAuthenticated: false, isLoading: false });
     }
-  }
+  },
 }));

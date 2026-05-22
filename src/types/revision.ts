@@ -12,9 +12,18 @@ export const ComplexityLevels = [
   'O(n³)',
   'O(2^n)',
 ] as const;
-export type Complexity = (typeof ComplexityLevels)[number];
+
+export type Complexity = string;
 
 export type CardVisibility = 'public' | 'private';
+
+export interface ISlide {
+  type?: string;
+  headline: string;
+  body?: string;
+  code?: string;
+  blocks?: Array<any>;
+}
 
 export interface FolderRef {
   _id: string;
@@ -38,6 +47,7 @@ export interface IRevisionCard {
   createdBy: string;
   visibility: CardVisibility;
   order: number;
+  slides?: ISlide[];
   createdAt: string;
   updatedAt: string;
 }
@@ -63,6 +73,7 @@ export type CreateRevisionCardDTO = {
   folderId: string;
   visibility?: CardVisibility;
   order?: number;
+  slides?: ISlide[];
 };
 
 export type UpdateRevisionCardDTO = Partial<CreateRevisionCardDTO>;

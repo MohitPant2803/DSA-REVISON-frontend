@@ -10,7 +10,7 @@ import '../global.css';  // ← only here
 // ... rest of imports
 
 export default function RootLayout() {
-  const { isAuthenticated, isLoading, restoreSession } = useAuthStore();
+  const { isAuthenticated, isLoading, restoreSession, user } = useAuthStore();
   const segments = useSegments();
   const router = useRouter();
 
@@ -19,18 +19,24 @@ export default function RootLayout() {
     restoreSession();
   }, []);
 
+  const isGuest = user?.id === 'guest-user';
+
   useEffect(() => {
     // Do not redirect until auth state has finished hydrating
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const hasAccess = !!isAuthenticated || isGuest;
 
-    if (!isAuthenticated && !inAuthGroup) {
+    // If no access (neither auth nor guest) and trying to enter protected area
+    if (!hasAccess && !inAuthGroup) {
       router.replace("/(auth)/login");
-    } else if (isAuthenticated && inAuthGroup) {
+    } 
+    // If we have access and are still hanging out in the auth group
+    else if (hasAccess && inAuthGroup) {
       router.replace("/(protected)/(tabs)/learn");
     }
-  }, [isAuthenticated, isLoading, segments]);
+  }, [isAuthenticated, isLoading, segments, user?.id, isGuest]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

@@ -1,17 +1,19 @@
-import React from 'react';
-import { View, Text, Image, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, Image, ScrollView, TouchableOpacity, Alert, Platform, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import SyntaxHighlighter from 'react-native-syntax-highlighter';
-import { Tag, Code, BookOpen, Heart, BrainCircuit, Edit, Trash2, Archive } from 'lucide-react-native';
+import { Tag, Code, BookOpen, Heart, BrainCircuit, Edit, Trash2, Archive, ListMusic, MoreVertical, X, Check } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 
-import { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
-import { useUpdateCardProgress } from '../../../src/services/useProgress';
+import type { IPopulatedRevisionCard } from '@/types/revision';
+import { useAuthStore } from '@/store/useAuthStore';
+import { useUpdateCardProgress, useUpdatePlaylistMembership } from '@/services/useProgress';
+import { canModifyItem, UserRole } from '@/utils/permissions';
+import { usePlaylists } from '@/hooks/usePlaylists';
+import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import { useDeleteRevisionCard } from '@/hooks/useRevisionCards';
 import { useRole } from '@/hooks/useRole';
-import { useAuthStore } from '@/store/useAuthStore';
-import { canModifyItem } from '@/utils/permissions';
 
 // Inlined Atom One Dark theme to fix Metro bundler path resolution bugs
 const atomOneDark = {
@@ -74,9 +76,19 @@ const AnimatedView = styled(Animated.View);
 export const CodeText = (props: any) => <StyledText {...props} />;
 
 interface RevisionCardProps {
-  card: IPopulatedRevisionCard;
+  slide: {
+    card: IPopulatedRevisionCard;
+    slideIndex: number;
+    totalSlides: number;
+    type?: string;
+    headline: string;
+    body?: string;
+    code?: string;
+    blocks?: any[];
+  };
   currentIndex: number;
   totalCount: number;
+  onContinuePress?: () => void;
 }
 
 interface ActionButtonProps {
@@ -119,10 +131,15 @@ const TopicBadge = ({ topic }: { topic: string }) => {
   );
 };
 
-export const RevisionCard = ({ card, currentIndex, totalCount }: RevisionCardProps) => {
+export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress }: RevisionCardProps) => {
+  const { card } = slide;
   const router = useRouter();
   const { mutate: updateProgress } = useUpdateCardProgress();
+  const { mutate: updatePlaylistMembership } = useUpdatePlaylistMembership();
   const { mutate: deleteCard } = useDeleteRevisionCard();
+  const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
+  const { data: playlists = [] } = usePlaylists();
+  const { data: membership = {} } = useCardPlaylistMembership(card._id, showPlaylistPicker);
 
   const { user } = useAuthStore();
   const { role } = useRole();
@@ -252,7 +269,9 @@ export const RevisionCard = ({ card, currentIndex, totalCount }: RevisionCardPro
                   language="javascript"
                   style={atomOneDark}
                   customStyle={{ borderRadius: 16, padding: 16, fontSize: 14 }}
+                  // @ts-ignore
                   CodeTag={CodeText} // Use our custom Text component for code
+                  // @ts-ignore
                   PreTag={Platform.OS === 'web' ? 'pre' : View} // Use View for PreTag on native
                 >
                   {card.code}
@@ -265,31 +284,84 @@ export const RevisionCard = ({ card, currentIndex, totalCount }: RevisionCardPro
 
       {/* --- Quick Actions Sidebar --- */}
       <AnimatedView entering={FadeInDown.duration(600).delay(200)} className="absolute right-3 bottom-28 flex-col items-center gap-y-6">
-        {canEdit && (
-          <>
-            <ActionButton onPress={handleEdit} icon={<Edit size={24} color="#a1a1aa" />} label="Edit" />
-            <ActionButton onPress={handleDelete} icon={<Trash2 size={24} color="#a1a1aa" />} label="Delete" />
-          </>
-        )}
-        <ActionButton
-          onPress={() => handleProgressUpdate('favorite')}
-          icon={<Heart size={24} color={card.isFavorite ? '#ef4444' : '#a1a1aa'} fill={card.isFavorite ? '#ef4444' : 'transparent'} />}
-          label="Favorite"
-          isActive={card.isFavorite}
-        />
-        <ActionButton
-          onPress={() => handleProgressUpdate('difficult')}
-          icon={<BrainCircuit size={24} color={card.isDifficult ? '#facc15' : '#a1a1aa'} />}
-          label="Difficult"
-          isActive={card.isDifficult}
-        />
-        <ActionButton
-          onPress={() => handleProgressUpdate('archived')}
-          icon={<Archive size={22} color={card.isArchived ? '#a78bfa' : '#a1a1aa'} />}
-          label="Archive"
-          isActive={card.isArchived}
-        />
+        <TouchableOpacity onPress={() => handleProgressUpdate('favorite')} className="items-center">
+          <View className="bg-slate-100/90 p-3 rounded-full border border-slate-200 shadow-sm">
+            <Heart color={card.isFavorite ? "#ef4444" : "#64748B"} fill={card.isFavorite ? "#ef4444" : "transparent"} size={22} />
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setShowPlaylistPicker(true)} className="items-center">
+          <View className="bg-slate-100/90 p-3 rounded-full border border-slate-200 shadow-sm">
+            <ListMusic color="#64748B" size={22} />
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => {/* Show More Menu */}} className="items-center">
+          <View className="bg-slate-100/90 p-3 rounded-full border border-slate-200 shadow-sm">
+            <MoreVertical color="#64748B" size={22} />
+          </View>
+        </TouchableOpacity>
       </AnimatedView>
+
+      {/* Playlist picker Modal */}
+      <Modal visible={showPlaylistPicker} transparent animationType="fade">
+        <TouchableOpacity 
+          activeOpacity={1} 
+          onPress={() => setShowPlaylistPicker(false)} 
+          className="flex-1 bg-[#0F172A]/40 justify-end p-4"
+        >
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+            <StyledView
+              className="w-full rounded-[24px] p-5 border border-slate-100"
+              style={{ backgroundColor: 'rgba(255,255,255,0.98)' }}
+            >
+              <StyledView className="flex-row items-center justify-between mb-4">
+                <StyledText className="text-[#0F172A] text-[17px] font-normal">Add to playlist</StyledText>
+                <StyledTouchableOpacity onPress={() => setShowPlaylistPicker(false)} className="ml-auto">
+                  <X color="#94A3B8" size={18} strokeWidth={2} />
+                </StyledTouchableOpacity>
+              </StyledView>
+
+              <StyledScrollView className="max-h-[250px] mb-3" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {playlists.map((playlist) => {
+                  const isAdded = !!membership[playlist.id];
+                  return (
+                    <StyledTouchableOpacity
+                      key={playlist.id}
+                      onPress={() => {
+                        updatePlaylistMembership({
+                          cardId: card._id,
+                          addToPlaylist: isAdded ? undefined : playlist.id,
+                          removeFromPlaylist: isAdded ? playlist.id : undefined
+                        });
+                      }}
+                      className="flex-row items-center justify-between py-3 border-b border-slate-100 last:border-b-0"
+                    >
+                      <StyledView className="flex-row items-center gap-3">
+                        <StyledView
+                          className="w-8 h-8 rounded-full items-center justify-center"
+                          style={{ backgroundColor: `${playlist.color1}20` }}
+                        >
+                          <ListMusic size={16} color={playlist.color1} />
+                        </StyledView>
+                        <StyledView>
+                          <StyledText className="text-[#0F172A] font-medium">{playlist.name}</StyledText>
+                          <StyledText className="text-zinc-500 text-xs">{playlist.itemCount} cards</StyledText>
+                        </StyledView>
+                      </StyledView>
+                      {isAdded && (
+                        <Animated.View entering={FadeInDown.duration(200).springify()}>
+                          <Check color="#8B5CF6" size={20} strokeWidth={3} />
+                        </Animated.View>
+                      )}
+                    </StyledTouchableOpacity>
+                  );
+                })}
+              </StyledScrollView>
+            </StyledView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </StyledView>
   );
 };
