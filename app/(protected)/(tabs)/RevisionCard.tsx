@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, Image, ScrollView, TouchableOpacity, Alert, Platform, Modal } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, ActivityIndicator, InteractionManager } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import SyntaxHighlighter from 'react-native-syntax-highlighter';
@@ -144,6 +145,16 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
   const { user } = useAuthStore();
   const { role } = useRole();
 
+  const [isCodeLoaded, setIsCodeLoaded] = useState(false);
+  React.useEffect(() => {
+    if (slide.type === 'code') {
+      const task = InteractionManager.runAfterInteractions(() => {
+        setIsCodeLoaded(true);
+      });
+      return () => task.cancel();
+    }
+  }, [slide.type]);
+
   const folderId =
     typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
 
@@ -187,183 +198,229 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
   };
 
   return (
-    <StyledView className="flex-1 bg-[#0c0c0e]">
-      <StyledView className="absolute top-12 left-0 right-0 px-5 flex-row gap-1 z-10">
-        {Array.from({ length: Math.min(totalCount, 12) }).map((_, i) => {
-          const segment = Math.floor((currentIndex / Math.max(totalCount - 1, 1)) * 11);
-          return (
-            <StyledView
-              key={i}
-              className={`flex-1 h-0.5 rounded-full ${i <= segment ? 'bg-violet-400/90' : 'bg-zinc-700/50'}`}
-            />
-          );
-        })}
-      </StyledView>
-
-      <StyledView className="flex-1 pt-20 pb-28">
-        <StyledScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 48 }}>
-          <AnimatedView entering={FadeInDown.duration(400)} className="gap-y-6">
+    <StyledView className="flex-1 bg-transparent pr-14">
+      <StyledView className="flex-1 pt-2 pb-6">
+        <StyledScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+          <AnimatedView entering={FadeInDown.duration(400)} className="gap-y-5">
+            
+            {/* Premium Apple-style Badge Row */}
             <StyledView className="flex-row flex-wrap gap-2 items-center">
-              <TopicBadge topic={card.topic} />
-              <DifficultyBadge difficulty={card.difficulty} />
+              <StyledView className="px-3 py-1 rounded-full bg-violet-50 border border-violet-100/80">
+                <StyledText className="text-violet-700 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</StyledText>
+              </StyledView>
+              <StyledView className={`px-3 py-1 rounded-full ${
+                card.difficulty === 'Easy' ? 'bg-emerald-50 border border-emerald-100' :
+                card.difficulty === 'Medium' ? 'bg-amber-50 border border-amber-100' :
+                'bg-rose-50 border border-rose-100'
+              }`}>
+                <StyledText className={`text-[10px] font-extrabold uppercase tracking-wider ${
+                  card.difficulty === 'Easy' ? 'text-emerald-700' :
+                  card.difficulty === 'Medium' ? 'text-amber-700' :
+                  'text-rose-700'
+                }`}>{card.difficulty}</StyledText>
+              </StyledView>
               {card.complexity && (
-                <StyledView className="px-3 py-1 rounded-full bg-zinc-800/80">
-                  <StyledText className="text-zinc-400 text-xs font-mono">{card.complexity}</StyledText>
+                <StyledView className="px-3 py-1 rounded-full bg-slate-50 border border-slate-200/60">
+                  <StyledText className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</StyledText>
                 </StyledView>
               )}
             </StyledView>
 
-            <StyledText className="text-zinc-50 text-[32px] font-bold tracking-tight leading-tight">
-              {card.title}
+            <StyledText className="text-slate-900 text-[28px] font-extrabold tracking-tighter leading-tight">
+              {slide.headline}
             </StyledText>
 
-            {card.tags?.length > 0 && (
-              <StyledView className="flex-row flex-wrap gap-2">
-                {card.tags.map((t) => (
-                  <StyledView key={t} className="px-2.5 py-1 bg-zinc-800/60 rounded-md">
-                    <StyledText className="text-zinc-500 text-xs">{t}</StyledText>
+            {/* 1. Intro / Cover & 2. Intuition / Explanation slide rendering */}
+            {(slide.type === 'intro' || slide.type === 'explanation' || slide.type === 'intuition') && (
+              <StyledView className="gap-y-4">
+                <StyledText className="text-slate-600 text-[15px] leading-relaxed">
+                  {slide.body || card.explanation}
+                </StyledText>
+                
+                {/* Premium Takeaways violet outline summary box */}
+                <StyledView className="bg-violet-50/40 rounded-2xl p-5 border border-violet-200/50 gap-4 mt-2">
+                  <StyledView className="flex-row items-center gap-2">
+                    <StyledView className="w-2.5 h-2.5 rounded-full bg-violet-500" />
+                    <StyledText className="text-violet-800 text-[14px] font-black tracking-tight uppercase">
+                      Core Intuition
+                    </StyledText>
                   </StyledView>
-                ))}
+                  <StyledText className="text-slate-600 text-[13px] leading-relaxed">
+                    Identify the base boundaries of the problem. Caching states or iterating progressively allows building towards the optimal solution.
+                  </StyledText>
+                </StyledView>
               </StyledView>
             )}
 
-            {/* Optional Image */}
-            {card.image && (
+            {/* Optional Cover Image */}
+            {card.image && slide.type === 'intro' && (
               <StyledImage
                 source={{ uri: card.image }}
-                className="w-full h-56 rounded-2xl bg-zinc-800"
-                resizeMode="cover"
+                className="w-full h-44 rounded-2xl bg-slate-100"
+                contentFit="cover"
+                transition={200}
+                cachePolicy="disk"
               />
             )}
 
-            {/* Explanation */}
-            <StyledView className="gap-3">
-              <StyledView className="flex-row items-center gap-3">
-                <BookOpen color="#a1a1aa" size={20} />
-                <StyledText className="text-zinc-400 text-xl font-bold">Explanation</StyledText>
+            {/* 3. Code Walkthrough slide (Progressive Highlights) */}
+            {slide.type === 'code' && card.code && (
+              <StyledView className="rounded-2xl border border-slate-800 overflow-hidden shadow-lg bg-[#0B0F19]">
+                {/* macOS Style Mock Header */}
+                <StyledView className="flex-row items-center gap-1.5 px-4 py-3 bg-[#111827] border-b border-slate-800">
+                  <StyledView className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
+                  <StyledView className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
+                  <StyledView className="w-2.5 h-2.5 rounded-full bg-[#10B981]" />
+                  <StyledText className="text-slate-500 font-mono text-[10px] ml-auto">javascript</StyledText>
+                </StyledView>
+                
+                {isCodeLoaded ? (
+                  <SyntaxHighlighter
+                    language="javascript"
+                    style={atomOneDark}
+                    customStyle={{ 
+                      borderRadius: 0, 
+                      padding: 16, 
+                      fontSize: 12, 
+                      lineHeight: 18, 
+                      fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+                      backgroundColor: '#0B0F19' 
+                    } as any}
+                    // @ts-ignore
+                    CodeTag={CodeText}
+                    // @ts-ignore
+                    PreTag={Platform.OS === 'web' ? 'pre' : View}
+                  >
+                    {card.code}
+                  </SyntaxHighlighter>
+                ) : (
+                  /* Premium macOS Code Mockup Skeleton Placeholder */
+                  <StyledView className="p-6 bg-[#0B0F19] min-h-[180px] gap-y-4">
+                    <StyledView className="flex-row items-center gap-2">
+                      <StyledView className="w-12 h-3.5 bg-slate-800/60 rounded" />
+                      <StyledView className="w-24 h-3.5 bg-slate-800/40 rounded" />
+                    </StyledView>
+                    <StyledView className="w-3/4 h-3 bg-slate-800/60 rounded" />
+                    <StyledView className="w-1/2 h-3 bg-slate-800/60 rounded" />
+                    <StyledView className="w-5/6 h-3 bg-slate-800/60 rounded" />
+                    <StyledView className="w-2/3 h-3 bg-slate-800/60 rounded" />
+                    <StyledView className="w-4/5 h-3 bg-slate-800/60 rounded" />
+                  </StyledView>
+                )}
               </StyledView>
-              <StyledText className="text-zinc-400 text-[17px] leading-7">{card.explanation}</StyledText>
-            </StyledView>
+            )}
 
-            {card.examples?.length > 0 && (
-              <StyledView className="gap-2">
-                <StyledText className="text-zinc-500 text-sm font-semibold uppercase tracking-wider">
-                  Examples
+            {/* 4. Dry Run Step Timelines */}
+            {slide.type === 'dryrun' && card.examples?.length > 0 && (
+              <StyledView className="gap-3 mt-1">
+                <StyledText className="text-slate-400 text-[10px] font-black uppercase tracking-wider">
+                  💡 Step-by-Step Test Cases
                 </StyledText>
                 {card.examples.map((ex, i) => (
-                  <StyledView key={i} className="bg-zinc-900/80 rounded-2xl p-4 border border-zinc-800">
-                    <StyledText className="text-zinc-400 text-base leading-relaxed">{ex}</StyledText>
+                  <StyledView key={i} className="flex-row items-start gap-3 bg-slate-50/80 rounded-xl p-4 border border-slate-100">
+                    <StyledView className="w-5 h-5 rounded-full bg-violet-100 border border-violet-200 justify-center items-center mt-0.5">
+                      <StyledText className="text-violet-700 text-[10px] font-black">{i + 1}</StyledText>
+                    </StyledView>
+                    <StyledText className="text-slate-700 text-sm leading-relaxed font-mono flex-1">{ex}</StyledText>
                   </StyledView>
                 ))}
               </StyledView>
             )}
 
-            {/* Optional Code Block */}
-            {card.code && (
-              <StyledView className="gap-3">
-                <StyledView className="flex-row items-center gap-3">
-                  <Code color="#a1a1aa" size={20} />
-                  <StyledText className="text-zinc-400 text-xl font-bold">Code</StyledText>
+            {/* 5. Complexity Matrix Slide */}
+            {slide.type === 'complexity' && (
+              <StyledView className="gap-y-4">
+                <StyledText className="text-slate-500 text-sm">
+                  Performance footprints showing the time and memory scales for this algorithmic approach:
+                </StyledText>
+                
+                <StyledView className="flex-row gap-4 mt-2">
+                  {/* Time Complexity Card */}
+                  <StyledView className="flex-1 bg-violet-50/60 border border-violet-100 rounded-2xl p-4 items-center">
+                    <BrainCircuit color="#8B5CF6" size={24} />
+                    <StyledText className="text-violet-900 text-lg font-black mt-2">
+                      {card.complexity?.split('/')[0] || card.complexity || 'O(N)'}
+                    </StyledText>
+                    <StyledText className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mt-1">
+                      Time Complexity
+                    </StyledText>
+                    <StyledText className="text-slate-400 text-[9px] text-center mt-2 leading-relaxed">
+                      Measures instruction scales relative to input size.
+                    </StyledText>
+                  </StyledView>
+                  
+                  {/* Space Complexity Card */}
+                  <StyledView className="flex-1 bg-emerald-50/60 border border-emerald-100 rounded-2xl p-4 items-center">
+                    <Archive color="#10B981" size={24} />
+                    <StyledText className="text-emerald-950 text-lg font-black mt-2">
+                      {card.complexity?.split('/')[1] || 'O(1)'}
+                    </StyledText>
+                    <StyledText className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mt-1">
+                      Space Complexity
+                    </StyledText>
+                    <StyledText className="text-slate-400 text-[9px] text-center mt-2 leading-relaxed">
+                      Measures peak heap/stack memory overhead scale.
+                    </StyledText>
+                  </StyledView>
                 </StyledView>
-                <SyntaxHighlighter
-                  language="javascript"
-                  style={atomOneDark}
-                  customStyle={{ borderRadius: 16, padding: 16, fontSize: 14 }}
-                  // @ts-ignore
-                  CodeTag={CodeText} // Use our custom Text component for code
-                  // @ts-ignore
-                  PreTag={Platform.OS === 'web' ? 'pre' : View} // Use View for PreTag on native
-                >
-                  {card.code}
-                </SyntaxHighlighter>
+                
+                <StyledView className="bg-slate-50 border border-slate-100 rounded-xl p-4 mt-2">
+                  <StyledText className="text-slate-500 text-[11px] leading-relaxed">
+                    💡 **Note**: Optimal algorithms aim to minimize space complexity to O(1) in-place adjustments, while caching indices if a speed lookup tradeoff is desired.
+                  </StyledText>
+                </StyledView>
+              </StyledView>
+            )}
+
+            {/* 6. Visualization Slide */}
+            {slide.type === 'visualization' && (
+              <StyledView className="gap-y-4">
+                <StyledText className="text-slate-500 text-sm">
+                  Visual pointer flow and heap trace diagram:
+                </StyledText>
+                
+                {card.image ? (
+                  <StyledView className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
+                    <StyledImage
+                      source={{ uri: card.image }}
+                      className="w-full h-48 bg-slate-50"
+                      contentFit="contain"
+                      transition={200}
+                      cachePolicy="disk"
+                    />
+                  </StyledView>
+                ) : (
+                  <StyledView className="border-2 border-dashed border-slate-200 rounded-2xl p-8 items-center justify-center bg-slate-50">
+                    <BrainCircuit color="#94A3B8" size={32} />
+                    <StyledText className="text-slate-400 text-[11px] text-center mt-2 leading-relaxed font-medium">
+                      Dynamic stack representation is mapped conceptually. Let the core pointer transitions guide your tracing bounds.
+                    </StyledText>
+                  </StyledView>
+                )}
+              </StyledView>
+            )}
+
+            {/* Fallback Summary Slide */}
+            {slide.type === 'summary' && (
+              <StyledView className="bg-violet-50/40 rounded-2xl p-5 border border-violet-200/50 gap-4 mt-2">
+                <StyledView className="flex-row items-center gap-2">
+                  <StyledView className="w-2.5 h-2.5 rounded-full bg-violet-500" />
+                  <StyledText className="text-violet-800 text-[16px] font-black tracking-tight uppercase">
+                    Key Takeaways
+                  </StyledText>
+                </StyledView>
+                <StyledText className="text-slate-600 text-[14px] leading-relaxed">
+                  {slide.body || 'Successfully mastered this DSA pattern! Retain this core logic for coding interviews.'}
+                </StyledText>
               </StyledView>
             )}
           </AnimatedView>
         </StyledScrollView>
       </StyledView>
-
-      {/* --- Quick Actions Sidebar --- */}
-      <AnimatedView entering={FadeInDown.duration(600).delay(200)} className="absolute right-3 bottom-28 flex-col items-center gap-y-6">
-        <TouchableOpacity onPress={() => handleProgressUpdate('favorite')} className="items-center">
-          <View className="bg-slate-100/90 p-3 rounded-full border border-slate-200 shadow-sm">
-            <Heart color={card.isFavorite ? "#ef4444" : "#64748B"} fill={card.isFavorite ? "#ef4444" : "transparent"} size={22} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setShowPlaylistPicker(true)} className="items-center">
-          <View className="bg-slate-100/90 p-3 rounded-full border border-slate-200 shadow-sm">
-            <ListMusic color="#64748B" size={22} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => {/* Show More Menu */}} className="items-center">
-          <View className="bg-slate-100/90 p-3 rounded-full border border-slate-200 shadow-sm">
-            <MoreVertical color="#64748B" size={22} />
-          </View>
-        </TouchableOpacity>
-      </AnimatedView>
-
-      {/* Playlist picker Modal */}
-      <Modal visible={showPlaylistPicker} transparent animationType="fade">
-        <TouchableOpacity 
-          activeOpacity={1} 
-          onPress={() => setShowPlaylistPicker(false)} 
-          className="flex-1 bg-[#0F172A]/40 justify-end p-4"
-        >
-          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
-            <StyledView
-              className="w-full rounded-[24px] p-5 border border-slate-100"
-              style={{ backgroundColor: 'rgba(255,255,255,0.98)' }}
-            >
-              <StyledView className="flex-row items-center justify-between mb-4">
-                <StyledText className="text-[#0F172A] text-[17px] font-normal">Add to playlist</StyledText>
-                <StyledTouchableOpacity onPress={() => setShowPlaylistPicker(false)} className="ml-auto">
-                  <X color="#94A3B8" size={18} strokeWidth={2} />
-                </StyledTouchableOpacity>
-              </StyledView>
-
-              <StyledScrollView className="max-h-[250px] mb-3" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                {playlists.map((playlist) => {
-                  const isAdded = !!membership[playlist.id];
-                  return (
-                    <StyledTouchableOpacity
-                      key={playlist.id}
-                      onPress={() => {
-                        updatePlaylistMembership({
-                          cardId: card._id,
-                          addToPlaylist: isAdded ? undefined : playlist.id,
-                          removeFromPlaylist: isAdded ? playlist.id : undefined
-                        });
-                      }}
-                      className="flex-row items-center justify-between py-3 border-b border-slate-100 last:border-b-0"
-                    >
-                      <StyledView className="flex-row items-center gap-3">
-                        <StyledView
-                          className="w-8 h-8 rounded-full items-center justify-center"
-                          style={{ backgroundColor: `${playlist.color1}20` }}
-                        >
-                          <ListMusic size={16} color={playlist.color1} />
-                        </StyledView>
-                        <StyledView>
-                          <StyledText className="text-[#0F172A] font-medium">{playlist.name}</StyledText>
-                          <StyledText className="text-zinc-500 text-xs">{playlist.itemCount} cards</StyledText>
-                        </StyledView>
-                      </StyledView>
-                      {isAdded && (
-                        <Animated.View entering={FadeInDown.duration(200).springify()}>
-                          <Check color="#8B5CF6" size={20} strokeWidth={3} />
-                        </Animated.View>
-                      )}
-                    </StyledTouchableOpacity>
-                  );
-                })}
-              </StyledScrollView>
-            </StyledView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
     </StyledView>
   );
 };
 
 export default RevisionCard;
+
+

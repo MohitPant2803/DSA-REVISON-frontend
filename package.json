@@ -20,6 +20,7 @@
     "expo-constants": "~55.0.16",
     "expo-crypto": "~55.0.15",
     "expo-dev-client": "~55.0.35",
+    "expo-image": "^56.0.8",
     "expo-linking": "~55.0.15",
     "expo-router": "~55.0.16",
     "expo-secure-store": "~55.0.14",

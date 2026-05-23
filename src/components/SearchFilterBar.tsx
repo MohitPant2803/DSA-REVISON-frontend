@@ -19,6 +19,32 @@ interface SearchFilterBarProps {
 
 const DIFFICULTIES = [...DifficultyLevels];
 
+interface ChipProps {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}
+
+const Chip = React.memo(({
+  label,
+  active,
+  onPress,
+}: ChipProps) => (
+  <TouchableOpacity
+    onPress={onPress}
+    className={`px-3.5 py-1.5 rounded-full mr-2 mb-2 border ${
+      active ? 'bg-violet-50/80 border-violet-100' : 'border-slate-100'
+    }`}
+    style={{ backgroundColor: active ? undefined : 'rgba(255,255,255,0.82)' }}
+  >
+    <Text className={`text-[14px] font-normal ${active ? 'text-violet-600' : 'text-[#64748B]'}`}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+), (prev, next) => {
+  return prev.label === next.label && prev.active === next.active;
+});
+
 export function SearchFilterBar({
   search,
   onSearchChange,
@@ -32,27 +58,6 @@ export function SearchFilterBar({
   tags = [],
   placeholder = 'Search...',
 }: SearchFilterBarProps) {
-  const Chip = ({
-    label,
-    active,
-    onPress,
-  }: {
-    label: string;
-    active: boolean;
-    onPress: () => void;
-  }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      className={`px-3.5 py-1.5 rounded-full mr-2 mb-2 border ${
-        active ? 'bg-violet-50/80 border-violet-100' : 'border-slate-100'
-      }`}
-      style={{ backgroundColor: active ? undefined : 'rgba(255,255,255,0.82)' }}
-    >
-      <Text className={`text-[14px] font-normal ${active ? 'text-violet-600' : 'text-[#64748B]'}`}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
 
   const hasFilters = topic || difficulty || tag;
 

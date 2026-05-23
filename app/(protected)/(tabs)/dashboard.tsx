@@ -111,10 +111,6 @@ export default function DashboardScreen() {
 
   // Ensure stats.consistencyByDay is an array before mapping
   const consistencyByDay = stats?.consistencyByDay || [];
-  const maxConsistency = Math.max(
-    ...(consistencyByDay.map((d) => d.sessions) ?? [1]),
-    1
-  );
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAFAFC]" edges={['top', 'left', 'right']}>

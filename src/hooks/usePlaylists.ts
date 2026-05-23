@@ -47,17 +47,28 @@ export function mapApiPlaylist(p: playlistService.ApiPlaylist, index = 0): UIPla
 export const usePlaylists = () => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
-    queryKey: [PLAYLISTS_KEY],
+    queryKey: [PLAYLISTS_KEY, isAuthenticated],
     queryFn: async () => {
-      // Get custom playlists from backend
-      const list = await playlistService.getPlaylists().catch(() => []);
-      const uiPlaylists = list.map((p, i) => mapApiPlaylist(p, i));
+      let uiPlaylists: UIPlaylist[] = [];
+      let likesCount = 0;
+      let likedCardIds: string[] = [];
 
-      // Get liked count
-      const library = await getPersonalLibrary().catch(() => null);
-      const likesCount = (library?.favorites ?? []).filter(f => f && f.card != null).length;
+      if (isAuthenticated) {
+        // Get custom playlists from backend
+        const list = await playlistService.getPlaylists().catch((err) => {
+          console.warn('[usePlaylists] Failed to fetch custom playlists', err);
+          return [];
+        });
+        uiPlaylists = list.map((p, i) => mapApiPlaylist(p, i));
 
-      // Get watch later count
+        // Get liked count from personal library
+        const library = await getPersonalLibrary().catch(() => null);
+        const validFavorites = (library?.favorites ?? []).filter(f => f && f.card != null);
+        likesCount = validFavorites.length;
+        likedCardIds = validFavorites.map(f => f.card?._id).filter(Boolean) as string[];
+      }
+
+      // Get watch later count (always available locally via Zustand)
       const watchLaterIds = useTrackingStore.getState().watchLaterCardIds ?? [];
       const watchLaterCount = watchLaterIds.length;
 
@@ -69,7 +80,7 @@ export const usePlaylists = () => {
         color2: '#fda4af', // Rose-300
         itemCount: likesCount,
         completedLoops: useTrackingStore.getState().loopsCompleted['likes'] ?? 0,
-        orderedCardIds: (library?.favorites ?? []).map(f => f.card?._id).filter(Boolean) as string[],
+        orderedCardIds: likedCardIds,
       };
 
       const watchLaterPlaylist: UIPlaylist = {
@@ -85,7 +96,6 @@ export const usePlaylists = () => {
       return [likesPlaylist, watchLaterPlaylist, ...uiPlaylists];
     },
     staleTime: 1000 * 60,
-    enabled: isAuthenticated,
     retry: 2,
   });
 };
@@ -165,6 +175,28 @@ export const useDeletePlaylist = () => {
     },
   });
 };
+
+export const useUpdatePlaylist = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ playlistId, name }: { playlistId: string; name: string }) =>
+      playlistService.updatePlaylist(playlistId, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+    },
+  });
+};
+
+export const useDuplicatePlaylist = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (playlistId: string) => playlistService.duplicatePlaylist(playlistId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+    },
+  });
+};
+
 
 export const useTogglePlaylistItem = () => {
   const qc = useQueryClient();

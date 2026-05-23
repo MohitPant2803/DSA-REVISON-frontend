@@ -88,7 +88,7 @@ export default function PlaylistCardsScreen() {
   }, [isLoading, localCards]);
   */
 
-  const displayTitle = isLikes ? 'Liked Cards' : (playlist?.name || 'Playlist');
+  const displayTitle = isLikes ? 'Revised' : (playlist?.name || 'Playlist');
 
   const handleDragEnd = ({ data }: { data: IPopulatedRevisionCard[] }) => {
     setLocalCards(data);

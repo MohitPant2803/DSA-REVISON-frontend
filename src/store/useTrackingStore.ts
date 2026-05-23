@@ -30,6 +30,7 @@ interface TrackingState {
   startSession: () => void;
   updateSessionTime: () => void;
   markCardCompleted: (cardId: string) => void;
+  toggleCardCompleted: (cardId: string) => void;
   registerLoopCompletion: (id: string) => void;
   resetSession: () => void;
 }
@@ -90,6 +91,20 @@ export const useTrackingStore = create<TrackingState>()(
         };
       }),
       
+      toggleCardCompleted: (cardId) => set((state) => {
+        const exists = !!state.completedCardIds[cardId];
+        const newCompletedIds = { ...state.completedCardIds };
+        if (exists) {
+          delete newCompletedIds[cardId];
+        } else {
+          newCompletedIds[cardId] = true;
+        }
+        return {
+          completedCardIds: newCompletedIds,
+          completedCardsCount: Object.keys(newCompletedIds).length,
+        };
+      }),
+      
       registerLoopCompletion: (id) => set((state) => {
         const currentCount = state.loopsCompleted[id] || 0;
         return {
@@ -110,6 +125,12 @@ export const useTrackingStore = create<TrackingState>()(
     {
       name: 'dsa-tracking-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({
+        currentMode: state.currentMode,
+        infiniteLoop: state.infiniteLoop,
+        watchLaterCardIds: state.watchLaterCardIds,
+        loopsCompleted: state.loopsCompleted,
+      }),
     }
   )
 );

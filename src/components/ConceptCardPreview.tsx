@@ -9,7 +9,10 @@ import {
   Alert,
   Modal,
   ScrollView,
+  Pressable,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+
 import { useRouter } from 'expo-router';
 import {
   X,
@@ -21,8 +24,7 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { IPopulatedRevisionCard, ISlide } from '@/hooks/useRevisionCards';
-import { usePlaylists, useTogglePlaylistItem } from '@/hooks/usePlaylists';
-import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
+import { useTogglePlaylistItem } from '@/hooks/usePlaylists';
 import { useUpdateCardProgress } from '@/services/useProgress';
 import { useDeleteRevisionCard } from '@/hooks/useRevisionCards';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -30,6 +32,7 @@ import { useRole } from '@/hooks/useRole';
 import { canModifyItem, UserRole } from '@/utils/permissions';
 import * as userCardStateService from '@/services/userCardStateService';
 import Toast from 'react-native-toast-message';
+import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -45,78 +48,110 @@ export const getSlidesForCard = (card: IPopulatedRevisionCard): ISlide[] => {
   }
   const slides: ISlide[] = [];
   
+  // 1. Intro / Cover Card (rendered via ConceptCardPreview)
   slides.push({
     type: 'intro',
     headline: card.title,
     body: card.explanation,
   });
 
+  // 2. Intuition / Explanation slide
+  slides.push({
+    type: 'explanation',
+    headline: 'Core Intuition',
+    body: card.explanation || 'Analyze the fundamental approach and optimal strategy for this problem.',
+  });
+
+  // 3. Code Walkthrough slide (if code is available)
   if (card.code && card.code.trim()) {
     slides.push({
       type: 'code',
       headline: 'Code Walkthrough',
-      body: 'Review the complete algorithmic implementation below:',
+      body: 'Review the clean, highly optimized implementation below:',
       code: card.code,
-    });
-  } else if (card.examples && card.examples.length > 0) {
-    slides.push({
-      type: 'dryrun',
-      headline: 'Examples & Cases',
-      body: `Let's dry run the algorithm with some sample test cases:`,
     });
   }
 
-  slides.push({
-    type: 'summary',
-    headline: 'Concept Summary',
-    body: card.complexity 
-      ? `Successfully mastered this concept! Time Complexity is estimated at ${card.complexity}.`
-      : 'Successfully mastered this concept! Retain this core pattern for coding interviews.',
-  });
+  // 4. Dry Run / Step-by-Step test cases (if examples are available)
+  if (card.examples && card.examples.length > 0) {
+    slides.push({
+      type: 'dryrun',
+      headline: 'Dry Run Trace',
+      body: "Walk through step-by-step executions of the algorithm:",
+    });
+  }
+
+  // 5. Complexity Matrix slide (if complexity is available)
+  if (card.complexity) {
+    slides.push({
+      type: 'complexity',
+      headline: 'Complexity Analysis',
+      body: 'Time and space performance benchmarks for this pattern.',
+    });
+  }
+
+  // 6. Visualization / Illustrative Diagram (if card has an image or we can show pointer visuals)
+  if (card.image) {
+    slides.push({
+      type: 'visualization',
+      headline: 'Visual Diagram',
+      body: 'Conceptual stack/heap pointer trace representation:',
+    });
+  }
+
+  // Fallback to Concept Summary if none of the above matches
+  if (slides.length <= 2) {
+    slides.push({
+      type: 'summary',
+      headline: 'Concept Summary',
+      body: 'Successfully mastered this DSA pattern! Retain this core logic for coding interviews.',
+    });
+  }
 
   return slides;
 };
 
 interface ConceptCardPreviewProps {
   card: IPopulatedRevisionCard;
-  onViewExplanation: (index?: number) => void;
-  isWatchLater: boolean;
-  onToggleWatchLater: () => void;
+  onViewExplanation?: (index?: number) => void;
+  isWatchLater?: boolean;
+  onToggleWatchLater?: () => void;
   onCardStateUpdate?: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
   activePlaylistId?: string | null;
 }
 
 export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatchLater, onToggleWatchLater, onCardStateUpdate, activePlaylistId }: ConceptCardPreviewProps) => {
   const router = useRouter();
+  const ctaScale = useSharedValue(1);
+
+  const ctaAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: ctaScale.value }],
+    };
+  });
+
   const { user, logout } = useAuthStore();
   const { role } = useRole();
   const { mutate: updateProgress } = useUpdateCardProgress();
   const { mutate: deleteCard } = useDeleteRevisionCard();
-
-  const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
-  const { data: playlists = [] } = usePlaylists();
-  const { data: membership, isPending: membershipLoading } = useCardPlaylistMembership(card._id, showPlaylistPicker);
   const togglePlaylistItem = useTogglePlaylistItem();
-
-  const [tempMembership, setTempMembership] = useState<Record<string, boolean>>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (membership && showPlaylistPicker) {
-      setTempMembership(membership);
-    }
-  }, [membership, showPlaylistPicker]);
-
-  const isAnySelected = useMemo(() => {
-    return Object.values(tempMembership).some(v => v);
-  }, [tempMembership]);
 
   const folderId = typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
   const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
   const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, card.createdBy) : false);
 
-  const slidesList = getSlidesForCard(card);
-  const slideCount = slidesList.length;
+  const { preferences } = useUserPreferencesStore();
+  const slideCount = useMemo(() => {
+    const baseSlides = getSlidesForCard(card);
+    const introSlide = baseSlides.find(s => s.type === 'intro');
+    let otherSlides = baseSlides.filter(s => s.type !== 'intro');
+    
+    if (preferences.hideCertainBlockTypes && preferences.hideCertainBlockTypes.length > 0) {
+      otherSlides = otherSlides.filter(s => s.type ? !preferences.hideCertainBlockTypes.includes(s.type) : true);
+    }
+    
+    return (introSlide ? 1 : 0) + otherSlides.length;
+  }, [card, preferences.hideCertainBlockTypes]);
 
   const isGuest = user?.id === 'guest-user';
 
@@ -238,55 +273,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
     });
   };
 
-  const handleSubmitPlaylists = async () => {
-    if (isGuest) return promptSignIn();
-    if (!membership) return;
 
-    setIsSubmitting(true);
-    lightHaptic();
-
-    const cleanCardId = card._id.split('-loop-')[0];
-    console.log(`[PLAYLIST SUBMIT] Starting submit for cardId: ${cleanCardId}`);
-    console.log(`[PLAYLIST SUBMIT] Authenticated user exists:`, !!user);
-
-    try {
-      for (const playlist of playlists) {
-        if (playlist.id === 'likes' || playlist.id === 'watch-later') continue;
-        const wasAdded = !!membership[playlist.id];
-        const isAddedNow = !!tempMembership[playlist.id];
-
-        if (wasAdded !== isAddedNow) {
-          console.log(`[PLAYLIST SUBMIT] Toggling playlistId: ${playlist.id}, wasAdded: ${wasAdded}, isAddedNow: ${isAddedNow}`);
-          await togglePlaylistItem.mutateAsync({
-            playlistId: playlist.id,
-            revisionCardId: cleanCardId,
-            isInPlaylist: wasAdded,
-          });
-          console.log(`[PLAYLIST SUBMIT SUCCESS] Toggled playlistId: ${playlist.id}`);
-        }
-      }
-
-      Toast.show({
-        type: 'success',
-        text1: 'Playlists Saved',
-        text2: 'Playlists membership updated successfully.',
-        position: 'top',
-        visibilityTime: 2000,
-      });
-
-      setShowPlaylistPicker(false);
-    } catch (err: any) {
-      console.error('[PLAYLIST SUBMIT OVERALL ERROR]', err);
-      Toast.show({
-        type: 'error',
-        text1: 'Save Failed',
-        text2: err.message || 'Could not update playlist membership.',
-        position: 'top',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const showCardOptionsMenu = () => {
     const options = [
@@ -295,7 +282,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
         onPress: () => {
           const slides = getSlidesForCard(card);
           const idx = slides.findIndex((s) => s.type === 'code');
-          onViewExplanation(idx !== -1 ? idx : 0);
+          onViewExplanation?.(idx !== -1 ? idx : 0);
         },
       },
       {
@@ -303,7 +290,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
         onPress: () => {
           const slides = getSlidesForCard(card);
           const idx = slides.findIndex((s) => s.type === 'dryrun');
-          onViewExplanation(idx !== -1 ? idx : 0);
+          onViewExplanation?.(idx !== -1 ? idx : 0);
         },
       },
       {
@@ -324,164 +311,74 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
   };
 
   return (
-    <View className="flex-1 justify-between bg-transparent h-full pb-2 relative">
-      <Text className="text-[#94A3B8] text-[13px] mb-4">
-        {card.topic} · {card.difficulty}
-        {card.complexity ? ` · ${card.complexity}` : ''}
-      </Text>
-
-      <Text
-        className="text-[#0F172A] font-normal tracking-tight leading-tight mb-5 text-[28px]"
-        numberOfLines={3}
-      >
-        {card.title}
-      </Text>
-
-      <View className="flex-1 justify-start mb-8">
-        <Text className="text-[#64748B] text-[15px] leading-relaxed" numberOfLines={6}>
-          {card.explanation}
-        </Text>
-        <Text className="text-[#94A3B8] text-[13px] mt-4">{slideCount} slides</Text>
-      </View>
-
-      <View className="mt-auto w-full">
-        <TouchableOpacity
-          onPress={() => onViewExplanation()}
-          activeOpacity={0.92}
-          className="py-4 rounded-[22px] flex-row items-center justify-center gap-1 bg-[#8B5CF6] shadow-md shadow-violet-500/20 active:scale-[0.98]"
-          style={{
-            shadowColor: '#8B5CF6',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.15,
-            shadowRadius: 12,
-            elevation: 2,
-            width: '82%',
-          }}
-        >
-          <Text className="text-white text-[15px] font-medium tracking-tight">View explanation</Text>
-          <ChevronRight color="#ffffff" size={16} strokeWidth={2.5} />
-        </TouchableOpacity>
-      </View>
-
-      <View className="absolute right-0 bottom-4 items-center gap-4 z-50">
-        <TouchableOpacity onPress={() => handleProgressUpdate('favorite')} className="items-center active:scale-90">
-          <View className="bg-white/95 p-3 rounded-full border border-slate-100/50 shadow-md">
-            <Heart 
-              color={
-                (!!card.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes')) 
-                  ? "#ef4444" 
-                  : "#64748B"
-              } 
-              fill={
-                (!!card.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes')) 
-                  ? "#ef4444" 
-                  : "transparent"
-              } 
-              size={20} 
-            />
+    <View className="flex-1 justify-between bg-transparent h-full pb-6 pr-14">
+      <View>
+        {/* Modern Apple-style Capsule Tags */}
+        <View className="flex-row flex-wrap gap-2 mb-5 items-center">
+          <View className="px-3 py-1 rounded-full bg-violet-50 border border-violet-100/80">
+            <Text className="text-violet-700 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
           </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={onToggleWatchLater} className="items-center active:scale-90">
-          <View className="bg-white/95 p-3 rounded-full border border-slate-100/50 shadow-md">
-            <Clock color={isWatchLater ? "#3b82f6" : "#64748B"} size={20} strokeWidth={2.25} />
+          <View className={`px-3 py-1 rounded-full ${
+            card.difficulty === 'Easy' ? 'bg-emerald-50 border border-emerald-100' :
+            card.difficulty === 'Medium' ? 'bg-amber-50 border border-amber-100' :
+            'bg-rose-50 border border-rose-100'
+          }`}>
+            <Text className={`text-[10px] font-extrabold uppercase tracking-wider ${
+              card.difficulty === 'Easy' ? 'text-emerald-700' :
+              card.difficulty === 'Medium' ? 'text-amber-700' :
+              'text-rose-700'
+            }`}>{card.difficulty}</Text>
           </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => { lightHaptic(); setShowPlaylistPicker(true); }} className="items-center active:scale-90">
-          <View className="bg-white/95 p-3 rounded-full border border-slate-100/50 shadow-md">
-            <ListMusic color="#64748B" size={20} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={showCardOptionsMenu} className="items-center active:scale-90">
-          <View className="bg-white/95 p-3 rounded-full border border-slate-100/50 shadow-md">
-            <MoreVertical color="#64748B" size={20} />
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* Playlist Picker */}
-      <Modal visible={showPlaylistPicker} transparent animationType="fade">
-        <View className="flex-1 bg-[#0F172A]/40 justify-end p-4">
-          <View
-            className="w-full rounded-[28px] p-6 border border-slate-100 shadow-2xl"
-            style={{ backgroundColor: 'rgba(255,255,255,0.98)' }}
-          >
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-[#0F172A] text-[17px] font-bold tracking-tight">Add to playlist</Text>
-              {membershipLoading && <ActivityIndicator size="small" color="#8B5CF6" />}
-              <TouchableOpacity onPress={() => setShowPlaylistPicker(false)} className="p-1 ml-auto bg-slate-100 rounded-full">
-                <X color="#94A3B8" size={16} strokeWidth={2.5} />
-              </TouchableOpacity>
+          {card.complexity && (
+            <View className="px-3 py-1 rounded-full bg-slate-50 border border-slate-200/60">
+              <Text className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</Text>
             </View>
-
-            <ScrollView className="max-h-[250px] mb-3" showsVerticalScrollIndicator={false}>
-              {playlists
-                .filter((p) => p.id !== 'likes' && p.id !== 'watch-later')
-                .map((playlist) => {
-                  const isAdded = !!tempMembership[playlist.id];
-                  const activeColor = playlist.color1 || '#8B5CF6';
-                  return (
-                    <TouchableOpacity
-                      key={playlist.id}
-                      activeOpacity={0.7}
-                      onPress={() => {
-                        lightHaptic();
-                        setTempMembership((prev) => ({
-                          ...prev,
-                          [playlist.id]: !isAdded,
-                        }));
-                      }}
-                      style={{
-                        borderColor: isAdded ? activeColor : 'rgba(226, 232, 240, 0.8)',
-                        backgroundColor: isAdded ? `${activeColor}0A` : '#F8FAFC',
-                        borderWidth: 1.5,
-                      }}
-                      className="flex-row items-center justify-between p-4 mb-2.5 rounded-2xl active:opacity-90 transition-all duration-200"
-                    >
-                      <View className="flex-row items-center gap-3">
-                        <ListMusic color={activeColor} size={18} strokeWidth={2.5} />
-                        <Text className="text-[#0F172A] text-[14px] font-semibold tracking-tight">{playlist.name}</Text>
-                      </View>
-                      <View
-                        style={{
-                          borderColor: isAdded ? activeColor : '#E2E8F0',
-                          backgroundColor: isAdded ? activeColor : 'transparent',
-                          borderWidth: 1.5,
-                        }}
-                        className="w-5 h-5 rounded-full items-center justify-center"
-                      >
-                        {isAdded && <Check color="#fff" size={11} strokeWidth={3} />}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              {playlists.filter(p => p.id !== 'likes' && p.id !== 'watch-later').length === 0 && (
-                <Text className="text-[#94A3B8] text-[14px] text-center py-4">
-                  Create a playlist in My Space first.
-                </Text>
-              )}
-            </ScrollView>
-
-            <TouchableOpacity
-              onPress={handleSubmitPlaylists}
-              disabled={playlists.filter(p => p.id !== 'likes' && p.id !== 'watch-later').length === 0 || isSubmitting}
-              style={{
-                backgroundColor: playlists.filter(p => p.id !== 'likes' && p.id !== 'watch-later').length > 0 ? '#8B5CF6' : '#CBD5E1',
-                opacity: isSubmitting ? 0.8 : 1,
-              }}
-              className="w-full py-4 rounded-2xl items-center justify-center flex-row gap-2 active:scale-[0.99] shadow-md shadow-violet-500/10"
-            >
-              {isSubmitting ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text className="text-white font-semibold text-[15px]">Save to Playlists</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
-      </Modal>
+
+        <Text
+          className="text-slate-900 font-extrabold tracking-tighter leading-tight mb-5 text-[28px]"
+          numberOfLines={3}
+        >
+          {card.title}
+        </Text>
+
+        <ScrollView 
+          showsVerticalScrollIndicator={false} 
+          className="max-h-[50%] mb-4"
+        >
+          <Text className="text-slate-600 text-[15px] leading-relaxed">
+            {card.explanation}
+          </Text>
+        </ScrollView>
+      </View>
+
+      {/* Redesigned Pulsing Interactive Walkthrough CTA */}
+      <Animated.View style={ctaAnimatedStyle} className="mt-auto w-full">
+        <Pressable
+          onPressIn={() => {
+            ctaScale.value = withSpring(0.96, { damping: 10, stiffness: 350 });
+          }}
+          onPressOut={() => {
+            ctaScale.value = withSpring(1, { damping: 10, stiffness: 350 });
+          }}
+          onPress={() => {
+            if (onViewExplanation) {
+              lightHaptic();
+              onViewExplanation(1);
+            }
+          }}
+          className="flex-row items-center gap-2.5 py-3.5 bg-violet-50/60 rounded-2xl px-5 border border-violet-100/50 shadow-sm shadow-violet-100/10"
+        >
+          <View className="w-2.5 h-2.5 rounded-full bg-violet-500 items-center justify-center">
+            <View className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-ping absolute" />
+          </View>
+          <Text className="text-violet-700 text-xs font-black tracking-wider uppercase">
+            Swipe left for Walkthrough · {slideCount} slides
+          </Text>
+          <ChevronRight color="#8B5CF6" size={15} strokeWidth={3} style={{ marginLeft: 'auto' }} />
+        </Pressable>
+      </Animated.View>
     </View>
   );
 }, (prevProps, nextProps) => {

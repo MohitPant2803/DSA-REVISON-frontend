@@ -3,7 +3,6 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   Alert,
   RefreshControl,
 } from 'react-native';
@@ -38,6 +37,89 @@ import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { SpringPressable } from '@/components/SpringPressable';
 
 const SURFACE = 'rgba(255,255,255,0.82)';
+
+// 1. Memoized Playlist Card with Premium Spring Feedback
+interface PlaylistCardProps {
+  playlist: any;
+  onPress: () => void;
+}
+
+const PlaylistCardComponent = ({ playlist, onPress }: PlaylistCardProps) => {
+  const loops = playlist.completedLoops || 0;
+  const isLikes = playlist.id === 'likes';
+  const isWatchLater = playlist.id === 'watch-later';
+
+  return (
+    <SpringPressable
+      onPress={onPress}
+      className="p-5 rounded-[24px] w-[152px] border border-slate-100/60"
+      style={{ backgroundColor: SURFACE }}
+    >
+      {isLikes ? (
+        <Heart color="#f43f5e" fill="#f43f5e" size={17} strokeWidth={1.75} />
+      ) : isWatchLater ? (
+        <Clock color="#3b82f6" size={17} strokeWidth={1.75} />
+      ) : (
+        <ListMusic color={playlist.color1} size={17} strokeWidth={1.75} />
+      )}
+      <View className="flex-row items-center mt-4 mb-0.5">
+        <Text className="text-[#0F172A] font-normal text-[15px] flex-1" numberOfLines={2}>
+          {playlist.name}
+        </Text>
+        {loops > 0 && (
+          <View className="bg-violet-100 px-1.5 py-0.5 rounded-full ml-1">
+            <Text className="text-violet-600 text-[8px] font-bold">x{loops}</Text>
+          </View>
+        )}
+      </View>
+      <Text className="text-[#94A3B8] text-[13px]">{playlist.itemCount} cards</Text>
+    </SpringPressable>
+  );
+};
+
+const PlaylistCard = React.memo(PlaylistCardComponent, (prev, next) => {
+  return (
+    prev.playlist.id === next.playlist.id &&
+    prev.playlist.name === next.playlist.name &&
+    prev.playlist.itemCount === next.playlist.itemCount &&
+    prev.playlist.completedLoops === next.playlist.completedLoops &&
+    prev.playlist.color1 === next.playlist.color1
+  );
+});
+
+// 2. Memoized Recent Revision Card with Premium Spring Feedback
+interface RecentRevisionCardProps {
+  entry: any;
+  onPress: () => void;
+}
+
+const RecentRevisionCardComponent = ({ entry, onPress }: RecentRevisionCardProps) => {
+  if (!entry?.card?.title) return null;
+  return (
+    <SpringPressable
+      onPress={onPress}
+      className="flex-row items-center justify-between p-5 mb-2.5 rounded-[22px] border border-slate-100/60"
+      style={{ backgroundColor: SURFACE }}
+    >
+      <View className="flex-1 pr-4">
+        <Text className="text-[#94A3B8] text-[13px] mb-0.5">{entry.card.topic}</Text>
+        <Text className="text-[#0F172A] text-[16px] font-normal" numberOfLines={1}>
+          {entry.card.title}
+        </Text>
+      </View>
+      <ChevronRight color="#CBD5E1" size={18} strokeWidth={1.75} />
+    </SpringPressable>
+  );
+};
+
+const RecentRevisionCard = React.memo(RecentRevisionCardComponent, (prev, next) => {
+  return (
+    prev.entry.progressId === next.entry.progressId &&
+    prev.entry.card?._id === next.entry.card?._id &&
+    prev.entry.card?.title === next.entry.card?.title &&
+    prev.entry.card?.topic === next.entry.card?.topic
+  );
+});
 
 export default function LearnScreen() {
   useAppBackHandler();
@@ -141,8 +223,8 @@ export default function LearnScreen() {
           Good to see you, {firstName}
         </Text>
 
-        {/* 1. Continue Learning */}
-        {stats && (
+        {/* 1. Continue Learning Section with Premium Netflix Skeleton */}
+        {stats ? (
           <View className="mb-12">
             <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
               Continue Learning
@@ -160,12 +242,28 @@ export default function LearnScreen() {
               </Text>
               <SpringPressable
                 onPress={() => router.push('/(protected)/(tabs)/reels')}
-                className="flex-row items-center self-start rounded-full px-6 py-3.5 active:opacity-90"
+                className="flex-row items-center self-start rounded-full px-6 py-3.5"
                 style={{ backgroundColor: '#8B5CF6' }}
               >
                 <Text className="text-white font-normal text-[15px] mr-1.5">Resume</Text>
                 <ArrowRight size={15} color="#ffffff" strokeWidth={2} />
               </SpringPressable>
+            </View>
+          </View>
+        ) : (
+          <View className="mb-12">
+            <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
+              Continue Learning
+            </Text>
+            <View
+              className="rounded-[28px] border border-slate-100/60 p-7 h-[178px] justify-between"
+              style={{ backgroundColor: SURFACE }}
+            >
+              <View>
+                <View className="h-4.5 w-36 bg-slate-100/80 rounded-full mb-3" />
+                <View className="h-6 w-56 bg-slate-100/80 rounded-full" />
+              </View>
+              <View className="h-[48px] w-[114px] bg-slate-100/80 rounded-full" />
             </View>
           </View>
         )}
@@ -181,7 +279,7 @@ export default function LearnScreen() {
           {canManageContent && (
             <SpringPressable
               onPress={openCreate}
-              className="flex-row items-center justify-center rounded-[22px] py-3.5 mb-5 border border-slate-100 active:opacity-90"
+              className="flex-row items-center justify-center rounded-[22px] py-3.5 mb-5 border border-slate-100"
               style={{ backgroundColor: SURFACE }}
             >
               <Plus color="#8B5CF6" size={16} strokeWidth={2} />
@@ -257,89 +355,69 @@ export default function LearnScreen() {
           })}
         </View>
 
-        {/* 3. My Space */}
+        {/* 3. My Space Playlists with Apple Spring Feedback */}
         {playlists.length > 0 && (
           <View className="mb-12">
             <View className="flex-row items-center justify-between mb-4">
               <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight">My Space</Text>
-              <TouchableOpacity onPress={() => router.push('/(protected)/(tabs)/personal')}>
+              <SpringPressable onPress={() => router.push('/(protected)/(tabs)/personal')}>
                 <Text className="text-[#8B5CF6] text-[15px] font-normal">See all</Text>
-              </TouchableOpacity>
+              </SpringPressable>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-              {playlists.slice(0, 6).map((pl) => {
-                const loops = pl.completedLoops || 0;
-                const isLikes = pl.id === 'likes';
-                const isWatchLater = pl.id === 'watch-later';
-                return (
-                  <TouchableOpacity
-                    key={pl.id}
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      setActivePlaylistId(pl.id);
-                      router.push('/(protected)/(tabs)/reels');
-                    }}
-                    className="p-5 rounded-[24px] w-[152px] border border-slate-100/60"
-                    style={{ backgroundColor: SURFACE }}
-                  >
-                    {isLikes ? (
-                      <Heart color="#f43f5e" fill="#f43f5e" size={17} strokeWidth={1.75} />
-                    ) : isWatchLater ? (
-                      <Clock color="#3b82f6" size={17} strokeWidth={1.75} />
-                    ) : (
-                      <ListMusic color={pl.color1} size={17} strokeWidth={1.75} />
-                    )}
-                    <View className="flex-row items-center mt-4 mb-0.5">
-                      <Text className="text-[#0F172A] font-normal text-[15px] flex-1" numberOfLines={2}>
-                        {pl.name}
-                      </Text>
-                      {loops > 0 && (
-                        <View className="bg-violet-100 px-1.5 py-0.5 rounded-full ml-1">
-                          <Text className="text-violet-600 text-[8px] font-bold">x{loops}</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text className="text-[#94A3B8] text-[13px]">{pl.itemCount} cards</Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {playlists.slice(0, 6).map((pl) => (
+                <PlaylistCard
+                  key={pl.id}
+                  playlist={pl}
+                  onPress={() => {
+                    setActivePlaylistId(pl.id);
+                    router.push('/(protected)/(tabs)/reels');
+                  }}
+                />
+              ))}
             </ScrollView>
           </View>
         )}
 
-        {/* 4. Recent Revision */}
-        {stats?.recentlyRevised && stats.recentlyRevised.length > 0 && (
+        {/* 4. Recent Revision Section with Premium Netflix Skeleton */}
+        {!stats ? (
           <View className="mb-8">
             <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
               Recent Revision
             </Text>
-            {stats.recentlyRevised.slice(0, 3).map((entry) => {
-              if (!entry?.card?.title) return null;
-              return (
-              <TouchableOpacity
+            {[1, 2, 3].map((i) => (
+              <View
+                key={i}
+                className="flex-row items-center justify-between p-5 mb-2.5 rounded-[22px] border border-slate-100/60 h-[78px]"
+                style={{ backgroundColor: SURFACE }}
+              >
+                <View className="flex-1 pr-4">
+                  <View className="h-3 w-20 bg-slate-100/80 rounded-full mb-2" />
+                  <View className="h-4.5 w-44 bg-slate-100/80 rounded-full" />
+                </View>
+                <View className="w-5 h-5 rounded-full bg-slate-100/80 mr-1" />
+              </View>
+            ))}
+          </View>
+        ) : stats.recentlyRevised && stats.recentlyRevised.length > 0 ? (
+          <View className="mb-8">
+            <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
+              Recent Revision
+            </Text>
+            {stats.recentlyRevised.slice(0, 3).map((entry) => (
+              <RecentRevisionCard
                 key={entry.progressId}
-                activeOpacity={0.9}
+                entry={entry}
                 onPress={() =>
                   router.push({
                     pathname: '/(protected)/(tabs)/reels',
                     params: { search: entry.card.title },
                   })
                 }
-                className="flex-row items-center justify-between p-5 mb-2.5 rounded-[22px] border border-slate-100/60"
-                style={{ backgroundColor: SURFACE }}
-              >
-                <View className="flex-1 pr-4">
-                  <Text className="text-[#94A3B8] text-[13px] mb-0.5">{entry.card.topic}</Text>
-                  <Text className="text-[#0F172A] text-[16px] font-normal" numberOfLines={1}>
-                    {entry.card.title}
-                  </Text>
-                </View>
-                <ChevronRight color="#CBD5E1" size={18} strokeWidth={1.75} />
-              </TouchableOpacity>
-            );
-            })}
+              />
+            ))}
           </View>
-        )}
+        ) : null}
       </ScrollView>
 
       <FolderFormModal

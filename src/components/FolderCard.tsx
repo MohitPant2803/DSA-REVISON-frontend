@@ -32,7 +32,7 @@ interface FolderCardProps {
   completedLoops?: number;
 }
 
-export function FolderCard({ folder, onPress, onLongPress, completedLoops = 0 }: FolderCardProps) {
+function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0 }: FolderCardProps) {
   const IconComponent = ICON_MAP[folder.icon] || Folder;
   const cardCount = folder.cardCount ?? 0;
   const accent = folder.color || '#8B5CF6';
@@ -87,3 +87,15 @@ export function FolderCard({ folder, onPress, onLongPress, completedLoops = 0 }:
     </SpringPressable>
   );
 }
+
+export const FolderCard = React.memo(FolderCardComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.completedLoops === nextProps.completedLoops &&
+    prevProps.folder._id === nextProps.folder._id &&
+    prevProps.folder.title === nextProps.folder.title &&
+    prevProps.folder.description === nextProps.folder.description &&
+    prevProps.folder.color === nextProps.folder.color &&
+    prevProps.folder.icon === nextProps.folder.icon &&
+    prevProps.folder.cardCount === nextProps.folder.cardCount
+  );
+});

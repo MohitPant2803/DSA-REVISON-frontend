@@ -12,6 +12,10 @@ import {
   ScrollView,
   Switch,
   Modal,
+  Image,
+  TextInput,
+  Animated as RNAnimated,
+  FlatList,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import {
@@ -27,14 +31,18 @@ import {
   RotateCcw,
   Sliders,
   Settings2,
+  BrainCircuit,
+  Lock,
 } from 'lucide-react-native';
 import Svg, { Circle } from 'react-native-svg';
-import { FlashList } from '@shopify/flash-list';
-const TypedFlashList = FlashList as any;
+import { Image as ExpoImage } from 'expo-image';
 import { useGetRevisionCards, IPopulatedRevisionCard, ISlide } from '@/hooks/useRevisionCards';
 import { useGetFolders } from '@/hooks/useFolders';
 import { RevisionCard } from './RevisionCard';
 import { useUpdateLastViewedCard, useFolderLoops } from '@/services/useUserProgress';
+import { ReelsSettingsOverlay } from '@/components/SettingsOverlay';
+import { PlaylistPickerModal } from '@/components/PlaylistPickerModal';
+import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 import { useResumeStore } from '@/store/useResumeStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useProgressSync } from '@/hooks/useProgressSync';
@@ -48,8 +56,11 @@ import Animated, {
   useAnimatedProps,
   withTiming,
   withSpring,
+  withSequence,
   interpolate,
   runOnJS,
+  SharedValue,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import Toast from 'react-native-toast-message';
 import { useUpdateCardProgress } from '@/services/useProgress';
@@ -59,14 +70,25 @@ import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { canModifyItem, UserRole } from '@/utils/permissions';
 import { normalizeParam } from '@/utils/routeParams';
-import { usePlaylists, usePlaylistCards, useTogglePlaylistItem } from '@/hooks/usePlaylists';
+import { usePlaylists, usePlaylistCards, useTogglePlaylistItem, useCreatePlaylist } from '@/hooks/usePlaylists';
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import * as sessionQueueService from '@/services/sessionQueueService';
 import * as userCardStateService from '@/services/userCardStateService';
 import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
 
 const { width, height } = Dimensions.get('window');
+const CARD_WIDTH = width * 0.97;
 const PAGE_SIZE = 15; // Increased page size for smoother continuous reel buffering
+
+// Premium physical spring snapping parameters (Spotify / Apple physics)
+const SPRING_CONFIG = {
+  damping: 28,
+  stiffness: 160,
+  mass: 0.8,
+  overshootClamping: true,
+  restDisplacementThreshold: 0.01,
+  restSpeedThreshold: 2,
+};
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -78,8 +100,14 @@ const lightHaptic = () => {
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
+interface ProgressRingProps {
+  radius?: number;
+  stroke?: number;
+  progress?: number;
+}
+
 // Premium circular progress ring around loop count
-const ProgressRing = ({ radius = 18, stroke = 3, progress = 0 }) => {
+const ProgressRing = React.memo(({ radius = 18, stroke = 3, progress = 0 }: ProgressRingProps) => {
   const strokeWidth = stroke;
   const innerRadius = radius - strokeWidth / 2;
   const circumference = 2 * Math.PI * innerRadius;
@@ -114,7 +142,7 @@ const ProgressRing = ({ radius = 18, stroke = 3, progress = 0 }) => {
       />
     </Svg>
   );
-};
+});
 
 const formatTime = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
@@ -134,13 +162,774 @@ const IndicatorDot = ({ isActive }: { isActive: boolean }) => (
   />
 );
 
+// High-fidelity elegant Apple-style Breathing Opacity Skeleton using Native Animated Driver
+const BreathingOpacitySkeleton = ({ style }: { style: any }) => {
+  const opacity = React.useRef(new RNAnimated.Value(0.35)).current;
+
+  React.useEffect(() => {
+    const animation = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(opacity, {
+          toValue: 0.75,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+        RNAnimated.timing(opacity, {
+          toValue: 0.35,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [opacity]);
+
+  return <RNAnimated.View style={[style, { opacity }]} />;
+};
+
+interface ReelItemSkeletonProps {
+  cardHeight: number;
+  width: number;
+}
+
+// Complete mock visual structure of a Reel Card matching the live layout perfectly
+const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProps) => {
+  const cardWidth = width * 0.97;
+  return (
+    <View
+      style={[
+        styles.cardBase,
+        {
+          height: cardHeight,
+          marginBottom: 16,
+          alignSelf: 'center',
+          width: cardWidth,
+          overflow: 'hidden',
+          padding: 24,
+          paddingTop: 64,
+          paddingBottom: 24,
+          justifyContent: 'space-between',
+        },
+      ]}
+    >
+      <View style={{ gap: 20 }}>
+        {/* Mock Badge Header capsules */}
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <BreathingOpacitySkeleton style={{ width: 64, height: 20, borderRadius: 10, backgroundColor: 'rgba(139, 92, 246, 0.15)' }} />
+          <BreathingOpacitySkeleton style={{ width: 72, height: 20, borderRadius: 10, backgroundColor: 'rgba(16, 185, 129, 0.15)' }} />
+          <BreathingOpacitySkeleton style={{ width: 52, height: 20, borderRadius: 10, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
+        </View>
+
+        {/* Mock Title Multi-line layout */}
+        <View style={{ gap: 8, marginTop: 12 }}>
+          <BreathingOpacitySkeleton style={{ width: '85%', height: 28, borderRadius: 8, backgroundColor: 'rgba(15, 23, 42, 0.1)' }} />
+          <BreathingOpacitySkeleton style={{ width: '65%', height: 28, borderRadius: 8, backgroundColor: 'rgba(15, 23, 42, 0.1)' }} />
+        </View>
+
+        {/* Mock Explanation block */}
+        <View style={{ gap: 6, marginTop: 12 }}>
+          <BreathingOpacitySkeleton style={{ width: '95%', height: 14, borderRadius: 4, backgroundColor: 'rgba(15, 23, 42, 0.06)' }} />
+          <BreathingOpacitySkeleton style={{ width: '90%', height: 14, borderRadius: 4, backgroundColor: 'rgba(15, 23, 42, 0.06)' }} />
+          <BreathingOpacitySkeleton style={{ width: '75%', height: 14, borderRadius: 4, backgroundColor: 'rgba(15, 23, 42, 0.06)' }} />
+        </View>
+      </View>
+
+      {/* Mock lower walkthrough bar */}
+      <View style={{ marginTop: 'auto', width: '100%' }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            height: 48,
+            borderRadius: 16,
+            backgroundColor: 'rgba(139, 92, 246, 0.05)',
+            borderWidth: 1,
+            borderColor: 'rgba(139, 92, 246, 0.08)',
+            paddingHorizontal: 20,
+          }}
+        >
+          <BreathingOpacitySkeleton style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(139, 92, 246, 0.5)' }} />
+          <BreathingOpacitySkeleton style={{ width: 180, height: 12, borderRadius: 3, backgroundColor: 'rgba(139, 92, 246, 0.15)', marginLeft: 10 }} />
+          <BreathingOpacitySkeleton style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: 'rgba(139, 92, 246, 0.3)', marginLeft: 'auto' }} />
+        </View>
+      </View>
+
+      {/* Mock vertical Action Rail on the right side */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 8,
+          bottom: 70,
+          alignItems: 'center',
+          backgroundColor: 'transparent',
+          gap: 16,
+          width: 42,
+        }}
+      >
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
+      </View>
+
+    </View>
+  );
+});
+
+interface ReelsActionRailProps {
+  cleanId: string;
+  item: IPopulatedRevisionCard;
+  isFavorite: boolean;
+  isDifficult: boolean;
+  isWatchLater: boolean;
+  onCardStateUpdate: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
+  onToggleWatchLater: (cleanId: string) => void;
+  onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
+  onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
+  scrollHorizontal: (idx?: number) => void;
+  isGuest: boolean;
+}
+
+const ReelsActionRail = React.memo(({
+  cleanId,
+  item,
+  isFavorite,
+  isDifficult,
+  isWatchLater,
+  onCardStateUpdate,
+  onToggleWatchLater,
+  onPlaylistPickerTrigger,
+  onMoreOptionsTrigger,
+  scrollHorizontal,
+  isGuest,
+}: ReelsActionRailProps) => {
+  const handlePress = (action: () => void) => {
+    lightHaptic();
+    action();
+  };
+
+  const completedCardIds = useTrackingStore((state) => state.completedCardIds);
+  const toggleCardCompleted = useTrackingStore((state) => state.toggleCardCompleted);
+  const isTicked = !!completedCardIds[cleanId];
+
+  const watchScale = useSharedValue(1);
+  const tickScale = useSharedValue(1);
+
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      return;
+    }
+    watchScale.value = withSequence(
+      withSpring(1.12, { damping: 18, stiffness: 180 }),
+      withSpring(1, { damping: 15, stiffness: 120 })
+    );
+  }, [isWatchLater]);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    tickScale.value = withSequence(
+      withSpring(1.12, { damping: 18, stiffness: 180 }),
+      withSpring(1, { damping: 15, stiffness: 120 })
+    );
+  }, [isTicked]);
+
+  const watchStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: watchScale.value }],
+  }));
+
+  const tickStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: tickScale.value }],
+  }));
+
+  const handleTickPress = async () => {
+    lightHaptic();
+    toggleCardCompleted(cleanId);
+    
+    if (!isGuest) {
+      try {
+        await userCardStateService.incrementRevision(cleanId);
+      } catch (err) {
+        console.error('[Increment Revision Error]', err);
+      }
+    }
+
+    Toast.show({
+      type: 'success',
+      text1: isTicked ? 'Removed revision mark' : 'Revised 🎯',
+      text2: isTicked ? 'Revision state reverted.' : 'Revision marked successfully.',
+      position: 'top',
+      visibilityTime: 1200,
+    });
+  };
+
+  return (
+    <View 
+      style={{
+        position: 'absolute',
+        right: 8,
+        bottom: 70,
+        alignItems: 'center',
+        backgroundColor: 'transparent',
+        gap: 12,
+        zIndex: 50,
+      }}
+    >
+      {/* Primary check/tick button: Elegant emerald check icon */}
+      <TouchableOpacity 
+        onPress={handleTickPress}
+        activeOpacity={0.65}
+        className="p-2.5 rounded-full active:scale-75"
+        style={{
+          backgroundColor: isTicked ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+          borderWidth: 1,
+          borderColor: isTicked ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+        }}
+        accessibilityLabel={isTicked ? "Mark as Uncompleted" : "Mark as Completed"}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isTicked }}
+      >
+        <Animated.View style={tickStyle}>
+          <Check 
+            color={isTicked ? "#10B981" : "#64748B"} 
+            size={20} 
+            strokeWidth={isTicked ? 3.5 : 2} 
+          />
+        </Animated.View>
+      </TouchableOpacity>
+
+      {/* Revise Later Button (Watch Later) */}
+      <TouchableOpacity 
+        onPress={() => handlePress(() => onToggleWatchLater(cleanId))}
+        activeOpacity={0.65}
+        className="p-2 rounded-full active:scale-75"
+        accessibilityLabel={isWatchLater ? "Remove from Revise Later" : "Add to Revise Later"}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isWatchLater }}
+      >
+        <Animated.View style={watchStyle}>
+          <Clock 
+            color={isWatchLater ? "#3B82F6" : "#64748B"} 
+            size={18} 
+            strokeWidth={2.25} 
+          />
+        </Animated.View>
+      </TouchableOpacity>
+
+      {/* Add to Playlist Button */}
+      <TouchableOpacity 
+        onPress={() => handlePress(() => onPlaylistPickerTrigger(item))}
+        activeOpacity={0.65}
+        className="p-2 rounded-full active:scale-75"
+        accessibilityLabel="Add to Playlist"
+        accessibilityRole="button"
+      >
+        <ListMusic color="#64748B" size={18} strokeWidth={2} />
+      </TouchableOpacity>
+    </View>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.cleanId === nextProps.cleanId &&
+    prevProps.isFavorite === nextProps.isFavorite &&
+    prevProps.isDifficult === nextProps.isDifficult &&
+    prevProps.isWatchLater === nextProps.isWatchLater &&
+    prevProps.item._id === nextProps.item._id
+  );
+});
+
+interface ReelItemProps {
+  item: IPopulatedRevisionCard;
+  index: number;
+  activeIndex: number;
+  goToNextCard: () => void;
+  goToPrevCard: () => void;
+  cardHeight: number;
+  width: number;
+  isFavorite: boolean;
+  activePlaylistId: string | null;
+  isGuest: boolean;
+  canEdit: boolean;
+  onToggleWatchLater: (cleanId: string) => void;
+  onCardStateUpdate: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
+  onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
+  onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
+}
+
+interface SlideCardWrapperProps {
+  slide: ISlide;
+  indexInDeck: number;
+  activeSlideIndexSV: SharedValue<number>;
+  slideDragX: SharedValue<number>;
+  cardHeight: number;
+  width: number;
+  zIndex: number;
+  renderSlideContent: (slide: ISlide, index: number) => React.ReactNode;
+}
+
+const SlideCardWrapper = React.memo(({
+  slide,
+  indexInDeck,
+  activeSlideIndexSV,
+  slideDragX,
+  cardHeight,
+  width,
+  zIndex,
+  renderSlideContent,
+}: SlideCardWrapperProps) => {
+  const animatedStyle = useAnimatedStyle(() => {
+    const activeIdx = activeSlideIndexSV.value;
+    const delta = indexInDeck - activeIdx;
+
+    // Direct finger tracking for active card (delta === 0)
+    if (delta === 0) {
+      return {
+        transform: [
+          { translateX: slideDragX.value },
+          { translateY: 0 },
+          { scale: 1 },
+          { rotate: '0deg' },
+        ],
+        opacity: 1,
+      };
+    }
+
+    // Next card (preview) – static appearance under active card (no pop animation)
+    if (delta === 1) {
+      return {
+        transform: [
+          { translateX: 0 },
+          { translateY: 0 },
+          { scale: 1 },
+          { rotate: '0deg' },
+        ],
+        opacity: 1,
+      };
+    }
+
+    // Previous card – slides in from the left only on right swipe
+    if (delta === -1) {
+      const translateX = -width + Math.max(0, slideDragX.value);
+      const isVisible = slideDragX.value > 0;
+      return {
+        transform: [
+          { translateX },
+          { translateY: 0 },
+          { scale: 1 },
+          { rotate: '0deg' },
+        ],
+        opacity: isVisible ? 1 : 0,
+      };
+    }
+
+    // All other cards – hidden
+    return { opacity: 0 };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.cardBase,
+        {
+          width: width * 0.97,
+          height: cardHeight,
+          position: 'absolute',
+          paddingHorizontal: 24,
+          paddingTop: 64,
+          paddingBottom: 24,
+          overflow: 'hidden',
+          zIndex,
+        },
+        animatedStyle,
+      ]}
+    >
+      {renderSlideContent(slide, indexInDeck)}
+    </Animated.View>
+  );
+});
+
+const ActiveReelItem = React.memo(({
+  item,
+  index,
+  activeIndex,
+  goToNextCard,
+  goToPrevCard,
+  cardHeight,
+  width,
+  isFavorite,
+  activePlaylistId,
+  isGuest,
+  canEdit,
+  onToggleWatchLater,
+  onCardStateUpdate,
+  onPlaylistPickerTrigger,
+  onMoreOptionsTrigger,
+}: ReelItemProps) => {
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [prevId, setPrevId] = useState(item._id);
+  const { preferences } = useUserPreferencesStore();
+
+  const [prevPrefsKey, setPrevPrefsKey] = useState(
+    `${preferences.hideCertainBlockTypes?.join(',')}-${preferences.explanationFlowOrder?.join(',')}`
+  );
+  
+  const slideDragX = useSharedValue(0);
+  const activeSlideIndexSV = useSharedValue(0);
+  const isTransitioning = useSharedValue(false);
+  const isMounted = useRef(true);
+
+  const currentPrefsKey = `${preferences.hideCertainBlockTypes?.join(',')}-${preferences.explanationFlowOrder?.join(',')}`;
+
+  // Synchronous state and translation value reset on card recycle or preference change
+  if (item._id !== prevId || currentPrefsKey !== prevPrefsKey) {
+    setPrevId(item._id);
+    setPrevPrefsKey(currentPrefsKey);
+    setActiveSlideIndex(0);
+    cancelAnimation(slideDragX);
+    slideDragX.value = 0;
+    activeSlideIndexSV.value = 0;
+    isTransitioning.value = false;
+  }
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      cancelAnimation(slideDragX);
+    };
+  }, [item._id, currentPrefsKey]);
+
+  useEffect(() => {
+    activeSlideIndexSV.value = activeSlideIndex;
+    // Reset translation and transition locks after the index change has been committed to prevent layout jumping/flickering
+    slideDragX.value = 0;
+    isTransitioning.value = false;
+  }, [activeSlideIndex]);
+
+  // Subscribe to watchLater state locally to stabilize parent's renderItem
+  const watchLaterCardIds = useTrackingStore((state) => state.watchLaterCardIds);
+  const cleanId = item._id.split('-loop-')[0];
+  const isWatchLater = watchLaterCardIds.includes(cleanId);
+
+  const slides = useMemo(() => {
+    const baseSlides = getSlidesForCard(item);
+    const introSlide = baseSlides.find(s => s.type === 'intro');
+    let otherSlides = baseSlides.filter(s => s.type !== 'intro');
+    
+    // Filter by preferences.hideCertainBlockTypes
+    if (preferences.hideCertainBlockTypes && preferences.hideCertainBlockTypes.length > 0) {
+      otherSlides = otherSlides.filter(s => s.type ? !preferences.hideCertainBlockTypes.includes(s.type) : true);
+    }
+    
+    // Sort by explanationFlowOrder
+    const order = preferences.explanationFlowOrder || ['intro', 'code', 'dryrun', 'summary'];
+    otherSlides.sort((a, b) => {
+      const idxA = a.type ? order.indexOf(a.type) : -1;
+      const idxB = b.type ? order.indexOf(b.type) : -1;
+      const sortA = idxA === -1 ? 999 : idxA;
+      const sortB = idxB === -1 ? 999 : idxB;
+      return sortA - sortB;
+    });
+    
+    return introSlide ? [introSlide, ...otherSlides] : otherSlides;
+  }, [item, preferences.hideCertainBlockTypes, preferences.explanationFlowOrder]);
+
+  const handleSwipeComplete = () => {
+    if (!isMounted.current) return;
+    
+    // If the reel is no longer active, abort state changes to prevent unmounted/inactive React updates
+    if (index !== activeIndex) {
+      setTimeout(() => {
+        slideDragX.value = 0;
+        isTransitioning.value = false;
+      }, 0);
+      return;
+    }
+    
+    setTimeout(() => {
+      if (isMounted.current) {
+        setActiveSlideIndex((prev) => prev + 1);
+        lightHaptic();
+      }
+    }, 0);
+  };
+
+  const handleSwipePrevComplete = () => {
+    if (!isMounted.current) return;
+    
+    if (index !== activeIndex) {
+      setTimeout(() => {
+        slideDragX.value = 0;
+        isTransitioning.value = false;
+      }, 0);
+      return;
+    }
+    
+    setTimeout(() => {
+      if (isMounted.current) {
+        setActiveSlideIndex((prev) => prev - 1);
+        lightHaptic();
+      }
+    }, 0);
+  };
+
+  // Handle explicit horizontal jump actions (e.g. from menu or explicit buttons)
+  const scrollHorizontal = useCallback((idx?: number) => {
+    const targetIdx = idx ?? 0;
+    if (targetIdx >= 0 && targetIdx < slides.length) {
+      if (isTransitioning.value) return;
+      isTransitioning.value = true;
+      slideDragX.value = 0;
+      setActiveSlideIndex(targetIdx);
+      isTransitioning.value = false;
+      lightHaptic();
+    }
+  }, [slides.length, index, activeIndex]);
+
+  const isDifficult = !!item.isDifficult;
+
+  // Strict direction lock for zero lag horizontal drag
+  const horizontalGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-10, 10])
+    .onStart(() => {
+      if (isTransitioning.value) return;
+    })
+    .onUpdate((event) => {
+      if (isTransitioning.value) return;
+      // Direct physical tracking with zero delayed interpolation
+      slideDragX.value = event.translationX;
+    })
+    .onEnd((event) => {
+      if (isTransitioning.value) return;
+      
+      const SWIPE_THRESHOLD_X = CARD_WIDTH * 0.16;
+      const VELOCITY_THRESHOLD = 350;
+      const transX = slideDragX.value;
+      const velX = event.velocityX;
+
+      if (transX < 0) {
+        // Dragging Left -> Move Forward to Next Slide
+        if (activeSlideIndex < slides.length - 1 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
+          isTransitioning.value = true;
+          slideDragX.value = withSpring(
+            -width * 1.3,
+            {
+              damping: 20,
+              stiffness: 360,
+              mass: 0.35,
+            },
+            (finished) => {
+              if (finished) {
+                runOnJS(handleSwipeComplete)();
+              }
+            }
+          );
+        } else {
+          isTransitioning.value = true;
+          slideDragX.value = withSpring(
+            0,
+            { damping: 20, stiffness: 360, mass: 0.35 },
+            () => {
+              isTransitioning.value = false;
+            }
+          );
+        }
+      } else {
+        // Dragging Right -> Move Backward to Previous Slide
+        if (activeSlideIndex > 0 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
+          isTransitioning.value = true;
+          slideDragX.value = withSpring(
+            width,
+            {
+              damping: 20,
+              stiffness: 360,
+              mass: 0.35,
+            },
+            (finished) => {
+              if (finished) {
+                runOnJS(handleSwipePrevComplete)();
+              }
+            }
+          );
+        } else {
+          isTransitioning.value = true;
+          slideDragX.value = withSpring(
+            0,
+            { damping: 20, stiffness: 360, mass: 0.35 },
+            () => {
+              isTransitioning.value = false;
+            }
+          );
+        }
+      }
+    });
+
+  const renderSlideContent = (slide: typeof slides[0], indexInDeck: number) => {
+    if (indexInDeck === 0) {
+      return (
+        <ConceptCardPreview
+          card={item}
+          activePlaylistId={activePlaylistId}
+          onViewExplanation={scrollHorizontal}
+        />
+      );
+    }
+    return (
+      <RevisionCard
+        slide={{
+          card: item,
+          slideIndex: indexInDeck,
+          totalSlides: slides.length,
+          type: slide.type,
+          headline: slide.headline,
+          body: slide.body,
+          code: slide.code,
+        }}
+        currentIndex={indexInDeck}
+        totalCount={slides.length}
+      />
+    );
+  };
+
+  return (
+    <View 
+      style={{ 
+        height: cardHeight, 
+        alignSelf: 'center', 
+        width: CARD_WIDTH, 
+        overflow: 'visible',
+        backgroundColor: 'transparent',
+        marginBottom: 16,
+      }}
+    >
+      <GestureDetector gesture={horizontalGesture}>
+        <View
+          style={{
+            width: CARD_WIDTH,
+            height: cardHeight,
+            position: 'relative',
+          }}
+        >
+          {slides.map((slide, indexInDeck) => {
+            const delta = indexInDeck - activeSlideIndex;
+            if (Math.abs(delta) > 1) return null;
+
+            let zIndex = 0;
+            if (delta === 0) zIndex = 2;
+            else if (delta === 1) zIndex = 1;
+            else if (delta === -1) zIndex = 3;
+
+            return (
+              <SlideCardWrapper
+                key={`slide-${indexInDeck}`}
+                slide={slide}
+                indexInDeck={indexInDeck}
+                activeSlideIndexSV={activeSlideIndexSV}
+                slideDragX={slideDragX}
+                cardHeight={cardHeight}
+                width={width}
+                zIndex={zIndex}
+                renderSlideContent={renderSlideContent}
+              />
+            );
+          })}
+        </View>
+      </GestureDetector>
+
+      {/* Premium Glassmorphic Vertical Action Rail */}
+      <ReelsActionRail
+        cleanId={cleanId}
+        item={item}
+        isFavorite={isFavorite}
+        isDifficult={isDifficult}
+        isWatchLater={isWatchLater}
+        onCardStateUpdate={onCardStateUpdate}
+        onToggleWatchLater={onToggleWatchLater}
+        onPlaylistPickerTrigger={onPlaylistPickerTrigger}
+        onMoreOptionsTrigger={onMoreOptionsTrigger}
+        scrollHorizontal={scrollHorizontal}
+        isGuest={isGuest}
+      />
+    </View>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.item._id === nextProps.item._id &&
+    prevProps.activeIndex === nextProps.activeIndex &&
+    prevProps.index === nextProps.index &&
+    prevProps.isFavorite === nextProps.isFavorite &&
+    prevProps.cardHeight === nextProps.cardHeight &&
+    prevProps.width === nextProps.width &&
+    prevProps.isGuest === nextProps.isGuest &&
+    prevProps.canEdit === nextProps.canEdit &&
+    prevProps.activePlaylistId === nextProps.activePlaylistId
+  );
+});
+
+const ReelItem = React.memo((props: ReelItemProps) => {
+  const isActiveReel = props.index === props.activeIndex;
+
+  if (!isActiveReel) {
+    return (
+      <View 
+        style={{ 
+          height: props.cardHeight, 
+          alignSelf: 'center', 
+          width: CARD_WIDTH,
+          marginBottom: 16,
+          backgroundColor: 'transparent',
+        }}
+      >
+        <View
+          style={[
+            styles.cardBase,
+            {
+              width: CARD_WIDTH,
+              height: props.cardHeight,
+              paddingHorizontal: 24,
+              paddingTop: 64,
+              paddingBottom: 24,
+              overflow: 'hidden',
+            }
+          ]}
+        >
+          <ConceptCardPreview
+            card={props.item}
+            activePlaylistId={props.activePlaylistId}
+            onViewExplanation={() => {}}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  return <ActiveReelItem {...props} />;
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.item._id === nextProps.item._id &&
+    prevProps.activeIndex === nextProps.activeIndex &&
+    prevProps.index === nextProps.index &&
+    prevProps.isFavorite === nextProps.isFavorite &&
+    prevProps.cardHeight === nextProps.cardHeight &&
+    prevProps.width === nextProps.width &&
+    prevProps.isGuest === nextProps.isGuest &&
+    prevProps.canEdit === nextProps.canEdit &&
+    prevProps.activePlaylistId === nextProps.activePlaylistId
+  );
+});
+
 export default function ReelsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { canManageContent } = useRole();
+  const { canManageContent, role } = useRole();
   
   // Custom hook for unified resume syncing and loop mutations
   const { syncResumeState, syncLoopCompletion } = useProgressSync();
@@ -162,34 +951,49 @@ export default function ReelsScreen() {
   const searchParam = normalizeParam(params.search);
   const startCardIdParam = normalizeParam(params.startCardId);
 
-  const flashListRef = useRef<any>(null);
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [navState, setNavState] = useState({ activeIndex: 0, prevIdx: -1 });
+  const activeIndex = navState.activeIndex;
+  const prevIdx = navState.prevIdx;
   const shuffledOrderRef = useRef<string[]>([]);
+  const flatListRef = useRef<FlatList>(null);
+  const hasScrolledToInitial = useRef(false);
+  const sessionStartCardId = useRef<string | null>(null);
+  const recentCardIdsRef = useRef<string[]>([]);
 
   const { activePlaylistId, setActivePlaylistId } = useBookmarkStore();
   const { data: playlists = [] } = usePlaylists();
+  const { data: foldersData } = useGetFolders({ limit: 100 });
 
   // Zustand scalable tracking store
-  const {
-    currentMode,
-    infiniteLoop,
-    watchLaterCardIds,
-    sessionStartTime,
-    sessionTotalTime,
-    completedCardsCount,
-    completedCardIds, // Added for stable completion checks
-    loopsCompleted,
-    setMode,
-    setInfiniteLoop,
-    toggleWatchLater,
-    setWatchLater,
-    startSession,
-    updateSessionTime,
-    markCardCompleted,
-    resetSession,
-  } = useTrackingStore();
+  const currentMode = useTrackingStore((state) => state.currentMode);
+  const infiniteLoop = useTrackingStore((state) => state.infiniteLoop);
+  const watchLaterCardIds = useTrackingStore((state) => state.watchLaterCardIds);
+  const loopsCompleted = useTrackingStore((state) => state.loopsCompleted);
+  const sessionTotalTime = useTrackingStore((state) => state.sessionTotalTime);
+  const completedCardsCount = useTrackingStore((state) => state.completedCardsCount);
+
+  const setMode = useTrackingStore((state) => state.setMode);
+  const setInfiniteLoop = useTrackingStore((state) => state.setInfiniteLoop);
+  const toggleWatchLater = useTrackingStore((state) => state.toggleWatchLater);
+  const setWatchLater = useTrackingStore((state) => state.setWatchLater);
+  const startSession = useTrackingStore((state) => state.startSession);
+  const updateSessionTime = useTrackingStore((state) => state.updateSessionTime);
+  const markCardCompleted = useTrackingStore((state) => state.markCardCompleted);
+  const resetSession = useTrackingStore((state) => state.resetSession);
+
+  const activePlaybackName = useMemo(() => {
+    if (activePlaylistId) {
+      if (activePlaylistId === 'likes') return 'Likes';
+      if (activePlaylistId === 'watch-later') return 'Revise Later';
+      return playlists.find((p) => p.id === activePlaylistId)?.name || 'Playlist';
+    }
+    if (folderIdParam) {
+      return foldersData?.results?.find((f: any) => f._id === folderIdParam)?.title || 'Folder';
+    }
+    return 'Reels';
+  }, [activePlaylistId, playlists, folderIdParam, foldersData]);
 
   // SessionQueue playback variables
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -204,8 +1008,8 @@ export default function ReelsScreen() {
 
   const [showRunConfig, setShowRunConfig] = useState(false);
 
-  // Premium static filter button and overlay states
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  // Premium settings overlay state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Resume Engine
   const {
@@ -223,21 +1027,15 @@ export default function ReelsScreen() {
     refetch: refetchPlaylistCards,
   } = usePlaylistCards(activePlaylistId);
 
-  // Local state for fullscreen presentation slider
-  const [activePlacard, setActivePlacard] = useState<IPopulatedRevisionCard | null>(null);
-  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
-  const [isPPTVisible, setIsPPTVisible] = useState(false);
-
-  // Presentation transitions shared values
-  const modalOpacity = useSharedValue(0);
-  const modalScale = useSharedValue(0.92);
-  const slideX = useSharedValue(0);
-  const slideOpacity = useSharedValue(1);
-  const pptDragX = useSharedValue(0);
+  // Local state for playlist picker modal and mutations
+  const [playlistModalCard, setPlaylistModalCard] = useState<IPopulatedRevisionCard | null>(null);
+  const updateProgressMutation = useUpdateCardProgress();
+  const togglePlaylistItem = useTogglePlaylistItem();
+  const { mutate: deleteCard } = useDeleteRevisionCard();
   const viewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bottomTabBarHeight = insets.bottom + 72;
-  const cardHeight = height - insets.top - bottomTabBarHeight - 64; 
+  const cardHeight = (height - insets.top - bottomTabBarHeight) * 0.98; 
 
   // Memoize query object to ensure stable queryKey references in React Query
   const query = useMemo(() => ({
@@ -251,7 +1049,6 @@ export default function ReelsScreen() {
   }), [page, folderIdParam, topicParam, tagsParam, difficultyParam, searchParam]);
 
   const { data, isLoading, isFetching, isError, error, refetch } = useGetRevisionCards(query);
-  const { data: foldersData } = useGetFolders({ limit: 100 });
 
   const { data: folderLoopsData } = useFolderLoops();
   const currentFolderLoops = folderLoopsData?.find((f: any) => f.folderId === folderIdParam)?.completedLoops || 0;
@@ -265,7 +1062,8 @@ export default function ReelsScreen() {
 
   // Sync session timer
   useEffect(() => {
-    if (!sessionStartTime) {
+    const currentStartTime = useTrackingStore.getState().sessionStartTime;
+    if (!currentStartTime) {
       startSession();
     }
     const interval = setInterval(() => {
@@ -401,25 +1199,10 @@ export default function ReelsScreen() {
     return displayedCards;
   }, [isSessionActive, sessionCards, displayedCards, currentMode, watchLaterCardIds]);
 
-  // Memoized adjacent card preloading to ensure zero slide latency
-  const preloadedSlides = useMemo(() => {
-    const preloaded: Record<string, ISlide[]> = {};
-    const indicesToPreload = [activeIndex - 1, activeIndex, activeIndex + 1];
-    indicesToPreload.forEach(idx => {
-      if (idx >= 0 && idx < cardsList.length) {
-        const card = cardsList[idx];
-        if (card && card._id) {
-          preloaded[card._id] = getSlidesForCard(card);
-        }
-      }
-    });
-    return preloaded;
-  }, [activeIndex, cardsList]);
 
-  // Scroll to index 0 on mode changes
+  // Reset index 0 on mode changes
   useEffect(() => {
-    setActiveIndex(0);
-    flashListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    setNavState({ activeIndex: 0, prevIdx: -1 });
   }, [currentMode]);
 
   // Track completed cards per session & mark as viewed
@@ -428,23 +1211,25 @@ export default function ReelsScreen() {
       const activeItem = cardsList[activeIndex];
       if (!activeItem) return;
       const cleanId = activeItem._id.split('-loop-')[0];
-      if (!completedCardIds[cleanId]) {
+      const currentCompletedIds = useTrackingStore.getState().completedCardIds;
+      if (!currentCompletedIds[cleanId]) {
         markCardCompleted(cleanId);
       }
       if (!isGuest) {
         userCardStateService.markViewed(cleanId).catch(console.error);
       }
     }
-  }, [activeIndex, cardsList, completedCardIds, markCardCompleted, isGuest]);
+  }, [activeIndex, cardsList, markCardCompleted, isGuest]);
 
   // Reset standard queries when parameters change
   useEffect(() => {
     hasPromptedResume.current = false;
+    hasScrolledToInitial.current = false;
     startSession(); // Start a fresh session when playback source/folder/playlist changes
     if (!activePlaylistId) {
       setPage(1);
       setAllCards([]);
-      setActiveIndex(0);
+      setNavState({ activeIndex: 0, prevIdx: -1 });
     }
   }, [folderIdParam, topicParam, tagsParam, difficultyParam, searchParam, activePlaylistId, startCardIdParam]);
 
@@ -462,7 +1247,7 @@ export default function ReelsScreen() {
   const prevPlaylistId = useRef<string | null>(null);
   useEffect(() => {
     if (activePlaylistId && activePlaylistId !== prevPlaylistId.current) {
-      setActiveIndex(0);
+      setNavState({ activeIndex: 0, prevIdx: -1 });
       setAllCards([]);
       prevPlaylistId.current = activePlaylistId;
     }
@@ -558,21 +1343,15 @@ export default function ReelsScreen() {
                     if (activePlaylistId) clearPlaylistProgress(sourceKey);
                     else clearFolderProgress(sourceKey);
                     
-                    setActiveIndex(0);
+                    setNavState({ activeIndex: 0, prevIdx: -1 });
                     sessionQueueService.updateSessionIndex(session._id, 0).catch(console.error);
                   }
                 },
                 {
                   text: 'Resume',
                   onPress: () => {
-                    setActiveIndex(foundIdx);
+                    setNavState({ activeIndex: foundIdx, prevIdx: -1 });
                     sessionQueueService.updateSessionIndex(session._id, foundIdx).catch(console.error);
-                    setTimeout(() => {
-                      const listLength = isSessionActive ? sessionCards.length : displayedCards.length;
-                      if (foundIdx >= 0 && foundIdx < listLength) {
-                        flashListRef.current?.scrollToIndex({ index: foundIdx, animated: false });
-                      }
-                    }, 300);
                     Toast.show({
                       type: 'info',
                       text1: 'Resuming from where you left',
@@ -585,13 +1364,7 @@ export default function ReelsScreen() {
             );
           }
         } else {
-          setActiveIndex(targetIndex);
-          setTimeout(() => {
-            const listLength = isSessionActive ? sessionCards.length : displayedCards.length;
-            if (targetIndex >= 0 && targetIndex < listLength) {
-              flashListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
-            }
-          }, 300);
+          setNavState({ activeIndex: targetIndex, prevIdx: -1 });
         }
 
       } catch (err: any) {
@@ -661,10 +1434,7 @@ export default function ReelsScreen() {
       });
       setSessionCards(initialCards);
       
-      setActiveIndex(slice.currentIndex);
-      if (slice.currentIndex >= 0 && slice.currentIndex < slice.orderedCardIds.length) {
-        flashListRef.current?.scrollToIndex({ index: slice.currentIndex, animated: true });
-      }
+      setNavState({ activeIndex: slice.currentIndex, prevIdx: -1 });
     } catch (err) {
       console.error('[Session Shuffle Toggle Error]', err);
     }
@@ -674,7 +1444,7 @@ export default function ReelsScreen() {
   useEffect(() => {
     if (isSessionActive) return;
     if (displayedCards.length === 0) {
-      if (activeIndex !== 0) setActiveIndex(0);
+      if (activeIndex !== 0) setNavState({ activeIndex: 0, prevIdx: -1 });
       return;
     }
     
@@ -683,10 +1453,7 @@ export default function ReelsScreen() {
         const targetIndex = displayedCards.findIndex(c => c._id === startCardIdParam);
         if (targetIndex !== -1) {
           hasPromptedResume.current = true;
-          setActiveIndex(targetIndex);
-          setTimeout(() => {
-            flashListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
-          }, 300);
+          setNavState({ activeIndex: targetIndex, prevIdx: -1 });
         } else if (!isLoading && !playlistCardsLoading) {
           hasPromptedResume.current = true;
         }
@@ -725,19 +1492,13 @@ export default function ReelsScreen() {
                   onPress: () => {
                     if (activePlaylistId) clearPlaylistProgress(id);
                     else clearFolderProgress(id);
-                    setActiveIndex(0);
+                    setNavState({ activeIndex: 0, prevIdx: -1 });
                   }
                 },
                 {
                   text: 'Resume',
                   onPress: () => {
-                    setActiveIndex(targetIndex);
-                    setTimeout(() => {
-                      const listLength = isSessionActive ? sessionCards.length : displayedCards.length;
-                      if (targetIndex >= 0 && targetIndex < listLength) {
-                        flashListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
-                      }
-                    }, 300);
+                    setNavState({ activeIndex: targetIndex, prevIdx: -1 });
                     Toast.show({
                       type: 'info',
                       text1: 'Resuming from where you left',
@@ -756,14 +1517,15 @@ export default function ReelsScreen() {
     }
 
     if (activeIndex >= displayedCards.length && displayedCards.length > 0) {
-      setActiveIndex(displayedCards.length - 1);
+      setNavState({ activeIndex: displayedCards.length - 1, prevIdx: -1 });
     }
   }, [displayedCards, activePlaylistId, folderIdParam, isSessionActive]);
 
   // Stable parent callback to handle instant, non-flickering, optimistic state updates
   const handleCardStateUpdate = useCallback((cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => {
+    const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
     setAllCards((prevCards) => {
-      if (activePlaylistId === 'likes' && action === 'favorite' && !value) {
+      if (currentActivePlaylistId === 'likes' && action === 'favorite' && !value) {
         return prevCards.filter((card) => card._id.split('-loop-')[0] !== cardId);
       }
       return prevCards.map((card) => {
@@ -775,7 +1537,7 @@ export default function ReelsScreen() {
         return card;
       });
     });
-  }, [activePlaylistId]);
+  }, []);
 
   // Synchronize and merge new/updated API pages to the continuous deck
   useEffect(() => {
@@ -783,7 +1545,7 @@ export default function ReelsScreen() {
     
     if (allCards.length === 0) {
       setAllCards(data.results);
-      setActiveIndex(0);
+      setNavState({ activeIndex: 0, prevIdx: -1 });
     } else {
       setAllCards((prevCards) => {
         // Map updated results for direct lookup
@@ -865,10 +1627,7 @@ export default function ReelsScreen() {
       }, 600);
     }
     lightHaptic();
-    setActiveIndex(nextIdx);
-    if (nextIdx >= 0 && nextIdx < cardsList.length) {
-      flashListRef.current?.scrollToIndex({ index: nextIdx, animated: true });
-    }
+    setNavState({ activeIndex: nextIdx, prevIdx: -1 });
   };
 
   useEffect(() => {
@@ -877,127 +1636,239 @@ export default function ReelsScreen() {
     };
   }, []);
 
-  const animateSlideChange = (direction: 'next' | 'prev', callback: () => void) => {
-    const outX = direction === 'next' ? -24 : 24;
-    slideX.value = withTiming(outX, { duration: 120 }, (finished) => {
-      if (finished) {
-        runOnJS(callback)();
-        slideX.value = direction === 'next' ? 24 : -24;
-        slideX.value = withTiming(0, { duration: 180 });
-      }
-    });
-  };
+  const handleProgressUpdateInReels = useCallback((cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => {
+    if (isGuest) {
+      Alert.alert(
+        "Sign In Required",
+        "Please sign in to save progress, favorite cards, or manage playlists.",
+        [
+          { text: "Maybe Later", style: "cancel" },
+          { 
+            text: "Sign In", 
+            onPress: async () => {
+              await useAuthStore.getState().logout();
+            } 
+          }
+        ]
+      );
+      return;
+    }
 
-  const nextSlide = () => {
-    if (activePlacard) {
-      const slides = preloadedSlides[activePlacard._id] || getSlidesForCard(activePlacard);
-      if (activeSlideIndex + 1 < slides.length) {
-        animateSlideChange('next', () => {
-          setActiveSlideIndex(activeSlideIndex + 1);
+    // 1. Optimistic state update
+    handleCardStateUpdate(cardId, action, value);
+
+    // 2. Sync to DB
+    updateProgressMutation.mutate(
+      { cardId, action, value },
+      {
+        onError: (err) => {
+          console.error(`[MUTATION ERROR]`, err);
+          handleCardStateUpdate(cardId, action, !value);
+        }
+      }
+    );
+
+    if (action === 'favorite') {
+      userCardStateService.toggleLike(cardId).catch(console.error);
+      const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
+      if (currentActivePlaylistId && currentActivePlaylistId !== 'likes' && currentActivePlaylistId !== 'watch-later') {
+        togglePlaylistItem.mutate({
+          playlistId: currentActivePlaylistId,
+          revisionCardId: cardId,
+          isInPlaylist: !value, // if it was marked true, remove (isInPlaylist = false now true)
         });
       }
     }
-  };
 
-  const prevSlide = () => {
-    if (activeSlideIndex > 0) {
-      animateSlideChange('prev', () => {
-        setActiveSlideIndex(activeSlideIndex - 1);
+    Toast.show({
+      type: 'success',
+      text1: value ? `Marked as ${action}` : `Removed from ${action}`,
+      position: 'top',
+      visibilityTime: 1200,
+    });
+  }, [isGuest, handleCardStateUpdate]);
+
+  const handleWatchLaterToggleInReels = useCallback((cardId: string) => {
+    lightHaptic();
+    toggleWatchLater(cardId);
+    if (!isGuest) {
+      userCardStateService.toggleWatchLater(cardId).catch(console.error);
+    }
+    queryClient.invalidateQueries({ queryKey: ['playlists'] });
+    queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'watch-later'] });
+  }, [isGuest, toggleWatchLater, queryClient]);
+
+  const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
+    const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
+    const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, card.createdBy) : false);
+
+    const options: any[] = [
+      {
+        text: '💻 Code Walkthrough',
+        onPress: () => {
+          const slides = getSlidesForCard(card);
+          const idx = slides.findIndex((s) => s.type === 'code');
+          scrollHorizontal(idx !== -1 ? idx : 0);
+        },
+      },
+      {
+        text: '📊 Trace Dry Run',
+        onPress: () => {
+          const slides = getSlidesForCard(card);
+          const idx = slides.findIndex((s) => s.type === 'dryrun');
+          scrollHorizontal(idx !== -1 ? idx : 0);
+        },
+      },
+      {
+        text: card.isArchived ? '🔓 Unhide Card' : '📦 Hide Card (Archive)',
+        onPress: () => handleProgressUpdateInReels(card._id, 'archived', !card.isArchived),
+      },
+    ];
+
+    if (canEdit) {
+      options.push({
+        text: '✍️ Edit Card',
+        onPress: () => {
+          const folderId = typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
+          router.push({
+            pathname: '/(protected)/(tabs)/CreateRevisionScreen',
+            params: { cardId: card._id, folderId, card: JSON.stringify(card) },
+          });
+        }
+      });
+      options.push({
+        text: '🗑️ Delete Card',
+        style: 'destructive' as const,
+        onPress: () => {
+          Alert.alert('Delete Card', 'Are you sure you want to permanently delete this card?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => deleteCard(card._id),
+            },
+          ]);
+        }
       });
     }
-  };
 
-  const openPPT = (card: IPopulatedRevisionCard, initialIndex = 0) => {
-    lightHaptic();
-    setActivePlacard(card);
-    setActiveSlideIndex(initialIndex);
-    setIsPPTVisible(true);
-    modalOpacity.value = withTiming(1, { duration: 220 });
-    modalScale.value = withTiming(1, { duration: 220 });
-  };
+    Alert.alert(card.title, 'Choose an action:', [
+      ...options,
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, [user, role, router, deleteCard, handleProgressUpdateInReels]);
 
-  const closePPT = () => {
-    lightHaptic();
-    modalOpacity.value = withTiming(0, { duration: 200 });
-    modalScale.value = withTiming(0.98, { duration: 200 }, (finished) => {
-      if (finished) {
-        runOnJS(setActivePlacard)(null);
-        runOnJS(setActiveSlideIndex)(0);
-        runOnJS(setIsPPTVisible)(false);
-      }
-    });
-  };
-
-  const pptPanGesture = Gesture.Pan()
-    .onUpdate((event) => {
-      pptDragX.value = event.translationX;
-    })
-    .onEnd((event) => {
-      const swipeThreshold = width * 0.18;
-      const velocityThreshold = 500;
-      if (activePlacard) {
-        const slides = preloadedSlides[activePlacard._id] || getSlidesForCard(activePlacard);
-        if (pptDragX.value < -swipeThreshold || event.velocityX < -velocityThreshold) {
-          if (activeSlideIndex + 1 < slides.length) {
-            pptDragX.value = 0;
-            runOnJS(nextSlide)();
-          } else {
-            pptDragX.value = withSpring(0);
-          }
-        } else if (pptDragX.value > swipeThreshold || event.velocityX > velocityThreshold) {
-          if (activeSlideIndex > 0) {
-            pptDragX.value = 0;
-            runOnJS(prevSlide)();
-          } else {
-            pptDragX.value = withSpring(0);
-          }
-        } else {
-          pptDragX.value = withSpring(0);
-        }
-      } else {
-        pptDragX.value = withSpring(0);
-      }
-    });
-
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: modalOpacity.value,
-  }));
-
-  const mainPptStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: modalScale.value },
-      { translateX: slideX.value + pptDragX.value * 0.3 },
-    ],
-    opacity: modalOpacity.value,
-  }));
-
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: any[] }) => {
-    if (viewableItems.length > 0) {
-      const idx = viewableItems[0].index;
-      if (idx !== null && idx !== undefined) {
-        setActiveIndex(idx);
-        
-        if (isSessionActive && sessionId) {
-          handleSessionSwipe(idx);
-        }
+  // Set sessionStartCardId when cardsList changes or activeIndex is first set
+  useEffect(() => {
+    if (cardsList.length > 0 && !sessionStartCardId.current) {
+      const activeCard = cardsList[activeIndex];
+      if (activeCard) {
+        sessionStartCardId.current = activeCard._id;
       }
     }
-  }, [isSessionActive, sessionId, handleSessionSwipe]);
+  }, [cardsList, activeIndex]);
 
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
+  useEffect(() => {
+    sessionStartCardId.current = null;
+  }, [folderIdParam, activePlaylistId]);
+
+  const goToNextCard = useCallback(() => {
+    const listLength = cardsList.length;
+    if (listLength === 0) return;
+    const nextIdx = (activeIndex + 1) % listLength;
+    flatListRef.current?.scrollToIndex({
+      index: nextIdx,
+      animated: true,
+    });
+    setNavState({ activeIndex: nextIdx, prevIdx: activeIndex });
+    transitionToCard(nextIdx);
+  }, [activeIndex, cardsList.length, transitionToCard]);
+
+  const goToPrevCard = useCallback(() => {
+    const listLength = cardsList.length;
+    if (listLength === 0) return;
+    const prevIdxLoc = (activeIndex - 1 + listLength) % listLength;
+    flatListRef.current?.scrollToIndex({
+      index: prevIdxLoc,
+      animated: true,
+    });
+    setNavState({ activeIndex: prevIdxLoc, prevIdx: activeIndex });
+    transitionToCard(prevIdxLoc);
+  }, [activeIndex, cardsList.length, transitionToCard]);
+
+  const goToNextCardRef = useRef(goToNextCard);
+  const goToPrevCardRef = useRef(goToPrevCard);
+  useEffect(() => { goToNextCardRef.current = goToNextCard; }, [goToNextCard]);
+  useEffect(() => { goToPrevCardRef.current = goToPrevCard; }, [goToPrevCard]);
+
+  // Stable callback wrappers
+  const stableGoToNext = useCallback(() => goToNextCardRef.current(), []);
+  const stableGoToPrev = useCallback(() => goToPrevCardRef.current(), []);
+
+  // Hydration Mount Scrolling
+  useEffect(() => {
+    if (cardsList.length > 0 && activeIndex > 0 && !hasScrolledToInitial.current) {
+      hasScrolledToInitial.current = true;
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({
+          index: activeIndex,
+          animated: false,
+        });
+      }, 100);
+    }
+  }, [cardsList.length, activeIndex]);
+
+  // Listen to activeIndex changes to sync session, prefetch images, and handle infinite pagination load
+  useEffect(() => {
+    if (cardsList.length > 0 && activeIndex >= 0 && activeIndex < cardsList.length) {
+      const idx = activeIndex;
+
+      // Keep track of the last 3 visited card IDs
+      const currentCardId = cardsList[idx]?._id;
+      if (currentCardId) {
+        recentCardIdsRef.current = [
+          currentCardId,
+          ...recentCardIdsRef.current.filter(id => id !== currentCardId).slice(0, 2)
+        ].filter(Boolean);
+      }
+
+      // 1. Sync session swipe
+      if (isSessionActive && sessionId) {
+        handleSessionSwipe(idx);
+      }
+
+      // 2. Prefetch upcoming card images
+      try {
+        const prefetchCount = Math.min(idx + 3, cardsList.length);
+        for (let i = idx + 1; i < prefetchCount; i++) {
+          const nextCard = cardsList[i];
+          if (nextCard && nextCard.image) {
+            ExpoImage.prefetch(nextCard.image).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('Image prefetch failed', e);
+      }
+
+      // 3. Trigger handleLoadMore if getting within 3 cards of the end of the stack
+      if (idx >= cardsList.length - 3) {
+        handleLoadMore();
+      }
+    }
+  }, [activeIndex, cardsList, isSessionActive, sessionId, handleSessionSwipe]);
 
   // Clean, high-fidelity overlay toggle without pill warping
   const toggleMenu = () => {
     lightHaptic();
-    setIsMenuOpen(!isMenuOpen);
+    setIsSettingsOpen(!isSettingsOpen);
   };
 
   const isPlaylistLoading = !!activePlaylistId && playlistCardsLoading;
 
   if (isLoading || isPlaylistLoading || (isSessionActive && sessionLoading)) {
     return (
-      <View className="flex-1 bg-[#F8FAFC] justify-center items-center">
-        <ActivityIndicator color="#8B5CF6" size="large" />
+      <View className="flex-1 bg-[#F5F5F7]" style={{ paddingTop: insets.top || 48 }}>
+        <ReelItemSkeleton cardHeight={cardHeight} width={width} />
       </View>
     );
   }
@@ -1032,329 +1903,136 @@ export default function ReelsScreen() {
 
   const activeCard = displayedCards[activeIndex];
 
-  const activeSlides = activePlacard
-    ? (preloadedSlides[activePlacard._id] || getSlidesForCard(activePlacard)).map((s, idx, arr) => ({
-        ...s,
-        card: activePlacard,
-        slideIndex: idx,
-        totalSlides: arr.length,
-      }))
-    : [];
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }} className="bg-[#F5F5F7]">
       
-      {/* Premium Glassmorphic Static Filter Trigger Button */}
+      {/* Settings & Personalization Overlay */}
+      {isSettingsOpen && (
+        <ReelsSettingsOverlay
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          playlistName={activePlaybackName}
+          sessionTimer={formatTime(sessionTotalTime)}
+          questionsRevised={completedCardsCount}
+        />
+      )}
+
+      {/* Premium Apple-Style Header Capsule Bar */}
       <View 
         style={{
           position: 'absolute',
           top: insets.top + 12,
+          left: 16,
           right: 16,
           zIndex: 90,
-          width: 130,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: 'rgba(255, 255, 255, 0.88)',
-          borderWidth: 1,
-          borderColor: 'rgba(148, 163, 184, 0.12)',
-          shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.04,
-          shadowRadius: 6,
-          elevation: 2,
-          overflow: 'hidden',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          pointerEvents: 'box-none',
         }}
       >
-        <TouchableOpacity 
-          onPress={toggleMenu} 
-          className="flex-row items-center gap-1.5 w-full h-full justify-center px-3"
+        {/* RIGHT SIDE: Transparent Settings Cog Icon */}
+        <TouchableOpacity
+          onPress={toggleMenu}
           activeOpacity={0.7}
+          style={{
+            padding: 8,
+            backgroundColor: 'transparent',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
         >
-          <Settings2 color="#8B5CF6" size={13} strokeWidth={2.5} />
-          <Text className="text-slate-800 text-[10px] font-extrabold uppercase tracking-wider">
-            {currentMode === 'sequential' ? '🔄 SEQ' : currentMode === 'shuffle' ? '🔀 SHUF' : currentMode === 'difficult' ? '🎯 DIFF' : currentMode === 'favorites' ? '❤️ FAV' : '🕒 LATE'}
-          </Text>
+          <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
         </TouchableOpacity>
       </View>
 
-      {/* Premium Glassmorphic Classy Dashboard Overlay */}
-      {isMenuOpen && (
-        <View 
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.45)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: 150,
-          }}
-        >
-          {/* Dismiss backdrop on click outside */}
-          <TouchableOpacity 
-            style={StyleSheet.absoluteFillObject} 
-            activeOpacity={1} 
-            onPress={toggleMenu} 
-          />
-
-          <View 
-            style={{
-              width: width - 32,
-              height: height * 0.7,
-              borderRadius: 24,
-              backgroundColor: 'rgba(255, 255, 255, 0.98)',
-              borderWidth: 1,
-              borderColor: 'rgba(241, 245, 249, 0.8)',
-              padding: 22,
-              shadowColor: '#0F172A',
-              shadowOffset: { width: 0, height: 12 },
-              shadowOpacity: 0.15,
-              shadowRadius: 30,
-              elevation: 12,
-            }}
-          >
-            <View className="flex-row items-center justify-between mb-5">
-              <View>
-                <Text className="text-[#0F172A] text-lg font-bold tracking-tight">Run Dashboard</Text>
-                <Text className="text-slate-400 text-xs mt-0.5">Continuous reel controls</Text>
-              </View>
-              <TouchableOpacity
-                onPress={toggleMenu}
-                className="bg-slate-100 p-2 rounded-full"
-              >
-                <X color="#64748B" size={16} strokeWidth={2.5} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Session Real-time Trackers */}
-            <View className="bg-[#F8FAFC] border border-slate-100/80 rounded-2xl p-4 mb-5 flex-row justify-around">
-              <View className="items-center">
-                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">⏱️ Duration</Text>
-                <Text className="text-slate-800 text-[15px] font-bold">{formatTime(sessionTotalTime)}</Text>
-              </View>
-              <View className="h-8 w-px bg-slate-200 self-center" />
-              <View className="items-center">
-                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">🃏 Finished</Text>
-                <Text className="text-slate-800 text-[15px] font-bold">{completedCardsCount} cards</Text>
-              </View>
-              <View className="h-8 w-px bg-slate-200 self-center" />
-              <View className="items-center">
-                <Text className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">🔄 Runs</Text>
-                <Text className="text-slate-800 text-[15px] font-bold">x{displayLoops}</Text>
-              </View>
-            </View>
-
-            <Text className="text-[#0F172A] text-[13px] font-bold uppercase tracking-wider text-slate-400 mb-2">Modes</Text>
-            <ScrollView showsVerticalScrollIndicator={false} className="flex-1 mb-4">
-              {(
-                [
-                  { id: 'sequential', label: 'Sequential', desc: 'Order of playlist/sheet', icon: '🔄', color: '#8B5CF6' },
-                  { id: 'shuffle', label: 'Shuffle', desc: 'Random order', icon: '🔀', color: '#ec4899' },
-                  { id: 'difficult', label: 'Difficult Only', desc: 'Starred difficult cards', icon: '🎯', color: '#f59e0b' },
-                  { id: 'favorites', label: 'Favorites Only', desc: 'Saved favorite cards', icon: '❤️', color: '#ef4444' },
-                  { id: 'watchLater', label: 'Watch Later Only', desc: 'Queued to read later', icon: '🕒', color: '#3b82f6' },
-                ] as const
-              ).map((mode) => {
-                const isActive = currentMode === mode.id;
-                return (
-                  <TouchableOpacity
-                    key={mode.id}
-                    onPress={() => {
-                      setMode(mode.id);
-                      lightHaptic();
-                      if (isSessionActive) {
-                        if (mode.id === 'shuffle') {
-                          handleToggleShuffleInSession(true);
-                        } else if (mode.id === 'sequential') {
-                          handleToggleShuffleInSession(false);
-                        }
-                      }
-                    }}
-                    className={`flex-row items-center justify-between p-3 mb-1.5 rounded-xl border ${
-                      isActive ? 'bg-violet-50/50 border-violet-200/60' : 'bg-[#F8FAFC]/80 border-slate-100/50'
-                    } active:opacity-85`}
-                  >
-                    <View className="flex-row items-center gap-2.5 flex-1">
-                      <View 
-                        className="w-8 h-8 rounded-lg justify-center items-center"
-                        style={{ backgroundColor: isActive ? `${mode.color}15` : '#f1f5f9' }}
-                      >
-                        <Text className="text-sm">{mode.icon}</Text>
-                      </View>
-                      <View className="flex-1">
-                        <Text className={`font-semibold text-xs ${isActive ? 'text-[#0F172A]' : 'text-slate-700'}`}>{mode.label}</Text>
-                        <Text className="text-slate-400 text-[10px] mt-0.5" numberOfLines={1}>{mode.desc}</Text>
-                      </View>
-                    </View>
-                    <View
-                      className={`w-4 h-4 rounded-full border items-center justify-center ${
-                        isActive ? 'bg-violet-500 border-violet-500' : 'border-slate-300'
-                      }`}
-                    >
-                      {isActive && <Check color="#fff" size={9} strokeWidth={3} />}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            {/* Loop toggle block */}
-            <View className="flex-row items-center justify-between p-3.5 mb-4 rounded-2xl bg-[#F8FAFC] border border-slate-100/80">
-              <View className="flex-1 pr-3">
-                <Text className="text-[#0F172A] font-semibold text-xs">🔄 Infinite Looping</Text>
-                <Text className="text-slate-400 text-[10px] mt-0.5">Continuous auto-restart</Text>
-              </View>
-              <Switch
-                value={infiniteLoop}
-                onValueChange={(val) => {
-                  setInfiniteLoop(val);
-                  lightHaptic();
-                }}
-                trackColor={{ false: '#e2e8f0', true: '#c084fc' }}
-                thumbColor={infiniteLoop ? '#8B5CF6' : '#94a3b8'}
-                style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
-              />
-            </View>
-
-            {/* Premium controls footer */}
-            <View className="flex-row gap-2.5 mt-auto">
-              <TouchableOpacity
-                onPress={() => {
-                  resetSession();
-                  lightHaptic();
-                  Toast.show({ type: 'info', text1: 'Session statistics reset!' });
-                }}
-                className="flex-1 py-3 rounded-xl items-center border border-slate-200 flex-row justify-center gap-1 bg-white active:scale-95"
-              >
-                <RotateCcw color="#64748B" size={13} />
-                <Text className="text-slate-600 font-semibold text-xs">Reset</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={toggleMenu}
-                className="flex-[1.5] py-3 rounded-xl items-center bg-[#8B5CF6] active:scale-95"
-              >
-                <Text className="text-white font-semibold text-xs">Apply</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* Dynamic Progress indicator header */}
-      <View className="absolute top-12 left-5 right-5 z-40 flex-row items-center gap-2.5 pr-[160px]">
-        {/* Back button */}
-        {navigation.canGoBack() && (
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="bg-white/95 p-2 rounded-full border border-slate-100/50 shadow-sm"
-          >
-            <ChevronLeft color="#0F172A" size={16} strokeWidth={2.5} />
-          </TouchableOpacity>
-        )}
-        
-        {/* Unified progress linear timeline */}
-        <View className="h-1 rounded-full bg-slate-200/50 overflow-hidden flex-1">
-          <View
-            className="h-full bg-violet-500 rounded-full"
-            style={{ width: `${cardsList.length > 0 ? ((activeIndex + 1) / cardsList.length) * 100 : 0}%` }}
-          />
-        </View>
-
-        {/* Progress Ring around loops */}
-        {displayLoops > 0 && (
-          <View className="flex-row items-center bg-white/90 border border-slate-100 rounded-full pr-2.5 pl-1.5 py-0.5 gap-1.5 shadow-sm">
-            <ProgressRing
-              radius={8}
-              stroke={1.5}
-              progress={cardsList.length > 0 ? (activeIndex + 1) / cardsList.length : 0}
-            />
-            <Text className="text-violet-600 text-[9px] font-black tracking-wider uppercase">L-{displayLoops}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Playlist Indicator Overlay */}
-      {activePlaylistId && (
-        <View
-          className="absolute top-[88px] left-5 right-5 z-40 flex-row items-center justify-between px-3.5 py-2.5 rounded-xl border border-slate-100"
-          style={{ backgroundColor: 'rgba(255,255,255,0.92)' }}
-        >
-          <View className="flex-row items-center gap-2 flex-1 pr-2">
-            <ListMusic color="#8B5CF6" size={14} strokeWidth={2.5} />
-            <Text className="text-[#0F172A] font-semibold text-[12px] flex-1" numberOfLines={1}>
-              {playlists.find((p) => p.id === activePlaylistId)?.name || 'Playlist'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => {
-              setActivePlaylistId(null);
-              lightHaptic();
-            }}
-            className="p-1 bg-slate-100 rounded-full"
-          >
-            <X color="#94A3B8" size={11} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Snappy Continuous Deck Core */}
       <View 
-        className="flex-1 justify-center items-center px-4"
+        className="flex-1 justify-center items-center px-2"
         style={{ 
-          marginTop: insets.top + (activePlaylistId ? 96 : 56),
-          marginBottom: bottomTabBarHeight - 12,
+          marginTop: insets.top - 12,
+          marginBottom: bottomTabBarHeight - 16,
+          position: 'relative',
+          width: '100%',
         }}
       >
         {cardsList.length > 0 ? (
-          <TypedFlashList
-            ref={flashListRef}
+          <FlatList
+            ref={flatListRef}
             data={cardsList}
-            keyExtractor={(item: any, index: number) => item?._id || `skeleton-${index}`}
-            style={{ alignSelf: 'stretch', flex: 1 }}
-            estimatedItemSize={cardHeight + 16}
-            showsVerticalScrollIndicator={false}
-            snapToInterval={cardHeight + 16}
-            decelerationRate="fast"
-            contentContainerStyle={{ paddingTop: 8, paddingBottom: 8 }}
-            onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={viewabilityConfig}
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.8}
-            renderItem={({ item, index }: any) => {
-              if (isSessionActive && !item) {
+            renderItem={({ item, index }) => {
+              if (!item) {
                 return (
-                  <View style={[styles.cardBase, { height: cardHeight, marginBottom: 16, alignSelf: 'center', width: width - 24, justifyContent: 'center', alignItems: 'center' }]}>
-                    <ActivityIndicator size="large" color="#8B5CF6" />
-                    <Text className="text-slate-400 text-xs mt-4">Preloading card...</Text>
+                  <View 
+                    style={{ 
+                      height: cardHeight, 
+                      alignSelf: 'center', 
+                      width: width * 0.97, 
+                      marginBottom: 16 
+                    }}
+                  >
+                    <ReelItemSkeleton cardHeight={cardHeight} width={width} />
                   </View>
                 );
               }
-              if (!item || !item._id) return null;
+
+              const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
+              const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
+              const isFavorite = !!item.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes');
+
               return (
-                <View style={[styles.cardBase, { height: cardHeight, marginBottom: 16, alignSelf: 'center', width: width - 24 }]}>
-                  <ConceptCardPreview
-                    card={item}
-                    isWatchLater={watchLaterCardIds.includes(item._id.split('-loop-')[0])}
-                    onToggleWatchLater={() => {
-                      lightHaptic();
-                      const cleanId = item._id.split('-loop-')[0];
-                      toggleWatchLater(cleanId);
-                      if (!isGuest) {
-                        userCardStateService.toggleWatchLater(cleanId).catch(console.error);
-                      }
-                      queryClient.invalidateQueries({ queryKey: ['playlists'] });
-                      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'watch-later'] });
-                    }}
-                    onViewExplanation={(idx) => openPPT(item, idx)}
-                    onCardStateUpdate={handleCardStateUpdate}
-                    activePlaylistId={activePlaylistId}
-                  />
-                </View>
+                <ReelItem
+                  item={item}
+                  index={index}
+                  activeIndex={activeIndex}
+                  goToNextCard={stableGoToNext}
+                  goToPrevCard={stableGoToPrev}
+                  cardHeight={cardHeight}
+                  width={width}
+                  isFavorite={isFavorite}
+                  activePlaylistId={activePlaylistId}
+                  isGuest={isGuest}
+                  canEdit={canEdit}
+                  onToggleWatchLater={handleWatchLaterToggleInReels}
+                  onCardStateUpdate={handleProgressUpdateInReels}
+                  onPlaylistPickerTrigger={setPlaylistModalCard}
+                  onMoreOptionsTrigger={handleMoreOptionsTrigger}
+                />
               );
             }}
+            keyExtractor={(item, index) => item?._id || `loading-slot-${index}`}
+            snapToInterval={cardHeight + 16}
+            snapToAlignment="center"
+            decelerationRate="fast"
+            disableIntervalMomentum={true}
+            showsVerticalScrollIndicator={false}
+            windowSize={3}
+            maxToRenderPerBatch={2}
+            removeClippedSubviews={Platform.OS === 'android'}
+            getItemLayout={(data, index) => ({
+              length: cardHeight + 16,
+              offset: (cardHeight + 16) * index,
+              index,
+            })}
+            onScroll={(event) => {
+              const yOffset = event.nativeEvent.contentOffset.y;
+              const index = Math.round(yOffset / (cardHeight + 16));
+              if (index !== activeIndex && index >= 0 && index < cardsList.length) {
+                setNavState({ activeIndex: index, prevIdx: activeIndex });
+                transitionToCard(index);
+              }
+            }}
+            scrollEventThrottle={16}
+            onMomentumScrollEnd={(event) => {
+              const yOffset = event.nativeEvent.contentOffset.y;
+              const index = Math.round(yOffset / (cardHeight + 16));
+              if (index !== activeIndex && index >= 0 && index < cardsList.length) {
+                setNavState({ activeIndex: index, prevIdx: activeIndex });
+                transitionToCard(index);
+              }
+            }}
+            style={{ width: '100%', height: '100%' }}
+            contentContainerStyle={{ alignItems: 'center' }}
           />
         ) : (
           <View className="flex-1 justify-center items-center px-10">
@@ -1394,78 +2072,12 @@ export default function ReelsScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Cinematic Slide walkthoughs presentation overlay */}
-      {isPPTVisible && activePlacard && (
-        <Animated.View
-          style={[StyleSheet.absoluteFill, { zIndex: 1000 }, backdropStyle]}
-          className="bg-slate-950/40 justify-center items-center"
-        >
-          <TouchableOpacity
-            onPress={closePPT}
-            className="absolute top-14 right-5 z-50 p-2.5 rounded-full items-center justify-center w-9 h-9 border border-white/20 bg-black/30"
-          >
-            <X color="#ffffff" size={16} strokeWidth={2.5} />
-          </TouchableOpacity>
-
-          <View className="flex-row items-center justify-center w-full px-3 relative">
-            <TouchableOpacity
-              onPress={prevSlide}
-              disabled={activeSlideIndex === 0}
-              className={`absolute left-2 z-50 p-3 rounded-full items-center justify-center w-9 h-9 border border-white/10 bg-black/40 ${
-                activeSlideIndex === 0 ? 'opacity-0' : 'opacity-100'
-              }`}
-            >
-              <ChevronLeft color="#ffffff" size={16} strokeWidth={2.5} />
-            </TouchableOpacity>
-
-            <GestureDetector gesture={pptPanGesture}>
-              <Animated.View
-                style={[
-                  {
-                    width: width - 24,
-                    height: height - insets.top - insets.bottom - 110,
-                    backgroundColor: '#FFFFFF',
-                    borderRadius: 32,
-                    borderWidth: 1,
-                    borderColor: '#F1F5F9',
-                    padding: 24,
-                    shadowColor: '#0F172A',
-                    shadowOffset: { width: 0, height: 10 },
-                    shadowOpacity: 0.12,
-                    shadowRadius: 28,
-                    elevation: 12,
-                  },
-                  mainPptStyle,
-                ]}
-              >
-                {activeSlides.length > 0 && (
-                  <RevisionCard
-                    slide={activeSlides[activeSlideIndex]}
-                    currentIndex={activeSlideIndex}
-                    totalCount={activeSlides.length}
-                    onContinuePress={activeSlideIndex + 1 < activeSlides.length ? nextSlide : undefined}
-                  />
-                )}
-              </Animated.View>
-            </GestureDetector>
-
-            <TouchableOpacity
-              onPress={nextSlide}
-              disabled={activeSlideIndex === activeSlides.length - 1}
-              className={`absolute right-2 z-50 p-3 rounded-full items-center justify-center w-9 h-9 border border-white/10 bg-black/40 ${
-                activeSlideIndex === activeSlides.length - 1 ? 'opacity-0' : 'opacity-100'
-              }`}
-            >
-              <ChevronRight color="#ffffff" size={16} strokeWidth={2.5} />
-            </TouchableOpacity>
-          </View>
-
-          <View className="absolute bottom-10 flex-row gap-1.5 items-center justify-center z-40">
-            {activeSlides.map((_, idx) => (
-              <IndicatorDot key={idx} isActive={idx === activeSlideIndex} />
-            ))}
-          </View>
-        </Animated.View>
+      {/* Centralized Playlist Picker Modal */}
+      {playlistModalCard !== null && (
+        <PlaylistPickerModal
+          card={playlistModalCard}
+          onClose={() => setPlaylistModalCard(null)}
+        />
       )}
     </GestureHandlerRootView>
   );
@@ -1474,14 +2086,13 @@ export default function ReelsScreen() {
 const styles = StyleSheet.create({
   cardBase: {
     backgroundColor: '#ffffff',
-    borderRadius: 32,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 26,
+    borderColor: 'rgba(226, 232, 240, 0.8)',
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.03,
-    shadowRadius: 16,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.04,
+    shadowRadius: 20,
+    elevation: 3,
   },
 });

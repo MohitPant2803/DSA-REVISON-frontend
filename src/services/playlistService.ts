@@ -77,3 +77,16 @@ export const reorderPlaylist = async (playlistId: string, cardIds: string[]): Pr
   const payload = unwrap<{ playlist: ApiPlaylist }>(response);
   return payload.playlist;
 };
+
+export const updatePlaylist = async (playlistId: string, data: { name?: string }): Promise<ApiPlaylist> => {
+  const response = await api.put(`/playlists/${playlistId}`, data);
+  const payload = unwrap<{ playlist: ApiPlaylist }>(response);
+  return payload.playlist;
+};
+
+export const duplicatePlaylist = async (playlistId: string): Promise<ApiPlaylist> => {
+  const response = await api.post(`/playlists/${playlistId}/duplicate`);
+  const payload = unwrap<{ playlist: ApiPlaylist }>(response);
+  return payload.playlist;
+};
+

@@ -26,6 +26,11 @@ export const toggleLike = async (cardId: string): Promise<IUserCardState> => {
   return response.data;
 };
 
+export const incrementRevision = async (cardId: string): Promise<IUserCardState> => {
+  const response = await api.post<IUserCardState>('/user-card-states/revision/increment', { cardId });
+  return response.data;
+};
+
 export const toggleWatchLater = async (cardId: string): Promise<IUserCardState> => {
   const response = await api.post<IUserCardState>('/user-card-states/watch-later', { cardId });
   return response.data;
