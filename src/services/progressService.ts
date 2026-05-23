@@ -27,6 +27,18 @@ export const updateUserProgress = async (
   return response.data?.data ?? response.data ?? { message: 'Progress updated' };
 };
 
+export const updateDifficultyState = async (
+  cardId: string,
+  difficultyState: 'easy' | 'medium' | 'hard' | 'skipped' | null
+): Promise<{ message: string }> => {
+  const payload = {
+    revisionCardId: cardId,
+    difficultyState,
+  };
+  const response = await api.post('/progress/update', payload);
+  return response.data?.data ?? response.data ?? { message: 'Difficulty state updated' };
+};
+
 export const updatePlaylistMembership = async (
   cardId: string,
   addToPlaylist?: string,

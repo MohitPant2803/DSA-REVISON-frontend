@@ -39,7 +39,7 @@ export function mapApiPlaylist(p: playlistService.ApiPlaylist, index = 0): UIPla
     color1: p.color1 || fallback1,
     color2: p.color2 || fallback2,
     itemCount: p.itemCount ?? 0,
-    completedLoops: p.completedLoops ?? 0,
+    completedLoops: p.completedLoops ?? useTrackingStore.getState().loopsCompleted[p._id] ?? 0,
     orderedCardIds: p.orderedCardIds ?? [],
   };
 }
@@ -50,50 +50,25 @@ export const usePlaylists = () => {
     queryKey: [PLAYLISTS_KEY, isAuthenticated],
     queryFn: async () => {
       let uiPlaylists: UIPlaylist[] = [];
-      let likesCount = 0;
-      let likedCardIds: string[] = [];
 
       if (isAuthenticated) {
-        // Get custom playlists from backend
+        // Get custom and smart playlists from backend
         const list = await playlistService.getPlaylists().catch((err) => {
           console.warn('[usePlaylists] Failed to fetch custom playlists', err);
           return [];
         });
         uiPlaylists = list.map((p, i) => mapApiPlaylist(p, i));
-
-        // Get liked count from personal library
-        const library = await getPersonalLibrary().catch(() => null);
-        const validFavorites = (library?.favorites ?? []).filter(f => f && f.card != null);
-        likesCount = validFavorites.length;
-        likedCardIds = validFavorites.map(f => f.card?._id).filter(Boolean) as string[];
+      } else {
+        // Guest mode offline-safe smart playlists
+        uiPlaylists = [
+          { id: 'easy', name: 'Easy', color1: '#10B981', color2: '#059669', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['easy'] ?? 0, orderedCardIds: [] },
+          { id: 'medium', name: 'Medium', color1: '#F59E0B', color2: '#D97706', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['medium'] ?? 0, orderedCardIds: [] },
+          { id: 'hard', name: 'Hard', color1: '#EF4444', color2: '#DC2626', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['hard'] ?? 0, orderedCardIds: [] },
+          { id: 'skipped', name: 'Skipped', color1: '#64748B', color2: '#475569', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['skipped'] ?? 0, orderedCardIds: [] },
+        ];
       }
 
-      // Get watch later count (always available locally via Zustand)
-      const watchLaterIds = useTrackingStore.getState().watchLaterCardIds ?? [];
-      const watchLaterCount = watchLaterIds.length;
-
-      // Build system playlists
-      const likesPlaylist: UIPlaylist = {
-        id: 'likes',
-        name: 'Liked Cards',
-        color1: '#f43f5e', // Pink-500
-        color2: '#fda4af', // Rose-300
-        itemCount: likesCount,
-        completedLoops: useTrackingStore.getState().loopsCompleted['likes'] ?? 0,
-        orderedCardIds: likedCardIds,
-      };
-
-      const watchLaterPlaylist: UIPlaylist = {
-        id: 'watch-later',
-        name: 'Watch Later',
-        color1: '#3b82f6', // Blue-500
-        color2: '#93c5fd', // Blue-300
-        itemCount: watchLaterCount,
-        completedLoops: useTrackingStore.getState().loopsCompleted['watch-later'] ?? 0,
-        orderedCardIds: watchLaterIds,
-      };
-
-      return [likesPlaylist, watchLaterPlaylist, ...uiPlaylists];
+      return uiPlaylists;
     },
     staleTime: 1000 * 60,
     retry: 2,
@@ -104,14 +79,6 @@ export const usePlaylistCardIds = (playlistId: string | null, enabled = true) =>
   return useQuery({
     queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'ids'],
     queryFn: async () => {
-      if (playlistId === 'likes') {
-        const library = await getPersonalLibrary();
-        const favorites = library?.favorites ?? [];
-        return favorites.map(f => f.card?._id).filter(Boolean) as string[];
-      }
-      if (playlistId === 'watch-later') {
-        return useTrackingStore.getState().watchLaterCardIds ?? [];
-      }
       const detail = await playlistService.getPlaylistById(playlistId!);
       return detail?.cardIds ?? [];
     },
@@ -125,26 +92,15 @@ export const usePlaylistCards = (playlistId: string | null) => {
     queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'cards'],
     queryFn: async (): Promise<IPopulatedRevisionCard[]> => {
       if (!playlistId) return [];
-      if (playlistId === 'likes') {
-        const library = await getPersonalLibrary();
-        const favorites = library?.favorites ?? [];
-        return favorites
-          .filter(f => f != null && f.card != null && typeof f.card === 'object' && '_id' in f.card)
-          .map(f => ({
-            ...(f.card as any),
-            isFavorite: f.favorite ?? true,
-            isDifficult: f.difficult ?? false,
-            isArchived: f.archived ?? false,
-          }))
-          .filter(c => c != null && c._id != null) as IPopulatedRevisionCard[];
-      }
-      if (playlistId === 'watch-later') {
-        const watchLaterIds = useTrackingStore.getState().watchLaterCardIds ?? [];
-        if (!watchLaterIds.length) return [];
-        return revisionService.getRevisionCardsByIds(watchLaterIds);
-      }
       const detail = await playlistService.getPlaylistById(playlistId!);
-      if (!detail || !detail.cardIds || !detail.cardIds.length) return [];
+      if (!detail) return [];
+      
+      // Dynamic populated items loading for smart playlists
+      if (detail.items && detail.items.length && typeof detail.items[0] === 'object') {
+        return detail.items as IPopulatedRevisionCard[];
+      }
+      
+      if (!detail.cardIds || !detail.cardIds.length) return [];
       return revisionService.getRevisionCardsByIds(detail.cardIds);
     },
     enabled: !!playlistId,

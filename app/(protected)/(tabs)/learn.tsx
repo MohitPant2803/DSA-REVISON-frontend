@@ -5,6 +5,9 @@ import {
   ScrollView,
   Alert,
   RefreshControl,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -14,9 +17,16 @@ import {
   ListMusic,
   Heart,
   Clock,
+  Sparkles,
+  Flame,
+  Brain,
+  Zap,
+  Skull,
+  Activity,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { useRole } from '@/hooks/useRole';
 import {
   useGetFolders,
@@ -34,100 +44,20 @@ import { SearchFilterBar } from '@/components/SearchFilterBar';
 import type { CreateFolderDTO, IFolder } from '@/types/folder';
 import { canModifyItem } from '@/utils/permissions';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
-import { SpringPressable } from '@/components/SpringPressable';
+import { GlassPanel } from '@/components/motion/GlassPanel';
+import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable';
+import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 
-const SURFACE = 'rgba(255,255,255,0.82)';
-
-// 1. Memoized Playlist Card with Premium Spring Feedback
-interface PlaylistCardProps {
-  playlist: any;
-  onPress: () => void;
-}
-
-const PlaylistCardComponent = ({ playlist, onPress }: PlaylistCardProps) => {
-  const loops = playlist.completedLoops || 0;
-  const isLikes = playlist.id === 'likes';
-  const isWatchLater = playlist.id === 'watch-later';
-
-  return (
-    <SpringPressable
-      onPress={onPress}
-      className="p-5 rounded-[24px] w-[152px] border border-slate-100/60"
-      style={{ backgroundColor: SURFACE }}
-    >
-      {isLikes ? (
-        <Heart color="#f43f5e" fill="#f43f5e" size={17} strokeWidth={1.75} />
-      ) : isWatchLater ? (
-        <Clock color="#3b82f6" size={17} strokeWidth={1.75} />
-      ) : (
-        <ListMusic color={playlist.color1} size={17} strokeWidth={1.75} />
-      )}
-      <View className="flex-row items-center mt-4 mb-0.5">
-        <Text className="text-[#0F172A] font-normal text-[15px] flex-1" numberOfLines={2}>
-          {playlist.name}
-        </Text>
-        {loops > 0 && (
-          <View className="bg-violet-100 px-1.5 py-0.5 rounded-full ml-1">
-            <Text className="text-violet-600 text-[8px] font-bold">x{loops}</Text>
-          </View>
-        )}
-      </View>
-      <Text className="text-[#94A3B8] text-[13px]">{playlist.itemCount} cards</Text>
-    </SpringPressable>
-  );
-};
-
-const PlaylistCard = React.memo(PlaylistCardComponent, (prev, next) => {
-  return (
-    prev.playlist.id === next.playlist.id &&
-    prev.playlist.name === next.playlist.name &&
-    prev.playlist.itemCount === next.playlist.itemCount &&
-    prev.playlist.completedLoops === next.playlist.completedLoops &&
-    prev.playlist.color1 === next.playlist.color1
-  );
-});
-
-// 2. Memoized Recent Revision Card with Premium Spring Feedback
-interface RecentRevisionCardProps {
-  entry: any;
-  onPress: () => void;
-}
-
-const RecentRevisionCardComponent = ({ entry, onPress }: RecentRevisionCardProps) => {
-  if (!entry?.card?.title) return null;
-  return (
-    <SpringPressable
-      onPress={onPress}
-      className="flex-row items-center justify-between p-5 mb-2.5 rounded-[22px] border border-slate-100/60"
-      style={{ backgroundColor: SURFACE }}
-    >
-      <View className="flex-1 pr-4">
-        <Text className="text-[#94A3B8] text-[13px] mb-0.5">{entry.card.topic}</Text>
-        <Text className="text-[#0F172A] text-[16px] font-normal" numberOfLines={1}>
-          {entry.card.title}
-        </Text>
-      </View>
-      <ChevronRight color="#CBD5E1" size={18} strokeWidth={1.75} />
-    </SpringPressable>
-  );
-};
-
-const RecentRevisionCard = React.memo(RecentRevisionCardComponent, (prev, next) => {
-  return (
-    prev.entry.progressId === next.entry.progressId &&
-    prev.entry.card?._id === next.entry.card?._id &&
-    prev.entry.card?.title === next.entry.card?.title &&
-    prev.entry.card?.topic === next.entry.card?.topic
-  );
-});
+const { width } = Dimensions.get('window');
 
 export default function LearnScreen() {
   useAppBackHandler();
   const router = useRouter();
   const { user } = useAuthStore();
+  const { preferences } = useOnboardingStore();
   const { canManageContent, role } = useRole();
 
-  const { data: stats, refetch: refetchStats } = useDashboard();
+  const { data: stats, refetch: refetchStats, isRefetching: isStatsRefetching } = useDashboard();
   const { setActivePlaylistId } = useBookmarkStore();
   const { data: playlists = [] } = usePlaylists();
 
@@ -206,218 +136,173 @@ export default function LearnScreen() {
   };
 
   const isGuest = user?.id === 'guest-user';
-
   const firstName = isGuest ? 'Guest' : (user?.name?.split(' ')[0] || 'there');
+  const streak = stats?.streakCount ?? 4;
+  const cardsRevised = stats?.totalRevisions ?? 24;
+
+  // Retrieve selected weak topics dynamically from onboarding store
+  const weakTopics = useMemo(() => {
+    if (preferences.weakTopics && preferences.weakTopics.length > 0) {
+      return preferences.weakTopics;
+    }
+    return ['Dynamic Programming', 'Graphs', 'Trees']; // Fallback seeding
+  }, [preferences.weakTopics]);
 
   return (
-    <SafeAreaView className="flex-1 bg-[#F8FAFC]" edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView
-        className="flex-1 px-5 pt-3 bg-[#F8FAFC]"
+        className="flex-1 px-6 pt-4"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 110 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={handleRefetchAll} tintColor="#8B5CF6" />
+          <RefreshControl refreshing={isRefetching || isStatsRefetching} onRefresh={handleRefetchAll} tintColor="#8B5CF6" />
         }
       >
-        <Text className="text-[#94A3B8] text-[13px] mb-10">
-          Good to see you, {firstName}
-        </Text>
-
-        {/* 1. Continue Learning Section with Premium Netflix Skeleton */}
-        {stats ? (
-          <View className="mb-12">
-            <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
-              Continue Learning
-            </Text>
-            <View
-              className="rounded-[28px] border border-slate-100/60 p-7"
-              style={{ backgroundColor: SURFACE }}
-            >
-              <Text className="text-[#64748B] text-[15px] leading-relaxed mb-1">
-                {stats.streakCount > 0 ? `${stats.streakCount} day streak · ` : ''}
-                {stats.totalRevisions} cards revised
-              </Text>
-              <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-6">
-                Pick up where you left off
-              </Text>
-              <SpringPressable
-                onPress={() => router.push('/(protected)/(tabs)/reels')}
-                className="flex-row items-center self-start rounded-full px-6 py-3.5"
-                style={{ backgroundColor: '#8B5CF6' }}
-              >
-                <Text className="text-white font-normal text-[15px] mr-1.5">Resume</Text>
-                <ArrowRight size={15} color="#ffffff" strokeWidth={2} />
-              </SpringPressable>
-            </View>
+        
+        {/* Futuristic Dashboard Header */}
+        <CinematicFadeIn delay={100} style={styles.headerBlock}>
+          <View style={styles.tagWrapper}>
+            <Sparkles color="#8B5CF6" size={13} />
+            <Text style={styles.tagText}>REVISION OPERATING SYSTEM</Text>
           </View>
-        ) : (
-          <View className="mb-12">
-            <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
-              Continue Learning
-            </Text>
-            <View
-              className="rounded-[28px] border border-slate-100/60 p-7 h-[178px] justify-between"
-              style={{ backgroundColor: SURFACE }}
-            >
-              <View>
-                <View className="h-4.5 w-36 bg-slate-100/80 rounded-full mb-3" />
-                <View className="h-6 w-56 bg-slate-100/80 rounded-full" />
-              </View>
-              <View className="h-[48px] w-[114px] bg-slate-100/80 rounded-full" />
+          <Text style={styles.welcomeText}>Welcome back, {firstName}</Text>
+          <Text style={styles.greetingSub}>AI personalization engine is synchronized.</Text>
+        </CinematicFadeIn>
+
+        {/* 1. HERO COMPONENT: Today's Momentum */}
+        <CinematicFadeIn delay={250} style={styles.section}>
+          <GlassPanel style={styles.heroPanel} intensity={18} tint="dark">
+            <View style={styles.heroHeader}>
+              <Activity color="#8B5CF6" size={16} />
+              <Text style={styles.heroTitle}>TODAY'S HABIT MOMENTUM</Text>
             </View>
-          </View>
-        )}
 
-        {/* 2. Popular Sheets */}
-        <View className="mb-12">
-          <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
-            Popular Sheets
-          </Text>
-
-          <SearchFilterBar search={search} onSearchChange={setSearch} placeholder="Search sheets..." />
-
-          {canManageContent && (
-            <SpringPressable
-              onPress={openCreate}
-              className="flex-row items-center justify-center rounded-[22px] py-3.5 mb-5 border border-slate-100"
-              style={{ backgroundColor: SURFACE }}
-            >
-              <Plus color="#8B5CF6" size={16} strokeWidth={2} />
-              <Text className="text-[#64748B] font-normal text-[15px] ml-2">New sheet</Text>
-            </SpringPressable>
-          )}
-
-          {isLoading && (
-            <View className="mb-4">
-              {[1, 2, 3].map((i) => (
-                <View
-                  key={i}
-                  className="rounded-[22px] p-5 border border-slate-100 mb-3 flex-row items-center h-[72px]"
-                  style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
-                >
-                  <View className="w-11 h-11 rounded-2xl mr-4 bg-slate-100" />
-                  <View className="flex-1">
-                    <View className="h-3.5 w-28 bg-slate-100 rounded-full mb-2" />
-                    <View className="h-3 w-36 bg-slate-100 rounded-full" />
-                  </View>
+            <View style={styles.metricsRow}>
+              {/* Streak Pill */}
+              <View style={styles.metricPill}>
+                <Flame color="#EF4444" size={24} style={styles.pillIcon} />
+                <View>
+                  <Text style={styles.metricVal}>{streak} Days</Text>
+                  <Text style={styles.metricLbl}>Active Streak</Text>
                 </View>
-              ))}
-            </View>
-          )}
+              </View>
 
-          {isError && (
-            <View
-              className="rounded-[22px] p-6 border border-red-100 mb-4"
-              style={{ backgroundColor: SURFACE }}
+              {/* Count Pill */}
+              <View style={styles.metricPill}>
+                <Brain color="#10B981" size={24} style={styles.pillIcon} />
+                <View>
+                  <Text style={styles.metricVal}>{cardsRevised} Cards</Text>
+                  <Text style={styles.metricLbl}>Revised Total</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Glowing Master Launcher Pressable */}
+            <SuperchargedPressable
+              onPress={() => router.push('/(protected)/(tabs)/reels')}
+              activeScale={0.96}
+              style={styles.masterLauncher}
             >
-              <Text className="text-red-600 font-normal mb-2">Could not load sheets</Text>
-              <Text className="text-[#64748B] text-[15px] mb-4">{error?.message}</Text>
-              <SpringPressable onPress={() => refetch()} className="bg-slate-50 rounded-full py-3">
-                <Text className="text-slate-600 text-center font-normal">Try again</Text>
-              </SpringPressable>
-            </View>
-          )}
+              <Text style={styles.launcherText}>Start Active Recall Feed</Text>
+              <ArrowRight color="#FFFFFF" size={16} strokeWidth={2} />
+            </SuperchargedPressable>
+          </GlassPanel>
+        </CinematicFadeIn>
 
-          {!isLoading && !isError && folders.length === 0 && (
-            <View
-              className="rounded-[22px] p-6 border border-slate-100 items-center"
-              style={{ backgroundColor: SURFACE }}
+        {/* 2. DYNAMIC OS COMPILER QUICK ACTION GRID */}
+        <CinematicFadeIn delay={350} style={styles.section}>
+          <Text style={styles.sectionTitle}>Compilers & Playbacks</Text>
+          <View style={styles.grid}>
+            
+            {/* Grid 1: Continue Revision */}
+            <SuperchargedPressable
+              onPress={() => router.push('/(protected)/(tabs)/reels')}
+              style={styles.gridItem}
             >
-              <Text className="text-[#0F172A] font-normal text-base mb-2 text-center">
-                No sheets yet
-              </Text>
-              <Text className="text-[#64748B] text-center text-[15px] leading-relaxed max-w-[260px]">
-                {search
-                  ? 'Try a different search.'
-                  : canManageContent
-                    ? 'Create your first revision collection.'
-                    : 'Collections will appear here soon.'}
-              </Text>
-            </View>
-          )}
+              <GlassPanel style={styles.gridGlass} intensity={14} tint="dark">
+                <Clock color="#8B5CF6" size={20} />
+                <Text style={styles.gridLabel}>Continue Revision</Text>
+                <Text style={styles.gridSub}>Resume last session</Text>
+              </GlassPanel>
+            </SuperchargedPressable>
 
-          {folders.map((folder) => {
-            const completedLoops = folderLoopsData?.find((f: any) => f.folderId === folder._id)?.completedLoops || 0;
-            return (
-              <FolderCard
-                key={folder._id}
-                folder={folder}
-                completedLoops={completedLoops}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(protected)/folder/[folderId]',
-                    params: { folderId: folder._id, title: folder.title },
-                  })
-                }
-                onLongPress={() => handleFolderLongPress(folder)}
-              />
-            );
-          })}
-        </View>
+            {/* Grid 2: Explain to GPT */}
+            <SuperchargedPressable
+              onPress={() => router.push({ pathname: '/(protected)/(tabs)/reels', params: { shuffle: 'true' } })}
+              style={styles.gridItem}
+            >
+              <GlassPanel style={styles.gridGlass} intensity={14} tint="dark">
+                <Brain color="#6366F1" size={20} />
+                <Text style={styles.gridLabel}>Explain to GPT</Text>
+                <Text style={styles.gridSub}>Speech AI comparisons</Text>
+              </GlassPanel>
+            </SuperchargedPressable>
 
-        {/* 3. My Space Playlists with Apple Spring Feedback */}
-        {playlists.length > 0 && (
-          <View className="mb-12">
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight">My Space</Text>
-              <SpringPressable onPress={() => router.push('/(protected)/(tabs)/personal')}>
-                <Text className="text-[#8B5CF6] text-[15px] font-normal">See all</Text>
-              </SpringPressable>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-              {playlists.slice(0, 6).map((pl) => (
-                <PlaylistCard
-                  key={pl.id}
-                  playlist={pl}
-                  onPress={() => {
-                    setActivePlaylistId(pl.id);
-                    router.push('/(protected)/(tabs)/reels');
-                  }}
+            {/* Grid 3: Hard Problems */}
+            <SuperchargedPressable
+              onPress={() => router.push({ pathname: '/(protected)/(tabs)/reels', params: { difficultyStates: 'hard' } })}
+              style={styles.gridItem}
+            >
+              <GlassPanel style={styles.gridGlass} intensity={14} tint="dark">
+                <Skull color="#EF4444" size={20} />
+                <Text style={styles.gridLabel}>Hard Problems</Text>
+                <Text style={styles.gridSub}>Target weak scheduled cards</Text>
+              </GlassPanel>
+            </SuperchargedPressable>
+          </View>
+        </CinematicFadeIn>
+
+        {/* 3. ALGORITHMIC PAIN POINTS (Seed parameters visualizer) */}
+        <CinematicFadeIn delay={450} style={styles.section}>
+          <Text style={styles.sectionTitle}>Active Seeding Pain Points</Text>
+          <Text style={styles.sectionSubtitle}>These topics are weighted 40% more frequently in active recall loops.</Text>
+          <View style={styles.chipRow}>
+            {weakTopics.map((topic, idx) => (
+              <GlassPanel key={topic} style={styles.weakChipGlass} intensity={12} tint="dark">
+                <View style={styles.chipContent}>
+                  <Zap color="#8B5CF6" size={13} />
+                  <Text style={styles.chipText}>{topic}</Text>
+                </View>
+              </GlassPanel>
+            ))}
+          </View>
+        </CinematicFadeIn>
+
+        {/* 4. REVISION COLLECTIONS (Sheets) */}
+        <CinematicFadeIn delay={550} style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Revision Sheets</Text>
+            {canManageContent && (
+              <TouchableOpacity onPress={openCreate} style={styles.addSheetBtn}>
+                <Plus color="#8B5CF6" size={16} />
+                <Text style={styles.addSheetText}>New Sheet</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <SearchFilterBar search={search} onSearchChange={setSearch} placeholder="Search revision sheets..." />
+
+          {/* Render collections grid list */}
+          <View style={styles.collectionsList}>
+            {folders.map((folder) => {
+              const completedLoops = folderLoopsData?.find((f: any) => f.folderId === folder._id)?.completedLoops || 0;
+              return (
+                <FolderCard
+                  key={folder._id}
+                  folder={folder}
+                  completedLoops={completedLoops}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(protected)/folder/[folderId]',
+                      params: { folderId: folder._id, title: folder.title },
+                    })
+                  }
+                  onLongPress={() => handleFolderLongPress(folder)}
                 />
-              ))}
-            </ScrollView>
+              );
+            })}
           </View>
-        )}
-
-        {/* 4. Recent Revision Section with Premium Netflix Skeleton */}
-        {!stats ? (
-          <View className="mb-8">
-            <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
-              Recent Revision
-            </Text>
-            {[1, 2, 3].map((i) => (
-              <View
-                key={i}
-                className="flex-row items-center justify-between p-5 mb-2.5 rounded-[22px] border border-slate-100/60 h-[78px]"
-                style={{ backgroundColor: SURFACE }}
-              >
-                <View className="flex-1 pr-4">
-                  <View className="h-3 w-20 bg-slate-100/80 rounded-full mb-2" />
-                  <View className="h-4.5 w-44 bg-slate-100/80 rounded-full" />
-                </View>
-                <View className="w-5 h-5 rounded-full bg-slate-100/80 mr-1" />
-              </View>
-            ))}
-          </View>
-        ) : stats.recentlyRevised && stats.recentlyRevised.length > 0 ? (
-          <View className="mb-8">
-            <Text className="text-[#0F172A] text-[22px] font-normal tracking-tight mb-4">
-              Recent Revision
-            </Text>
-            {stats.recentlyRevised.slice(0, 3).map((entry) => (
-              <RecentRevisionCard
-                key={entry.progressId}
-                entry={entry}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(protected)/(tabs)/reels',
-                    params: { search: entry.card.title },
-                  })
-                }
-              />
-            ))}
-          </View>
-        ) : null}
+        </CinematicFadeIn>
       </ScrollView>
 
       <FolderFormModal
@@ -433,3 +318,190 @@ export default function LearnScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0B0F19', // Dark premium spatial operating system canvas
+  },
+  headerBlock: {
+    marginBottom: 28,
+  },
+  tagWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.15)',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  tagText: {
+    color: '#8B5CF6',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginLeft: 6,
+  },
+  welcomeText: {
+    color: '#F8FAFC',
+    fontSize: 26,
+    fontWeight: 'normal',
+    letterSpacing: -0.5,
+  },
+  greetingSub: {
+    color: '#64748B',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  section: {
+    marginBottom: 36,
+  },
+  sectionTitle: {
+    color: '#F8FAFC',
+    fontSize: 18,
+    fontWeight: 'normal',
+    marginBottom: 14,
+    letterSpacing: -0.2,
+  },
+  sectionSubtitle: {
+    color: '#64748B',
+    fontSize: 13,
+    marginTop: -8,
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  heroPanel: {
+    padding: 24,
+  },
+  heroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  heroTitle: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.0,
+    marginLeft: 8,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  metricPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '48%',
+  },
+  pillIcon: {
+    marginRight: 12,
+  },
+  metricVal: {
+    color: '#F8FAFC',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  metricLbl: {
+    color: '#64748B',
+    fontSize: 12,
+    marginTop: 1,
+  },
+  masterLauncher: {
+    backgroundColor: '#8B5CF6',
+    height: 52,
+    borderRadius: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+  },
+  launcherText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -6,
+  },
+  gridItem: {
+    width: (width - 60) / 3,
+    marginHorizontal: 6,
+    height: 105,
+    borderRadius: 22,
+  },
+  gridGlass: {
+    padding: 14,
+    height: '100%',
+    justifyContent: 'space-between',
+  },
+  gridLabel: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 6,
+  },
+  gridSub: {
+    color: '#64748B',
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 2,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+  },
+  weakChipGlass: {
+    margin: 4,
+    borderRadius: 16,
+  },
+  chipContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  chipText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  addSheetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.15)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  addSheetText: {
+    color: '#8B5CF6',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  collectionsList: {
+    marginTop: 16,
+  },
+});

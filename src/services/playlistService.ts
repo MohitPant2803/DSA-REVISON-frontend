@@ -16,6 +16,7 @@ export interface PlaylistDetail {
   playlist: ApiPlaylist;
   cardIds: string[];
   pagination: { total: number; page: number; pages: number };
+  items?: any[];
 }
 
 const unwrap = <T,>(response: { data?: { data?: T } & T }): T => {
@@ -37,7 +38,7 @@ export const createPlaylist = async (data: {
   description?: string;
   color1?: string;
   color2?: string;
-}): Promise<ApiPlaylist> => {
+  }): Promise<ApiPlaylist> => {
   const response = await api.post('/playlists/create', data);
   const payload = unwrap<{ playlist: ApiPlaylist }>(response);
   return payload.playlist;
@@ -55,12 +56,13 @@ export const getPlaylistById = async (
   const response = await api.get(`/playlists/${playlistId}`, {
     params: { page, limit },
   });
-  const payload = unwrap<PlaylistDetail & { items?: string[] }>(response);
-  const cardIds = payload.cardIds ?? payload.items ?? [];
+  const payload = unwrap<PlaylistDetail & { items?: any[] }>(response);
+  const cardIds = payload.cardIds ?? payload.items?.map((i: any) => typeof i === 'string' ? i : i._id) ?? [];
   return {
     playlist: payload.playlist,
     cardIds,
     pagination: payload.pagination ?? { total: cardIds.length, page: 1, pages: 1 },
+    items: payload.items,
   };
 };
 

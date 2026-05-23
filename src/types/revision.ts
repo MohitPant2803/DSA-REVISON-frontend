@@ -58,6 +58,7 @@ export interface IPopulatedRevisionCard extends Omit<IRevisionCard, 'createdBy' 
   isFavorite?: boolean;
   isDifficult?: boolean;
   isArchived?: boolean;
+  difficultyState?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
 }
 
 export type CreateRevisionCardDTO = {

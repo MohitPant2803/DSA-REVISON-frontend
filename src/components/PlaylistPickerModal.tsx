@@ -111,7 +111,7 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
 
     try {
       for (const playlist of playlists) {
-        if (playlist.id === 'likes' || playlist.id === 'watch-later') continue;
+        if (['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].includes(playlist.id)) continue;
         const wasAdded = !!membership[playlist.id];
         const isAddedNow = !!tempMembership[playlist.id];
 
@@ -201,7 +201,7 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
                 <Text className="text-white text-xs font-semibold">Sign In / Register</Text>
               </TouchableOpacity>
             </View>
-          ) : playlists.filter((p) => p.id !== 'likes' && p.id !== 'watch-later').length === 0 ? (
+          ) : playlists.filter((p) => p.id !== 'likes' && p.id !== 'watch-later' && p.id !== 'easy' && p.id !== 'medium' && p.id !== 'hard' && p.id !== 'skipped').length === 0 ? (
             <View className="flex-1 mb-5">
               <View style={{ paddingVertical: 32, alignItems: 'center' }}>
                 <ListMusic color="#8B5CF6" size={32} strokeWidth={1.5} style={{ opacity: 0.8 }} />
@@ -246,7 +246,7 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
             <View className="flex-1 mb-5">
               <ScrollView showsVerticalScrollIndicator={false} className="flex-1 mb-4 max-h-[220px]">
                 {playlists
-                  .filter((p) => p.id !== 'likes' && p.id !== 'watch-later')
+                  .filter((p) => p.id !== 'likes' && p.id !== 'watch-later' && p.id !== 'easy' && p.id !== 'medium' && p.id !== 'hard' && p.id !== 'skipped')
                   .map((playlist) => {
                     const isSelected = !!tempMembership[playlist.id];
                     return (

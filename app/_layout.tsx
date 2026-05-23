@@ -9,8 +9,11 @@ import '../global.css';  // ← only here
 
 // ... rest of imports
 
+import { useOnboardingStore } from "@/store/useOnboardingStore";
+
 export default function RootLayout() {
   const { isAuthenticated, isLoading, restoreSession, user } = useAuthStore();
+  const { isOnboarded } = useOnboardingStore();
   const segments = useSegments();
   const router = useRouter();
 
@@ -26,17 +29,26 @@ export default function RootLayout() {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inOnboarding = (segments as string[])[1] === 'onboarding';
     const hasAccess = !!isAuthenticated || isGuest;
 
-    // If no access (neither auth nor guest) and trying to enter protected area
+    // Guard 1: If onboarding has not been completed, funnel them to the onboarding sequence
+    if (!isOnboarded) {
+      if (!inOnboarding) {
+        router.replace("/(auth)/onboarding");
+      }
+      return;
+    }
+
+    // Guard 2: If onboarding is complete, but they have no session and try to access protected area
     if (!hasAccess && !inAuthGroup) {
       router.replace("/(auth)/login");
     } 
-    // If we have access and are still hanging out in the auth group
+    // Guard 3: If they are fully authenticated and lingering in the auth group, send to Home Page
     else if (hasAccess && inAuthGroup) {
       router.replace("/(protected)/(tabs)/learn");
     }
-  }, [isAuthenticated, isLoading, segments, user?.id, isGuest]);
+  }, [isAuthenticated, isLoading, segments, user?.id, isGuest, isOnboarded]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

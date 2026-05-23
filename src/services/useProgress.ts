@@ -215,3 +215,86 @@ export const useUpdatePlaylistMembership = () => {
     },
   });
 };
+
+export const useUpdateDifficultyState = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ cardId, difficultyState }: { cardId: string; difficultyState: 'easy' | 'medium' | 'hard' | 'skipped' | null }) =>
+      progressService.updateDifficultyState(cardId, difficultyState),
+
+    onMutate: async ({ cardId, difficultyState }) => {
+      await queryClient.cancelQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
+      
+      const activePlaylistId = useBookmarkStore.getState().activePlaylistId;
+      if (activePlaylistId) {
+        await queryClient.cancelQueries({ queryKey: ['playlistDetail', activePlaylistId, 'cards'] });
+      }
+      await queryClient.cancelQueries({ queryKey: ['personalLibrary'] });
+
+      const previousRevisionCards = queryClient.getQueriesData<PaginatedRevisionCards>({ queryKey: [REVISION_CARDS_QUERY_KEY] });
+      const previousPlaylistCards = activePlaylistId
+        ? queryClient.getQueryData<IPopulatedRevisionCard[]>(['playlistDetail', activePlaylistId, 'cards'])
+        : null;
+      const previousLibrary = queryClient.getQueryData<PersonalLibrary>(['personalLibrary']);
+
+      queryClient.setQueriesData<PaginatedRevisionCards>({ queryKey: [REVISION_CARDS_QUERY_KEY] }, (oldData) => {
+        if (!oldData) return;
+        return {
+          ...oldData,
+          results: oldData.results.map((card) => {
+            if (card._id === cardId) {
+              return { ...card, difficultyState };
+            }
+            return card;
+          }),
+        };
+      });
+
+      if (activePlaylistId) {
+        queryClient.setQueryData<IPopulatedRevisionCard[]>(['playlistDetail', activePlaylistId, 'cards'], (oldCards) => {
+          if (!oldCards) return;
+          return oldCards.map((card) => {
+            if (card._id === cardId) {
+              return { ...card, difficultyState };
+            }
+            return card;
+          });
+        });
+      }
+
+      return { previousRevisionCards, previousPlaylistCards, previousLibrary, activePlaylistId };
+    },
+
+    onError: (err, variables, context) => {
+      if (context?.previousRevisionCards) {
+        context.previousRevisionCards.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      }
+      if (context?.activePlaylistId && context?.previousPlaylistCards) {
+        queryClient.setQueryData(['playlistDetail', context.activePlaylistId, 'cards'], context.previousPlaylistCards);
+      }
+      if (context?.previousLibrary) {
+        queryClient.setQueryData(['personalLibrary'], context.previousLibrary);
+      }
+      Toast.show({
+        type: 'error',
+        text1: 'Sync Failed',
+        text2: 'Could not update difficulty state.',
+      });
+    },
+
+    onSettled: (data, error, variables, context) => {
+      queryClient.invalidateQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+      queryClient.invalidateQueries({ queryKey: ['personalLibrary'] });
+      queryClient.invalidateQueries({ queryKey: ['playlists'] });
+      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'easy'] });
+      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'medium'] });
+      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'hard'] });
+      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'skipped'] });
+      if (context?.activePlaylistId) {
+        queryClient.invalidateQueries({ queryKey: ['playlistDetail', context.activePlaylistId, 'cards'] });
+      }
+    },
+  });
+};

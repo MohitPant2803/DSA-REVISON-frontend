@@ -16,6 +16,7 @@ import {
   TextInput,
   Animated as RNAnimated,
   FlatList,
+  Pressable,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import {
@@ -25,6 +26,7 @@ import {
   X,
   ListMusic,
   Check,
+  CheckCircle2,
   Heart,
   MoreVertical,
   Clock,
@@ -33,6 +35,11 @@ import {
   Settings2,
   BrainCircuit,
   Lock,
+  Flame,
+  Zap,
+  Skull,
+  SkipForward,
+  BookmarkPlus,
 } from 'lucide-react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { Image as ExpoImage } from 'expo-image';
@@ -57,13 +64,15 @@ import Animated, {
   withTiming,
   withSpring,
   withSequence,
+  withRepeat,
   interpolate,
+  interpolateColor,
   runOnJS,
   SharedValue,
   cancelAnimation,
 } from 'react-native-reanimated';
 import Toast from 'react-native-toast-message';
-import { useUpdateCardProgress } from '@/services/useProgress';
+import { useUpdateCardProgress, useUpdateDifficultyState } from '@/services/useProgress';
 import { useDeleteRevisionCard } from '@/hooks/useRevisionCards';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
@@ -75,6 +84,8 @@ import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import * as sessionQueueService from '@/services/sessionQueueService';
 import * as userCardStateService from '@/services/userCardStateService';
 import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
+import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.97;
@@ -279,166 +290,302 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
 interface ReelsActionRailProps {
   cleanId: string;
   item: IPopulatedRevisionCard;
-  isFavorite: boolean;
-  isDifficult: boolean;
-  isWatchLater: boolean;
-  onCardStateUpdate: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
-  onToggleWatchLater: (cleanId: string) => void;
+  onDifficultyStateUpdate: (state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
-  onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
-  scrollHorizontal: (idx?: number) => void;
   isGuest: boolean;
 }
+
+interface ClassificationButtonProps {
+  label: string;
+  icon: React.ComponentType<any>;
+  activeColor: string;
+  isActive: boolean;
+  onPress: () => void;
+  shouldPulse?: boolean;
+  pulseDelay?: number;
+}
+
+const ClassificationButton = React.memo(({
+  label,
+  icon: Icon,
+  activeColor,
+  isActive,
+  onPress,
+  shouldPulse = false,
+  pulseDelay = 0,
+}: ClassificationButtonProps) => {
+  const scale = useSharedValue(1);
+  const pulseScale = useSharedValue(1);
+  const glowOpacity = useSharedValue(isActive ? 1 : 0);
+  const ringScale = useSharedValue(isActive ? 1.15 : 0);
+
+  // Smoothly transition glow opacity and scale on active state change
+  useEffect(() => {
+    glowOpacity.value = withSpring(isActive ? 1 : 0, { damping: 15, stiffness: 120 });
+    ringScale.value = withSpring(isActive ? 1.15 : 0, { damping: 12, stiffness: 150 });
+  }, [isActive]);
+
+  // Premium Snappy Press scaling (Apple physical tactile feedback tokens)
+  const handlePressIn = () => {
+    scale.value = withSpring(0.82, { damping: 12, stiffness: 350 });
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1.0, { damping: 15, stiffness: 220 });
+  };
+
+  const handlePress = () => {
+    lightHaptic();
+    
+    // Snappy tactile feedback pop on activation
+    scale.value = withSequence(
+      withSpring(1.26, { damping: 9, stiffness: 320 }),
+      withSpring(1.0, { damping: 12, stiffness: 200 })
+    );
+    
+    onPress();
+  };
+
+  // Stagger-pulsing idle animation (direct active recall gaze guide)
+  useEffect(() => {
+    if (shouldPulse && !isActive) {
+      const timeout = setTimeout(() => {
+        pulseScale.value = withRepeat(
+          withSequence(
+            withTiming(1.15, { duration: 900 }),
+            withTiming(1.0, { duration: 900 })
+          ),
+          -1,
+          true
+        );
+      }, pulseDelay);
+      return () => {
+        clearTimeout(timeout);
+        cancelAnimation(pulseScale);
+        pulseScale.value = 1;
+      };
+    } else {
+      cancelAnimation(pulseScale);
+      pulseScale.value = 1;
+    }
+  }, [shouldPulse, pulseDelay, isActive]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value * pulseScale.value }],
+    };
+  });
+
+  const glowStyle = useAnimatedStyle(() => {
+    return {
+      opacity: glowOpacity.value,
+      transform: [{ scale: interpolate(glowOpacity.value, [0, 1], [0.8, 1.1]) }],
+    };
+  });
+
+  const ringStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(ringScale.value, [0, 1.15], [0, 0.45]),
+      transform: [{ scale: ringScale.value }],
+    };
+  });
+
+  return (
+    <Pressable
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      onPress={handlePress}
+      style={{ alignItems: 'center', marginBottom: 16 }}
+    >
+      <Animated.View style={[animatedStyle, { position: 'relative' }]}>
+        {/* Futuristic Soft Neon Aura Glow behind button */}
+        <Animated.View
+          style={[
+            glowStyle,
+            {
+              position: 'absolute',
+              top: -8,
+              left: -8,
+              right: -8,
+              bottom: -8,
+              borderRadius: 30,
+              backgroundColor: activeColor,
+              opacity: 0.25,
+              shadowColor: activeColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.65,
+              shadowRadius: 10,
+            },
+          ]}
+        />
+
+        {/* Expanding Ring on Active State */}
+        <Animated.View
+          style={[
+            ringStyle,
+            {
+              position: 'absolute',
+              top: -4,
+              left: -4,
+              right: -4,
+              bottom: -4,
+              borderRadius: 26,
+              borderWidth: 1.5,
+              borderColor: activeColor,
+            },
+          ]}
+        />
+
+        {/* Main Action Capsule Button */}
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: isActive ? activeColor : 'rgba(255, 255, 255, 0.08)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: isActive ? 'rgba(255, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.12)',
+            shadowColor: activeColor,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: isActive ? 0.4 : 0,
+            shadowRadius: 8,
+            elevation: isActive ? 4 : 0,
+          }}
+        >
+          {/* Concentric Glow pulse halo when in unclassified mode */}
+          {shouldPulse && !isActive && (
+            <Animated.View
+              style={{
+                position: 'absolute',
+                top: -6,
+                left: -6,
+                right: -6,
+                bottom: -6,
+                borderRadius: 28,
+                borderWidth: 1.5,
+                borderColor: activeColor,
+                opacity: interpolate(pulseScale.value, [1, 1.15], [0.65, 0]),
+                transform: [{ scale: pulseScale.value }],
+              }}
+            />
+          )}
+
+          <Icon
+            color={isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.65)'}
+            size={18}
+            strokeWidth={isActive ? 3.0 : 2.2}
+          />
+        </View>
+      </Animated.View>
+
+      <Text
+        style={{
+          fontSize: 9,
+          fontWeight: '900',
+          color: isActive ? activeColor : 'rgba(255, 255, 255, 0.45)',
+          marginTop: 6,
+          opacity: isActive ? 1 : 0.7,
+          textTransform: 'uppercase',
+          letterSpacing: 0.6,
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+});
 
 const ReelsActionRail = React.memo(({
   cleanId,
   item,
-  isFavorite,
-  isDifficult,
-  isWatchLater,
-  onCardStateUpdate,
-  onToggleWatchLater,
+  onDifficultyStateUpdate,
   onPlaylistPickerTrigger,
-  onMoreOptionsTrigger,
-  scrollHorizontal,
   isGuest,
 }: ReelsActionRailProps) => {
-  const handlePress = (action: () => void) => {
-    lightHaptic();
-    action();
-  };
-
-  const completedCardIds = useTrackingStore((state) => state.completedCardIds);
-  const toggleCardCompleted = useTrackingStore((state) => state.toggleCardCompleted);
-  const isTicked = !!completedCardIds[cleanId];
-
-  const watchScale = useSharedValue(1);
-  const tickScale = useSharedValue(1);
-
-  const isFirstRender = useRef(true);
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      return;
-    }
-    watchScale.value = withSequence(
-      withSpring(1.12, { damping: 18, stiffness: 180 }),
-      withSpring(1, { damping: 15, stiffness: 120 })
-    );
-  }, [isWatchLater]);
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    tickScale.value = withSequence(
-      withSpring(1.12, { damping: 18, stiffness: 180 }),
-      withSpring(1, { damping: 15, stiffness: 120 })
-    );
-  }, [isTicked]);
-
-  const watchStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: watchScale.value }],
-  }));
-
-  const tickStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: tickScale.value }],
-  }));
-
-  const handleTickPress = async () => {
-    lightHaptic();
-    toggleCardCompleted(cleanId);
-    
-    if (!isGuest) {
-      try {
-        await userCardStateService.incrementRevision(cleanId);
-      } catch (err) {
-        console.error('[Increment Revision Error]', err);
-      }
-    }
-
-    Toast.show({
-      type: 'success',
-      text1: isTicked ? 'Removed revision mark' : 'Revised 🎯',
-      text2: isTicked ? 'Revision state reverted.' : 'Revision marked successfully.',
-      position: 'top',
-      visibilityTime: 1200,
-    });
-  };
+  const currentDifficulty = item.difficultyState;
+  const shouldPulse = !currentDifficulty;
 
   return (
     <View 
       style={{
         position: 'absolute',
-        right: 8,
-        bottom: 70,
+        right: 12,
+        bottom: 74,
         alignItems: 'center',
-        backgroundColor: 'transparent',
-        gap: 12,
+        backgroundColor: 'rgba(9, 9, 11, 0.88)',
+        borderRadius: 32,
+        paddingVertical: 20,
+        paddingHorizontal: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
         zIndex: 50,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.22,
+        shadowRadius: 24,
+        elevation: 8,
       }}
     >
-      {/* Primary check/tick button: Elegant emerald check icon */}
-      <TouchableOpacity 
-        onPress={handleTickPress}
-        activeOpacity={0.65}
-        className="p-2.5 rounded-full active:scale-75"
-        style={{
-          backgroundColor: isTicked ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-          borderWidth: 1,
-          borderColor: isTicked ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-        }}
-        accessibilityLabel={isTicked ? "Mark as Uncompleted" : "Mark as Completed"}
-        accessibilityRole="button"
-        accessibilityState={{ selected: isTicked }}
-      >
-        <Animated.View style={tickStyle}>
-          <Check 
-            color={isTicked ? "#10B981" : "#64748B"} 
-            size={20} 
-            strokeWidth={isTicked ? 3.5 : 2} 
-          />
-        </Animated.View>
-      </TouchableOpacity>
+      <ClassificationButton
+        label="Easy"
+        icon={Flame}
+        activeColor="#10B981"
+        isActive={currentDifficulty === 'easy'}
+        onPress={() => onDifficultyStateUpdate('easy')}
+        shouldPulse={shouldPulse}
+        pulseDelay={0}
+      />
 
-      {/* Revise Later Button (Watch Later) */}
-      <TouchableOpacity 
-        onPress={() => handlePress(() => onToggleWatchLater(cleanId))}
-        activeOpacity={0.65}
-        className="p-2 rounded-full active:scale-75"
-        accessibilityLabel={isWatchLater ? "Remove from Revise Later" : "Add to Revise Later"}
-        accessibilityRole="button"
-        accessibilityState={{ selected: isWatchLater }}
-      >
-        <Animated.View style={watchStyle}>
-          <Clock 
-            color={isWatchLater ? "#3B82F6" : "#64748B"} 
-            size={18} 
-            strokeWidth={2.25} 
-          />
-        </Animated.View>
-      </TouchableOpacity>
+      <ClassificationButton
+        label="Medium"
+        icon={Zap}
+        activeColor="#F59E0B"
+        isActive={currentDifficulty === 'medium'}
+        onPress={() => onDifficultyStateUpdate('medium')}
+        shouldPulse={shouldPulse}
+        pulseDelay={250}
+      />
 
-      {/* Add to Playlist Button */}
-      <TouchableOpacity 
-        onPress={() => handlePress(() => onPlaylistPickerTrigger(item))}
-        activeOpacity={0.65}
-        className="p-2 rounded-full active:scale-75"
-        accessibilityLabel="Add to Playlist"
-        accessibilityRole="button"
-      >
-        <ListMusic color="#64748B" size={18} strokeWidth={2} />
-      </TouchableOpacity>
+      <ClassificationButton
+        label="Hard"
+        icon={Skull}
+        activeColor="#EF4444"
+        isActive={currentDifficulty === 'hard'}
+        onPress={() => onDifficultyStateUpdate('hard')}
+        shouldPulse={shouldPulse}
+        pulseDelay={500}
+      />
+
+      <ClassificationButton
+        label="Skipped"
+        icon={SkipForward}
+        activeColor="#64748B"
+        isActive={currentDifficulty === 'skipped'}
+        onPress={() => onDifficultyStateUpdate('skipped')}
+        shouldPulse={shouldPulse}
+        pulseDelay={750}
+      />
+
+      {/* Futuristic Sleek Separator Line */}
+      <View style={{ width: 24, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.15)', marginVertical: 4, marginBottom: 14 }} />
+
+      <ClassificationButton
+        label="Save"
+        icon={BookmarkPlus}
+        activeColor="#8B5CF6"
+        isActive={false}
+        onPress={() => onPlaylistPickerTrigger(item)}
+      />
     </View>
   );
 }, (prevProps, nextProps) => {
   return (
     prevProps.cleanId === nextProps.cleanId &&
-    prevProps.isFavorite === nextProps.isFavorite &&
-    prevProps.isDifficult === nextProps.isDifficult &&
-    prevProps.isWatchLater === nextProps.isWatchLater &&
-    prevProps.item._id === nextProps.item._id
+    prevProps.item.difficultyState === nextProps.item.difficultyState &&
+    prevProps.item._id === nextProps.item._id &&
+    prevProps.isGuest === nextProps.isGuest
   );
 });
 
@@ -458,6 +605,8 @@ interface ReelItemProps {
   onCardStateUpdate: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
   onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
+  onDifficultyStateUpdate: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
+  isActiveCardClassified?: boolean;
 }
 
 interface SlideCardWrapperProps {
@@ -568,6 +717,7 @@ const ActiveReelItem = React.memo(({
   onCardStateUpdate,
   onPlaylistPickerTrigger,
   onMoreOptionsTrigger,
+  onDifficultyStateUpdate,
 }: ReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [prevId, setPrevId] = useState(item._id);
@@ -578,6 +728,8 @@ const ActiveReelItem = React.memo(({
   );
   
   const slideDragX = useSharedValue(0);
+  const cardTranslateY = useSharedValue(0);
+  const lockPillColor = useSharedValue(0);
   const activeSlideIndexSV = useSharedValue(0);
   const isTransitioning = useSharedValue(false);
   const isMounted = useRef(true);
@@ -591,6 +743,7 @@ const ActiveReelItem = React.memo(({
     setActiveSlideIndex(0);
     cancelAnimation(slideDragX);
     slideDragX.value = 0;
+    cardTranslateY.value = 0;
     activeSlideIndexSV.value = 0;
     isTransitioning.value = false;
   }
@@ -691,6 +844,53 @@ const ActiveReelItem = React.memo(({
   }, [slides.length, index, activeIndex]);
 
   const isDifficult = !!item.isDifficult;
+  const isClassified = item.difficultyState !== null && item.difficultyState !== undefined;
+
+  useEffect(() => {
+    lockPillColor.value = withTiming(isClassified ? 1 : 0, { duration: 400 });
+  }, [isClassified]);
+
+  const lockPillAnimatedStyle = useAnimatedStyle(() => {
+    const backgroundColor = interpolateColor(
+      lockPillColor.value,
+      [0, 1],
+      ['rgba(15, 23, 42, 0.85)', 'rgba(6, 78, 59, 0.95)']
+    );
+    const borderColor = interpolateColor(
+      lockPillColor.value,
+      [0, 1],
+      ['rgba(255, 255, 255, 0.12)', 'rgba(16, 185, 129, 0.4)']
+    );
+
+    return {
+      backgroundColor,
+      borderColor,
+    };
+  });
+
+  const verticalGesture = Gesture.Pan()
+    .activeOffsetY([-10, 10])
+    .failOffsetX([-10, 10])
+    .enabled(!isClassified)
+    .onUpdate((event) => {
+      // Elastic resistance cap at -40px on swipe up, snap back on release
+      if (event.translationY < 0) {
+        cardTranslateY.value = Math.max(-40, event.translationY * 0.25);
+      } else {
+        cardTranslateY.value = Math.min(20, event.translationY * 0.2);
+      }
+    })
+    .onEnd(() => {
+      cardTranslateY.value = withSpring(0, {
+        damping: 15,
+        stiffness: 220,
+      });
+      runOnJS(lightHaptic)();
+    });
+
+  const animatedActiveCardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: cardTranslateY.value }],
+  }));
 
   // Strict direction lock for zero lag horizontal drag
   const horizontalGesture = Gesture.Pan()
@@ -807,13 +1007,16 @@ const ActiveReelItem = React.memo(({
         marginBottom: 16,
       }}
     >
-      <GestureDetector gesture={horizontalGesture}>
-        <View
-          style={{
-            width: CARD_WIDTH,
-            height: cardHeight,
-            position: 'relative',
-          }}
+      <GestureDetector gesture={Gesture.Exclusive(horizontalGesture, verticalGesture)}>
+        <Animated.View
+          style={[
+            {
+              width: CARD_WIDTH,
+              height: cardHeight,
+              position: 'relative',
+            },
+            animatedActiveCardStyle,
+          ]}
         >
           {slides.map((slide, indexInDeck) => {
             const delta = indexInDeck - activeSlideIndex;
@@ -838,21 +1041,73 @@ const ActiveReelItem = React.memo(({
               />
             );
           })}
-        </View>
+
+          {/* Morphing Lock Pill */}
+          <Animated.View
+            style={[
+              {
+                position: 'absolute',
+                bottom: 24,
+                left: 24,
+                right: 76, // give space for the action rail
+                borderRadius: 16,
+                borderWidth: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.1,
+                shadowRadius: 12,
+                zIndex: 40,
+              },
+              lockPillAnimatedStyle,
+            ]}
+          >
+            <View style={{ marginRight: 10 }}>
+              {isClassified ? (
+                <CheckCircle2 color="#10B981" size={18} strokeWidth={3} />
+              ) : (
+                <Lock color="#F59E0B" size={18} strokeWidth={2.5} />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontSize: 11,
+                  fontWeight: '800',
+                  letterSpacing: 0.5,
+                  textTransform: 'uppercase',
+                  marginBottom: 1,
+                }}
+              >
+                {isClassified ? 'Spaced Repetition Calibrated' : 'Calibrate Active Recall'}
+              </Text>
+              <Text
+                style={{
+                  color: isClassified ? '#A7F3D0' : '#E2E8F0',
+                  fontSize: 10,
+                  lineHeight: 14,
+                  opacity: 0.9,
+                }}
+              >
+                {isClassified 
+                  ? 'Card saved automatically! Swipe up anytime to revise.' 
+                  : 'Choose how well you know this to build your custom queue.'}
+              </Text>
+            </View>
+          </Animated.View>
+        </Animated.View>
       </GestureDetector>
 
       {/* Premium Glassmorphic Vertical Action Rail */}
       <ReelsActionRail
         cleanId={cleanId}
         item={item}
-        isFavorite={isFavorite}
-        isDifficult={isDifficult}
-        isWatchLater={isWatchLater}
-        onCardStateUpdate={onCardStateUpdate}
-        onToggleWatchLater={onToggleWatchLater}
+        onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
         onPlaylistPickerTrigger={onPlaylistPickerTrigger}
-        onMoreOptionsTrigger={onMoreOptionsTrigger}
-        scrollHorizontal={scrollHorizontal}
         isGuest={isGuest}
       />
     </View>
@@ -860,6 +1115,7 @@ const ActiveReelItem = React.memo(({
 }, (prevProps, nextProps) => {
   return (
     prevProps.item._id === nextProps.item._id &&
+    prevProps.item.difficultyState === nextProps.item.difficultyState &&
     prevProps.activeIndex === nextProps.activeIndex &&
     prevProps.index === nextProps.index &&
     prevProps.isFavorite === nextProps.isFavorite &&
@@ -875,6 +1131,27 @@ const ReelItem = React.memo((props: ReelItemProps) => {
   const isActiveReel = props.index === props.activeIndex;
 
   if (!isActiveReel) {
+    const isLockedNextCard = props.index > props.activeIndex && !props.isActiveCardClassified;
+
+    const scale = useSharedValue(isLockedNextCard ? 0.95 : 1);
+    const opacity = useSharedValue(isLockedNextCard ? 0.6 : 1);
+    const overlayOpacitySV = useSharedValue(isLockedNextCard ? 1 : 0);
+
+    useEffect(() => {
+      scale.value = withSpring(isLockedNextCard ? 0.95 : 1, SPRING_CONFIG);
+      opacity.value = withTiming(isLockedNextCard ? 0.6 : 1, { duration: 400 });
+      overlayOpacitySV.value = withTiming(isLockedNextCard ? 1 : 0, { duration: 350 });
+    }, [isLockedNextCard]);
+
+    const animatedCardStyle = useAnimatedStyle(() => ({
+      transform: [{ scale: scale.value }],
+      opacity: opacity.value,
+    }));
+
+    const overlayStyle = useAnimatedStyle(() => ({
+      opacity: overlayOpacitySV.value,
+    }));
+
     return (
       <View 
         style={{ 
@@ -885,7 +1162,7 @@ const ReelItem = React.memo((props: ReelItemProps) => {
           backgroundColor: 'transparent',
         }}
       >
-        <View
+        <Animated.View
           style={[
             styles.cardBase,
             {
@@ -895,15 +1172,92 @@ const ReelItem = React.memo((props: ReelItemProps) => {
               paddingTop: 64,
               paddingBottom: 24,
               overflow: 'hidden',
-            }
+            },
+            animatedCardStyle,
           ]}
         >
-          <ConceptCardPreview
-            card={props.item}
-            activePlaylistId={props.activePlaylistId}
-            onViewExplanation={() => {}}
-          />
-        </View>
+          {/* Card Content Backdrop */}
+          <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
+            <ConceptCardPreview
+              card={props.item}
+              activePlaylistId={props.activePlaylistId}
+              onViewExplanation={() => {}}
+            />
+          </Animated.View>
+
+          {/* Lock Blur Overlay */}
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, overlayStyle]}
+            pointerEvents={isLockedNextCard ? 'auto' : 'none'}
+          >
+            {Platform.OS === 'ios' ? (
+              (() => {
+                try {
+                  const { BlurView } = require('expo-blur');
+                  return (
+                    <BlurView
+                      intensity={25}
+                      tint="dark"
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                  );
+                } catch {
+                  return (
+                    <View 
+                      style={[
+                        StyleSheet.absoluteFillObject, 
+                        { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+                      ]} 
+                    />
+                  );
+                }
+              })()
+            ) : (
+              <View 
+                style={[
+                  StyleSheet.absoluteFillObject, 
+                  { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+                ]} 
+              />
+            )}
+
+            {/* Lock Indicator in center */}
+            <View 
+              style={{
+                ...StyleSheet.absoluteFillObject,
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <View
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 28,
+                  backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255, 255, 255, 0.2)',
+                }}
+              >
+                <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
+              </View>
+              <Text
+                style={{
+                  color: '#94A3B8',
+                  fontSize: 12,
+                  fontWeight: '800',
+                  textTransform: 'uppercase',
+                  letterSpacing: 1.5,
+                }}
+              >
+                Locked Next Problem
+              </Text>
+            </View>
+          </Animated.View>
+        </Animated.View>
       </View>
     );
   }
@@ -912,6 +1266,7 @@ const ReelItem = React.memo((props: ReelItemProps) => {
 }, (prevProps, nextProps) => {
   return (
     prevProps.item._id === nextProps.item._id &&
+    prevProps.item.difficultyState === nextProps.item.difficultyState &&
     prevProps.activeIndex === nextProps.activeIndex &&
     prevProps.index === nextProps.index &&
     prevProps.isFavorite === nextProps.isFavorite &&
@@ -919,7 +1274,8 @@ const ReelItem = React.memo((props: ReelItemProps) => {
     prevProps.width === nextProps.width &&
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.canEdit === nextProps.canEdit &&
-    prevProps.activePlaylistId === nextProps.activePlaylistId
+    prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
   );
 });
 
@@ -928,6 +1284,20 @@ export default function ReelsScreen() {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  useEffect(() => {
+    const checkTutorialStatus = async () => {
+      try {
+        const isComplete = await AsyncStorage.getItem('dsa-reels-tutorial-complete');
+        if (!isComplete) {
+          setShowTutorial(true);
+        }
+      } catch (e) {}
+    };
+    checkTutorialStatus();
+  }, []);
+
   const { user } = useAuthStore();
   const { canManageContent, role } = useRole();
   
@@ -942,6 +1312,7 @@ export default function ReelsScreen() {
     search?: string;
     shuffle?: string;
     startCardId?: string;
+    difficultyStates?: string;
   }>();
 
   const folderIdParam = normalizeParam(params.folderId);
@@ -950,6 +1321,7 @@ export default function ReelsScreen() {
   const difficultyParam = normalizeParam(params.difficulty);
   const searchParam = normalizeParam(params.search);
   const startCardIdParam = normalizeParam(params.startCardId);
+  const difficultyStatesParam = normalizeParam(params.difficultyStates);
 
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
@@ -1030,6 +1402,7 @@ export default function ReelsScreen() {
   // Local state for playlist picker modal and mutations
   const [playlistModalCard, setPlaylistModalCard] = useState<IPopulatedRevisionCard | null>(null);
   const updateProgressMutation = useUpdateCardProgress();
+  const updateDifficultyStateMutation = useUpdateDifficultyState();
   const togglePlaylistItem = useTogglePlaylistItem();
   const { mutate: deleteCard } = useDeleteRevisionCard();
   const viewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1138,6 +1511,14 @@ export default function ReelsScreen() {
       return true;
     });
 
+    // Apply difficulty states filters from parameters (from Folder)
+    if (difficultyStatesParam) {
+      const activeStates = difficultyStatesParam.split(',').filter(Boolean);
+      if (activeStates.length > 0) {
+        list = list.filter((c: any) => c.difficultyState && activeStates.includes(c.difficultyState));
+      }
+    }
+
     if (currentMode === 'difficult') {
       return list.filter((c) => c.isDifficult);
     }
@@ -1166,7 +1547,7 @@ export default function ReelsScreen() {
     }
     
     return list;
-  }, [allCards, currentMode, watchLaterCardIds, activePlaylistId]);
+  }, [allCards, currentMode, watchLaterCardIds, activePlaylistId, difficultyStatesParam]);
 
   // Hydrate watchLater list from backend on mount
   useEffect(() => {
@@ -1194,10 +1575,17 @@ export default function ReelsScreen() {
       } else if (currentMode === 'watchLater') {
         list = list.filter((c) => !c || watchLaterCardIds.includes(c._id.split('-loop-')[0]));
       }
+      // Apply difficulty states filters
+      if (difficultyStatesParam) {
+        const activeStates = difficultyStatesParam.split(',').filter(Boolean);
+        if (activeStates.length > 0) {
+          list = list.filter((c) => !c || (c.difficultyState && activeStates.includes(c.difficultyState)));
+        }
+      }
       return list;
     }
     return displayedCards;
-  }, [isSessionActive, sessionCards, displayedCards, currentMode, watchLaterCardIds]);
+  }, [isSessionActive, sessionCards, displayedCards, currentMode, watchLaterCardIds, difficultyStatesParam]);
 
 
   // Reset index 0 on mode changes
@@ -1698,6 +2086,34 @@ export default function ReelsScreen() {
     queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'watch-later'] });
   }, [isGuest, toggleWatchLater, queryClient]);
 
+  const handleDifficultyStateUpdateInReels = useCallback((cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => {
+    lightHaptic();
+    
+    // 1. Optimistic update of local React state instantly to unlock vertical swipe locks
+    setAllCards((prevCards) =>
+      prevCards.map((card) => {
+        const baseId = card._id.split('-loop-')[0];
+        if (baseId === cardId) {
+          return { ...card, difficultyState: state };
+        }
+        return card;
+      })
+    );
+
+    // 2. Persist to database instantly
+    if (!isGuest) {
+      updateDifficultyStateMutation.mutate({ cardId, difficultyState: state });
+    }
+
+    Toast.show({
+      type: 'success',
+      text1: `Classified as ${state.toUpperCase()}! 🔥`,
+      text2: 'Revision state synchronized.',
+      position: 'top',
+      visibilityTime: 1200,
+    });
+  }, [isGuest, updateDifficultyStateMutation]);
+
   const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
     const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
     const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, card.createdBy) : false);
@@ -1775,6 +2191,19 @@ export default function ReelsScreen() {
   const goToNextCard = useCallback(() => {
     const listLength = cardsList.length;
     if (listLength === 0) return;
+
+    const currentCard = cardsList[activeIndex];
+    if (currentCard && (currentCard.difficultyState === null || currentCard.difficultyState === undefined)) {
+      Toast.show({
+        type: 'info',
+        text1: 'Classification Required',
+        text2: 'Select a difficulty state to unlock the next card! 🔥',
+        position: 'top',
+        visibilityTime: 1800,
+      });
+      return;
+    }
+
     const nextIdx = (activeIndex + 1) % listLength;
     flatListRef.current?.scrollToIndex({
       index: nextIdx,
@@ -1782,7 +2211,7 @@ export default function ReelsScreen() {
     });
     setNavState({ activeIndex: nextIdx, prevIdx: activeIndex });
     transitionToCard(nextIdx);
-  }, [activeIndex, cardsList.length, transitionToCard]);
+  }, [activeIndex, cardsList, transitionToCard]);
 
   const goToPrevCard = useCallback(() => {
     const listLength = cardsList.length;
@@ -1901,10 +2330,14 @@ export default function ReelsScreen() {
     );
   }
 
-  const activeCard = displayedCards[activeIndex];
+  const activeCard = cardsList[activeIndex];
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} className="bg-[#F5F5F7]">
+      
+      {showTutorial && (
+        <FirstFeedTutorial onDismiss={() => setShowTutorial(false)} />
+      )}
       
       {/* Settings & Personalization Overlay */}
       {isSettingsOpen && (
@@ -1960,6 +2393,7 @@ export default function ReelsScreen() {
           <FlatList
             ref={flatListRef}
             data={cardsList}
+            scrollEnabled={activeCard ? activeCard.difficultyState !== null && activeCard.difficultyState !== undefined : true}
             renderItem={({ item, index }) => {
               if (!item) {
                 return (
@@ -1979,12 +2413,16 @@ export default function ReelsScreen() {
               const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
               const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
               const isFavorite = !!item.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes');
+              
+              const activeCardItem = cardsList[activeIndex];
+              const isActiveCardClassified = activeCardItem ? (activeCardItem.difficultyState !== null && activeCardItem.difficultyState !== undefined) : true;
 
               return (
                 <ReelItem
                   item={item}
                   index={index}
                   activeIndex={activeIndex}
+                  isActiveCardClassified={isActiveCardClassified}
                   goToNextCard={stableGoToNext}
                   goToPrevCard={stableGoToPrev}
                   cardHeight={cardHeight}
@@ -1997,6 +2435,7 @@ export default function ReelsScreen() {
                   onCardStateUpdate={handleProgressUpdateInReels}
                   onPlaylistPickerTrigger={setPlaylistModalCard}
                   onMoreOptionsTrigger={handleMoreOptionsTrigger}
+                  onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
                 />
               );
             }}
