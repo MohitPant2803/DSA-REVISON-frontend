@@ -102,6 +102,9 @@ export default function LoginScreen() {
           throw new Error('Google Sign-In failed: No ID Token returned.');
         }
 
+        console.log('[DEBUG] Google Sign-In Successful! Exchanging token with backend...');
+        console.log('[DEBUG] Target Backend URL:', api.defaults.baseURL ? `${api.defaults.baseURL}/auth/google` : 'UNDEFINED');
+
         const res = await api.post('/auth/google', { idToken });
         const { token, user: rawUser } = res.data.data;
 
@@ -121,6 +124,7 @@ export default function LoginScreen() {
         setIsAuthenticating(false);
       }
     } catch (error: any) {
+      console.log("FULL GOOGLE ERROR:", JSON.stringify(error, null, 2));
       if (error.code !== statusCodes.SIGN_IN_CANCELLED) {
         console.error('Google Sign-In Error:', error);
       }
