@@ -1550,8 +1550,39 @@ export default function ReelsScreen() {
     let cardsToSet = [...playlistCards]
       .filter(Boolean)
       .filter((card: any) => card && card._id);
-    setAllCards(cardsToSet);
-  }, [playlistCards]);
+      
+    setAllCards((prevCards) => {
+      if (prevCards.length === 0) return cardsToSet;
+      
+      const updatedCardsMap = new Map(cardsToSet.map((c: any) => [c._id, c]));
+      return prevCards.map((card) => {
+        const fresh = updatedCardsMap.get(card._id);
+        if (fresh) {
+          const baseId = card._id.split('-loop-')[0];
+          const isActiveCard = card._id === activeCardId || baseId === activeCardId?.split('-loop-')[0];
+          return {
+            ...card,
+            isFavorite: fresh.isFavorite,
+            isDifficult: fresh.isDifficult,
+            isArchived: fresh.isArchived,
+            // Protect active card from stale background overwrites
+            difficultyState: isActiveCard ? card.difficultyState : fresh.difficultyState,
+            currentUserQuestionProgress: isActiveCard ? card.currentUserQuestionProgress : fresh.currentUserQuestionProgress,
+            // Sync other properties
+            title: fresh.title,
+            explanation: fresh.explanation,
+            topic: fresh.topic,
+            difficulty: fresh.difficulty,
+            complexity: fresh.complexity,
+            code: fresh.code,
+            examples: fresh.examples,
+            slides: fresh.slides,
+          };
+        }
+        return card;
+      });
+    });
+  }, [playlistCards, activeCardId]);
 
   // Reset activeIndex and clear cards only when the active playlist actually changes
   const prevPlaylistId = useRef<string | null>(null);
@@ -1910,13 +1941,15 @@ export default function ReelsScreen() {
           const baseId = card._id.split('-loop-')[0];
           const fresh = updatedCardsMap.get(baseId) || updatedCardsMap.get(card._id);
           if (fresh) {
+            const isActiveCard = card._id === activeCardId || baseId === activeCardId?.split('-loop-')[0];
             return {
               ...card,
               isFavorite: fresh.isFavorite,
               isDifficult: fresh.isDifficult,
               isArchived: fresh.isArchived,
-              difficultyState: fresh.difficultyState,
-              currentUserQuestionProgress: fresh.currentUserQuestionProgress,
+              // Protect active card from stale background overwrites
+              difficultyState: isActiveCard ? card.difficultyState : fresh.difficultyState,
+              currentUserQuestionProgress: isActiveCard ? card.currentUserQuestionProgress : fresh.currentUserQuestionProgress,
               // Sync other base data too if changed
               title: fresh.title,
               explanation: fresh.explanation,
@@ -1941,7 +1974,7 @@ export default function ReelsScreen() {
         return [...mergedCards, ...newCards];
       });
     }
-  }, [activePlaylistId, data?.results]);
+  }, [activePlaylistId, data?.results, activeCardId]);
 
   // Prefetch adjacent pagination pages in background
   useEffect(() => {
@@ -2403,6 +2436,21 @@ export default function ReelsScreen() {
             let fullContext = activeCard.explanation || '';
             if (activeCard.code) {
               fullContext += `\n\nCode:\n${activeCard.code}`;
+            }
+            
+            if (activeCard.slides && activeCard.slides.length > 0) {
+              fullContext += `\n\nAdditional Slides Context:\n`;
+              activeCard.slides.forEach((slide, idx) => {
+                fullContext += `\n[Slide ${idx + 1}: ${slide.headline}]\n`;
+                if (slide.body) fullContext += `${slide.body}\n`;
+                if (slide.code) fullContext += `Code:\n${slide.code}\n`;
+                if (slide.blocks && Array.isArray(slide.blocks)) {
+                  slide.blocks.forEach((block: any) => {
+                    if (block.text) fullContext += `${block.text}\n`;
+                    if (block.code) fullContext += `Code:\n${block.code}\n`;
+                  });
+                }
+              });
             }
             
             let fullPrompt = '';
