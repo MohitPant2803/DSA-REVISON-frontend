@@ -210,7 +210,7 @@ export default function StartupCoordinator() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0F19', // Dark premium spatial canvas
+    backgroundColor: '#FAF9F7', // Warm off-white canvas
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -230,15 +230,15 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(226, 232, 240, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    shadowColor: '#8B5CF6',
+    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.04,
     shadowRadius: 16,
     elevation: 3,
   },
@@ -246,14 +246,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    color: '#F8FAFC',
+    color: '#0F172A', // Dark navy
     fontSize: 26,
     fontWeight: 'normal',
     letterSpacing: -0.5,
     marginBottom: 8,
   },
   subtitle: {
-    color: '#64748B',
+    color: '#475569', // Soft charcoal
     fontSize: 14,
     fontWeight: 'normal',
   },

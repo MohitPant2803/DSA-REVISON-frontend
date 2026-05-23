@@ -368,6 +368,19 @@ export const ReelsSettingsOverlay = React.memo(({
                 }}
               />
             </View>
+
+            {/* AI Assistant Mode */}
+            <View style={styles.settingGroup}>
+              <Text style={styles.groupLabel}>AI Assistant Mode</Text>
+              <SegmentedControl
+                options={[
+                  { id: 'explanation', label: 'Explain This' },
+                  { id: 'quiz', label: 'Test Me' },
+                ]}
+                activeId={preferences.gptPromptMode || 'explanation'}
+                onChange={(id) => updatePreference('gptPromptMode', id as 'explanation' | 'quiz')}
+              />
+            </View>
           </ScrollView>
         </Animated.View>
       </View>

@@ -173,18 +173,21 @@ export const useTogglePlaylistItem = () => {
       }
     },
     onMutate: async ({ playlistId, revisionCardId, isInPlaylist }) => {
-      await qc.cancelQueries({ queryKey: [PLAYLISTS_KEY] });
+      const isAuthenticated = useAuthStore.getState().isAuthenticated;
+      const playlistsKey = [PLAYLISTS_KEY, isAuthenticated];
+
+      await qc.cancelQueries({ queryKey: playlistsKey });
       await qc.cancelQueries({ queryKey: [PLAYLISTS_KEY, 'membership', revisionCardId] });
       await qc.cancelQueries({ queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'cards'] });
 
-      const previousPlaylists = qc.getQueryData<UIPlaylist[]>([PLAYLISTS_KEY]);
+      const previousPlaylists = qc.getQueryData<UIPlaylist[]>(playlistsKey);
       const previousMembership = qc.getQueryData<Record<string, boolean>>([PLAYLISTS_KEY, 'membership', revisionCardId]);
       const previousCards = qc.getQueryData<IPopulatedRevisionCard[]>([PLAYLIST_DETAIL_KEY, playlistId, 'cards']);
 
       // Optimistically update the playlists key
       if (previousPlaylists) {
         qc.setQueryData(
-          [PLAYLISTS_KEY],
+          playlistsKey,
           previousPlaylists.map((pl) => {
             if (pl.id === playlistId) {
               const currentIds = pl.orderedCardIds ?? [];
@@ -222,11 +225,11 @@ export const useTogglePlaylistItem = () => {
         );
       }
 
-      return { previousPlaylists, previousMembership, previousCards };
+      return { previousPlaylists, previousMembership, previousCards, playlistsKey };
     },
     onError: (err, variables, context) => {
-      if (context?.previousPlaylists) {
-        qc.setQueryData([PLAYLISTS_KEY], context.previousPlaylists);
+      if (context?.previousPlaylists && context.playlistsKey) {
+        qc.setQueryData(context.playlistsKey, context.previousPlaylists);
       }
       if (context?.previousMembership) {
         qc.setQueryData([PLAYLISTS_KEY, 'membership', variables.revisionCardId], context.previousMembership);
@@ -236,7 +239,8 @@ export const useTogglePlaylistItem = () => {
       }
     },
     onSettled: (_data, _error, variables) => {
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+      const isAuthenticated = useAuthStore.getState().isAuthenticated;
+      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY, isAuthenticated] });
       qc.invalidateQueries({ queryKey: [PLAYLIST_DETAIL_KEY, variables.playlistId] });
       qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY, 'membership', variables.revisionCardId] });
     },

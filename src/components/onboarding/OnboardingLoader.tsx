@@ -178,7 +178,7 @@ export function OnboardingLoader() {
       <View style={styles.compilerPortal}>
         <Animated.View style={[styles.haloRing, haloAnimatedStyle]} />
         <View style={styles.coreBranding}>
-          <Sparkles color="#8B5CF6" size={28} />
+          <Sparkles color="#8B5CF6" size={28} strokeWidth={1.5} />
         </View>
 
         {/* Floating cards being sorted */}
@@ -194,21 +194,21 @@ export function OnboardingLoader() {
       {/* Playlist Folders visual compiling */}
       <View style={styles.foldersRow}>
         <Animated.View style={[styles.folderPlate, folder1AnimatedStyle]}>
-          <GlassPanel style={styles.folderGlass} intensity={14} tint="dark">
-            <Folder color="#8B5CF6" size={18} />
+          <View style={styles.folderCard}>
+            <Folder color="#8B5CF6" size={16} strokeWidth={2.5} />
             <Text style={styles.folderName} numberOfLines={1}>
               {weak1}
             </Text>
-          </GlassPanel>
+          </View>
         </Animated.View>
 
         <Animated.View style={[styles.folderPlate, folder2AnimatedStyle]}>
-          <GlassPanel style={styles.folderGlass} intensity={14} tint="dark">
-            <Folder color="#6366F1" size={18} />
+          <View style={styles.folderCard}>
+            <Folder color="#6366F1" size={16} strokeWidth={2.5} />
             <Text style={styles.folderName} numberOfLines={1}>
               {weak2}
             </Text>
-          </GlassPanel>
+          </View>
         </Animated.View>
       </View>
 
@@ -256,21 +256,22 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#8B5CF6',
     borderStyle: 'dashed',
-    opacity: 0.35,
+    opacity: 0.25,
   },
   coreBranding: {
     width: 68,
     height: 68,
     borderRadius: 22,
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.15)',
+    borderColor: 'rgba(226, 232, 240, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8B5CF6',
+    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.03,
     shadowRadius: 16,
+    elevation: 2,
   },
   microCard: {
     position: 'absolute',
@@ -283,15 +284,15 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   cardRed: {
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    borderColor: '#8B5CF6',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
   cardGreen: {
-    backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    borderColor: '#6366F1',
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    borderColor: 'rgba(99, 102, 241, 0.3)',
   },
   microText: {
-    color: '#F8FAFC',
+    color: '#0F172A',
     fontSize: 10,
     fontWeight: 'bold',
   },
@@ -303,18 +304,27 @@ const styles = StyleSheet.create({
   },
   folderPlate: {
     width: (width - 80) / 2,
-    height: 64,
+    height: 56,
   },
-  folderGlass: {
+  folderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.8)',
     padding: 12,
     height: '100%',
     flexDirection: 'row',
     alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
+    elevation: 1,
   },
   folderName: {
-    color: '#94A3B8',
+    color: '#0F172A',
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: 'bold',
     marginLeft: 8,
     flex: 1,
   },
@@ -324,7 +334,7 @@ const styles = StyleSheet.create({
   progressBarBg: {
     width: '100%',
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(148, 163, 184, 0.15)',
     borderRadius: 2,
     marginBottom: 16,
   },
@@ -342,11 +352,12 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   logText: {
-    color: '#64748B',
+    color: '#475569',
     fontSize: 14,
+    fontWeight: '500',
   },
   logTextSuccess: {
     color: '#10B981',
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
 });

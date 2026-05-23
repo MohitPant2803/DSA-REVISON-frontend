@@ -244,7 +244,13 @@ export const useUpdateDifficultyState = () => {
           ...oldData,
           results: oldData.results.map((card) => {
             if (card._id === cardId) {
-              return { ...card, difficultyState };
+              const qp = difficultyState
+                ? {
+                    attemptStatus: difficultyState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
+                    perceivedDifficultyByUser: difficultyState === 'skipped' ? null : (difficultyState as any),
+                  }
+                : null;
+              return { ...card, difficultyState, currentUserQuestionProgress: qp };
             }
             return card;
           }),
@@ -256,7 +262,13 @@ export const useUpdateDifficultyState = () => {
           if (!oldCards) return;
           return oldCards.map((card) => {
             if (card._id === cardId) {
-              return { ...card, difficultyState };
+              const qp = difficultyState
+                ? {
+                    attemptStatus: difficultyState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
+                    perceivedDifficultyByUser: difficultyState === 'skipped' ? null : (difficultyState as any),
+                  }
+                : null;
+              return { ...card, difficultyState, currentUserQuestionProgress: qp };
             }
             return card;
           });

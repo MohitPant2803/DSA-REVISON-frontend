@@ -10,14 +10,27 @@ interface StatsCardProps {
 
 export function StatsCard({ icon, label, value, containerClassName }: StatsCardProps) {
   return (
-    <View className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-sm shadow-slate-200/50 ${containerClassName || ''}`}>
+    <View 
+      className={`bg-white p-6 rounded-[30px] border ${containerClassName || ''}`}
+      style={{
+        borderColor: 'rgba(148,163,184,0.08)',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.03,
+        shadowRadius: 18,
+        elevation: 2,
+      }}
+    >
       <View className="flex-row items-center mb-3">
-        <View className="bg-slate-50 p-2.5 rounded-2xl mr-3">
+        <View 
+          className="p-2.5 rounded-2xl mr-3 border bg-[#F5F3FF]/40"
+          style={{ borderColor: 'rgba(139, 92, 246, 0.04)' }}
+        >
           {icon}
         </View>
-        <Text className="text-slate-500 text-xs font-bold uppercase tracking-wider">{label}</Text>
+        <Text className="text-[#64748B] text-[10px] font-bold uppercase tracking-wider">{label}</Text>
       </View>
-      <Text className="text-slate-900 text-3xl font-black tracking-tight">{value}</Text>
+      <Text className="text-[#0F172A] text-[26px] font-bold tracking-tight leading-none">{value}</Text>
     </View>
   );
 }

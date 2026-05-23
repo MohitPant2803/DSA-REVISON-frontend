@@ -34,6 +34,11 @@ import {
   ArrowRight,
   ShieldCheck,
   Lock,
+  Folder,
+  Smile,
+  Play,
+  ChevronRight,
+  MoreHorizontal,
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -72,25 +77,8 @@ interface SmartPlaylistCardProps {
 }
 
 const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardProps) => {
-  const isHard = playlist.id === 'hard';
-  const hasItems = (playlist.itemCount ?? 0) > 0;
-  
   // Spring lift configurations on touch
   const scale = useSharedValue(1);
-  const glowOpacity = useSharedValue(0.45);
-
-  useEffect(() => {
-    // Soft idle breathing glow for smart playlists
-    glowOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.65, { duration: 1500 }),
-        withTiming(0.35, { duration: 1500 })
-      ),
-      -1,
-      true
-    );
-    return () => cancelAnimation(glowOpacity);
-  }, []);
 
   const handlePressIn = () => {
     scale.value = withSpring(0.95, { damping: 20, stiffness: 350 });
@@ -104,47 +92,55 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
     transform: [{ scale: scale.value }],
   }));
 
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glowOpacity.value,
-  }));
-
   const getCardTheme = () => {
     switch (playlist.id) {
       case 'easy':
         return {
-          bg: '#E6F4EA',
-          border: 'rgba(52, 168, 83, 0.25)',
-          text: '#137333',
-          iconBg: '#D2EBD9',
-          glow: 'rgba(52, 168, 83, 0.4)',
-          icon: Flame,
+          bg: '#F2FAF5', // Light green pastel
+          border: 'rgba(16, 185, 129, 0.06)',
+          text: '#10B981', // Clean green
+          iconBg: '#E6F4EA',
+          blobColor: 'rgba(16, 185, 129, 0.05)',
+          displayName: 'Easy progress',
+          statusText: 'Keep it going',
+          statusColor: '#10B981',
+          icon: Check,
         };
       case 'medium':
         return {
-          bg: '#FFFBEB',
-          border: 'rgba(245, 158, 11, 0.25)',
-          text: '#B45309',
-          iconBg: '#FFF3C2',
-          glow: 'rgba(245, 158, 11, 0.4)',
+          bg: '#FCFAF2', // Light yellow pastel
+          border: 'rgba(245, 158, 11, 0.05)',
+          text: '#F59E0B', // Clean amber
+          iconBg: '#FEF7E0',
+          blobColor: 'rgba(245, 158, 11, 0.04)',
+          displayName: 'Medium practice',
+          statusText: 'Good to review',
+          statusColor: '#B45309',
           icon: Zap,
         };
       case 'hard':
         return {
-          bg: '#FFF5F5',
-          border: 'rgba(239, 68, 68, 0.25)',
-          text: '#B91C1C',
-          iconBg: '#FFE3E3',
-          glow: 'rgba(239, 68, 68, 0.4)',
-          icon: Skull,
+          bg: '#FFF4F4', // Light pink pastel
+          border: 'rgba(239, 68, 68, 0.05)',
+          text: '#EF4444', // Clean red
+          iconBg: '#FCE8E6',
+          blobColor: 'rgba(239, 68, 68, 0.05)',
+          displayName: 'Hard focus',
+          statusText: 'Cards need attention',
+          statusColor: '#E11D48',
+          icon: Brain,
         };
       case 'skipped':
       default:
         return {
-          bg: '#F8FAFC',
-          border: 'rgba(100, 116, 139, 0.2)',
-          text: '#475569',
-          iconBg: '#E2E8F0',
-          glow: 'rgba(100, 116, 139, 0.15)',
+          bg: '#F4F6FA', // Light blue/gray pastel
+          border: 'rgba(100, 116, 139, 0.05)',
+          text: '#64748B', // Cool slate
+          iconBg: '#E8EAED',
+          blobColor: 'rgba(100, 116, 139, 0.04)',
+          displayName: 'Skipped for now',
+          statusText: 'Come back later',
+          statusColor: '#64748B',
           icon: SkipForward,
         };
     }
@@ -159,52 +155,56 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         onPress={onPress}
-        className="w-full p-5 rounded-[28px] border relative overflow-hidden"
+        className="w-full p-5 rounded-[26px] border relative overflow-hidden"
         style={{
           backgroundColor: theme.bg,
           borderColor: theme.border,
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: 0.02,
+          shadowRadius: 14,
+          elevation: 2,
         }}
       >
-        {/* Soft Glowing Neon Aura */}
-        <Animated.View
-          style={[
-            glowStyle,
-            {
-              position: 'absolute',
-              top: -20,
-              right: -20,
-              width: 70,
-              height: 70,
-              borderRadius: 35,
-              backgroundColor: theme.glow,
-              filter: Platform.OS === 'web' ? 'blur(16px)' : undefined,
-              opacity: 0.35,
-            },
-          ]}
+        {/* Soft corner blob decoration */}
+        <View
+          style={{
+            position: 'absolute',
+            top: -24,
+            right: -24,
+            width: 76,
+            height: 76,
+            borderRadius: 38,
+            backgroundColor: theme.blobColor,
+          }}
         />
 
-        {/* Header containing icon and indicator */}
+        {/* Header containing icon */}
         <View className="flex-row items-center justify-between">
           <View
-            className="w-8 h-8 rounded-xl items-center justify-center border"
-            style={{ backgroundColor: theme.iconBg, borderColor: theme.border }}
+            className="w-9 h-9 rounded-full items-center justify-center border"
+            style={{ backgroundColor: theme.iconBg, borderColor: 'rgba(148,163,184,0.04)' }}
           >
-            <IconComponent color={theme.text} size={15} strokeWidth={2.5} />
+            <IconComponent color={theme.text} size={15} strokeWidth={2.0} />
           </View>
-          
-          {isHard && hasItems && (
-            <View className="px-2 py-0.5 rounded-full bg-rose-500 shadow-sm shadow-rose-200">
-              <Text className="text-[8px] font-extrabold text-white uppercase tracking-wider">Focus</Text>
-            </View>
-          )}
         </View>
 
-        <Text className="text-[26px] font-black tracking-tight mt-5 leading-none" style={{ color: theme.text }}>
+        {/* Huge dynamic number */}
+        <Text className="text-[34px] font-black tracking-tight mt-4 leading-none text-[#0B1327]">
           {playlist.itemCount ?? 0}
         </Text>
 
-        <Text className="font-extrabold text-[12px] uppercase tracking-wider mt-1" style={{ color: theme.text, opacity: 0.7 }}>
-          {playlist.name}
+        {/* Label */}
+        <Text className="font-bold text-[13px] text-[#0B1327] mt-2 tracking-tight">
+          {theme.displayName}
+        </Text>
+
+        {/* Status subtext */}
+        <Text 
+          className="text-[10px] font-semibold mt-1 tracking-tight"
+          style={{ color: theme.statusColor }}
+        >
+          {theme.statusText}
         </Text>
       </Pressable>
     </Animated.View>
@@ -244,49 +244,52 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
     transform: [{ scale: scale.value }],
   }));
 
-  // Muted tones for custom playlists to separate them visually from system cores
-  const getCustomTheme = () => {
-    const tones = [
-      { bg: '#F5F3FF', border: 'rgba(109, 40, 217, 0.15)', text: '#6D28D9', bar: '#8B5CF6', iconBg: '#E8E3FF' }, // soft violet
-      { bg: '#ECFDF5', border: 'rgba(16, 185, 129, 0.15)', text: '#047857', bar: '#10B981', iconBg: '#D1FAE5' }, // soft emerald
-      { bg: '#EFF6FF', border: 'rgba(59, 130, 246, 0.15)', text: '#1D4ED8', bar: '#3B82F6', iconBg: '#DBEAFE' }, // soft blue
-      { bg: '#FFF5F5', border: 'rgba(239, 68, 68, 0.15)', text: '#B91C1C', bar: '#EF4444', iconBg: '#FFE3E3' }, // soft rose
-    ];
-
-    const hash = (playlist.name || '').split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
-    return tones[hash % tones.length];
-  };
-
-  const colors = getCustomTheme();
-
   return (
     <Animated.View style={[animatedStyle, { width: '48%', marginBottom: 12 }]}>
       <Pressable
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         onPress={onPress}
-        onLongPress={handleLongPress}
-        delayLongPress={350}
-        className="w-full p-5 rounded-[28px] border shadow-sm shadow-slate-100/5 bg-white"
-        style={{ borderColor: colors.border }}
+        className="w-full flex-row items-center p-4 rounded-[22px] border bg-white justify-between"
+        style={{
+          borderColor: 'rgba(148,163,184,0.08)',
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: 0.025,
+          shadowRadius: 14,
+          elevation: 2,
+        }}
       >
-        <View 
-          className="w-8 h-8 rounded-xl items-center justify-center border"
-          style={{ backgroundColor: colors.iconBg, borderColor: colors.border }}
-        >
-          <ListMusic color={colors.text} size={14} strokeWidth={2.5} />
+        <View className="flex-row items-center flex-1 mr-2">
+          {/* Soft purple rounded icon container */}
+          <View 
+            className="w-10 h-10 rounded-2xl items-center justify-center bg-[#F5F3FF] border"
+            style={{ borderColor: 'rgba(139, 92, 246, 0.04)' }}
+          >
+            <ListMusic color="#8B5CF6" size={16} strokeWidth={2.0} />
+          </View>
+
+          {/* Title & Metadata */}
+          <View className="ml-3 flex-1">
+            <Text 
+              className="font-bold text-[13px] text-[#0B1327]" 
+              numberOfLines={1}
+            >
+              {playlist.name}
+            </Text>
+            <Text className="text-[10px] font-semibold text-[#7F8A9E] mt-0.5">
+              {playlist.itemCount === 0 ? 'Empty' : `${playlist.itemCount ?? 0} cards`}
+            </Text>
+          </View>
         </View>
 
-        <Text 
-          className="font-extrabold text-[14px] leading-tight tracking-tight mt-5 text-[#0F172A]" 
-          numberOfLines={1}
+        {/* Three dots menu */}
+        <TouchableOpacity 
+          onPress={onLongPress}
+          className="p-1"
         >
-          {playlist.name}
-        </Text>
-
-        <Text className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
-          {playlist.itemCount ?? 0} cards
-        </Text>
+          <MoreHorizontal color="#A0AEC0" size={16} />
+        </TouchableOpacity>
       </Pressable>
     </Animated.View>
   );
@@ -323,9 +326,17 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
 
   return (
     <Modal visible={true} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/35 justify-center items-center px-6" onPress={onClose}>
+      <Pressable className="flex-1 bg-black/25 justify-center items-center px-6" onPress={onClose}>
         <View 
-          className="bg-white w-full rounded-[32px] p-6 shadow-2xl border border-slate-100"
+          className="bg-white w-full rounded-[32px] p-6 border bg-white"
+          style={{
+            borderColor: 'rgba(148,163,184,0.10)',
+            shadowColor: '#0F172A',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.03,
+            shadowRadius: 18,
+            elevation: 3,
+          }}
           onTouchEnd={(e) => e.stopPropagation()}
         >
           <Text className="text-[#0F172A] text-base font-bold tracking-tight mb-4 text-center">
@@ -333,8 +344,9 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
           </Text>
 
           <TextInput
-            className="border border-slate-200 text-[#0F172A] p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center bg-slate-50"
-            placeholder="e.g. Dynamic Programming, Graph Core"
+            className="border text-[#0F172A] p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center bg-[#FAF9F7]"
+            style={{ borderColor: 'rgba(148,163,184,0.12)' }}
+            placeholder="e.g. Trees, Dynamic Programming..."
             placeholderTextColor="#94A3B8"
             value={playlistName}
             onChangeText={setPlaylistName}
@@ -346,22 +358,23 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
             <SpringPressable
               onPress={handleCreate}
               disabled={createPlaylistMutation.isPending}
-              className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6] shadow-md shadow-violet-200"
+              className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
               style={{ opacity: createPlaylistMutation.isPending ? 0.7 : 1 }}
             >
               {createPlaylistMutation.isPending ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text className="text-white font-bold text-xs">Create Archive</Text>
+                <Text className="text-white font-semibold text-sm">Create</Text>
               )}
             </SpringPressable>
 
             <SpringPressable
               onPress={onClose}
               disabled={createPlaylistMutation.isPending}
-              className="flex-1 py-3.5 rounded-2xl items-center justify-center border border-slate-200 bg-white"
+              className="flex-1 py-3.5 rounded-2xl items-center justify-center border bg-white"
+              style={{ borderColor: 'rgba(148,163,184,0.10)' }}
             >
-              <Text className="text-slate-500 font-bold text-xs">Cancel</Text>
+              <Text className="text-[#64748B] font-semibold text-sm">Cancel</Text>
             </SpringPressable>
           </View>
         </View>
@@ -415,9 +428,12 @@ export default function PersonalScreen() {
     transform: [{ translateY: bgFloatY.value }],
   }));
 
-  // Smart split lists
+  // Smart split lists sorted exactly like the reference screenshot grid layout
   const smartPlaylists = useMemo(() => {
-    return playlists.filter((p) => ['easy', 'medium', 'hard', 'skipped'].includes(p.id));
+    const order = ['hard', 'easy', 'medium', 'skipped'];
+    return order
+      .map(id => playlists.find(p => p.id === id))
+      .filter((p): p is any => p !== undefined);
   }, [playlists]);
 
   const customPlaylists = useMemo(() => {
@@ -577,9 +593,9 @@ export default function PersonalScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F6]" edges={['top', 'left', 'right']}>
+    <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
       
-      {/* Sleek Futuristic Background Ambient Orbs */}
+      {/* Sleek Minimalist Background Ambient Orbs */}
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', zIndex: -1 }}>
         <Animated.View
           style={[
@@ -587,12 +603,12 @@ export default function PersonalScreen() {
             {
               position: 'absolute',
               top: 50,
-              right: -100,
-              width: 300,
-              height: 300,
-              borderRadius: 150,
-              backgroundColor: 'rgba(139, 92, 246, 0.05)',
-              filter: Platform.OS === 'web' ? 'blur(80px)' : undefined,
+              right: -120,
+              width: 500,
+              height: 500,
+              borderRadius: 250,
+              backgroundColor: 'rgba(139, 92, 246, 0.008)', // Reduced opacity significantly
+              filter: Platform.OS === 'web' ? 'blur(100px)' : undefined,
             },
           ]}
         />
@@ -601,13 +617,13 @@ export default function PersonalScreen() {
             ambientOrbStyle,
             {
               position: 'absolute',
-              bottom: 100,
-              left: -120,
-              width: 320,
-              height: 320,
-              borderRadius: 160,
-              backgroundColor: 'rgba(16, 185, 129, 0.04)',
-              filter: Platform.OS === 'web' ? 'blur(85px)' : undefined,
+              bottom: 80,
+              left: -150,
+              width: 450,
+              height: 450,
+              borderRadius: 225,
+              backgroundColor: 'rgba(245, 158, 11, 0.006)', // Reduced opacity significantly
+              filter: Platform.OS === 'web' ? 'blur(110px)' : undefined,
             },
           ]}
         />
@@ -616,66 +632,176 @@ export default function PersonalScreen() {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 130, paddingTop: 8 }}
+        contentContainerStyle={{ paddingBottom: 130, paddingTop: 12 }}
       >
         {/* ==========================================
             OS HEADER SECTION WITH BREATHING STREAK
             ========================================== */}
-        <View className="px-6 pb-4">
+        <View className="px-6 pb-6 pt-2">
           <View className="flex-row items-center justify-between">
             <View>
-              {/* Online indicator node */}
-              <View className="flex-row items-center gap-1.5 mb-1 bg-emerald-50 border border-emerald-200/50 rounded-full px-2 py-0.5 self-start">
-                <View className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <Text className="text-emerald-700 text-[9px] font-black uppercase tracking-wider">Synced to Brain</Text>
-              </View>
-
-              <Text className="text-[#0F172A] text-[28px] font-black tracking-tight leading-tight">
-                Revision OS
+              <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
+                My Space
               </Text>
-              <Text className="text-slate-400 text-xs font-semibold">
-                Spaced-Repetition Kernel v1.2
+              <Text className="text-[#7F8A9E] text-[13px] font-semibold mt-1.5 leading-none">
+                Your personal revision deck
               </Text>
             </View>
 
             {/* Streak & Floating Capsule Navigation */}
-            <View className="flex-row items-center gap-2.5">
-              {/* Breathing Orange/Red Streak 🔥 */}
+            <View className="flex-row items-center gap-2">
+              {/* Flame Streak Pill */}
               <SpringPressable
                 onPress={handleStreakTap}
                 activeScale={0.92}
-                className="flex-row items-center gap-1.5 px-3.5 py-2 rounded-full border border-amber-200/50 bg-[#FFFBEB] shadow-sm shadow-amber-100"
+                className="flex-row items-center gap-1 px-3 py-1.5 rounded-full bg-white border"
+                style={{
+                  borderColor: 'rgba(245, 158, 11, 0.1)',
+                  shadowColor: '#0F172A',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.02,
+                  shadowRadius: 10,
+                  elevation: 1,
+                }}
               >
-                <Flame color="#F59E0B" size={15} strokeWidth={2.8} />
-                <Text className="text-[#B45309] font-black text-xs tracking-tight">
-                  {stats?.streakCount ?? 4} Days
+                <Flame color="#F59E0B" size={14} strokeWidth={2.2} />
+                <Text className="text-[#B45309] font-bold text-[11px] tracking-tight">
+                  {stats?.streakCount ?? 0} Days
                 </Text>
               </SpringPressable>
 
               <SpringPressable
                 onPress={handlePressSettings}
                 activeScale={0.9}
-                className="w-9 h-9 rounded-full items-center justify-center border border-slate-200 bg-white shadow-sm"
+                className="w-8 h-8 rounded-full items-center justify-center bg-white border"
+                style={{
+                  borderColor: 'rgba(148,163,184,0.08)',
+                  shadowColor: '#0F172A',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.02,
+                  shadowRadius: 10,
+                  elevation: 1,
+                }}
               >
-                <Settings2 color="#64748B" size={16} strokeWidth={2.2} />
+                <Settings2 color="#7F8A9E" size={14} strokeWidth={2.0} />
               </SpringPressable>
             </View>
           </View>
+        </View>
 
-          {/* Metric widgets */}
-          <View className="flex-row gap-4 mt-6">
-            <StatsCard
-              icon={<Check color="#10B981" size={18} strokeWidth={3} />}
-              label="Revised Cards"
-              value={`${stats?.totalRevisions ?? 0}`}
-              containerClassName="flex-1 rounded-[24px] border border-slate-100/50 bg-white"
-            />
-            <StatsCard
-              icon={<Clock color="#3B82F6" size={18} strokeWidth={2.5} />}
-              label="Revision Time"
-              value={formatTotalTime(stats?.totalTimeSpent ?? 0)}
-              containerClassName="flex-1 rounded-[24px] border border-slate-100/50 bg-white"
-            />
+        {/* ==========================================
+            HERO STUDY JOURNAL CARD
+            ========================================== */}
+        <View className="px-6 mb-6">
+          <View 
+            className="flex-row items-center justify-between p-6 rounded-[28px] bg-white border"
+            style={{
+              borderColor: 'rgba(148,163,184,0.08)',
+              shadowColor: '#0F172A',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.03,
+              shadowRadius: 18,
+              elevation: 2,
+            }}
+          >
+            {/* Left Column info */}
+            <View className="flex-1 mr-4">
+              {/* Smiling emoji avatar */}
+              <View 
+                className="w-10 h-10 rounded-full items-center justify-center bg-[#F3E8FF] mb-3 border border-[#E9D5FF]/30"
+              >
+                <Smile color="#8B5CF6" size={20} strokeWidth={2.0} />
+              </View>
+
+              <Text className="text-[#0B1327] text-base font-bold tracking-tight">
+                Good evening, {user?.name ? user.name.split(' ')[0] : 'Mohit'}
+              </Text>
+              
+              <Text className="text-[#7F8A9E] text-xs font-semibold mt-1.5 leading-normal">
+                You revised {stats?.totalRevisions ?? 116} cards this week.
+              </Text>
+              <Text className="text-[#7F8A9E] text-xs font-semibold leading-normal">
+                Let's keep the flow going.
+              </Text>
+
+              {/* Continue button */}
+              <SpringPressable
+                onPress={() => router.push('/(protected)/(tabs)/reels')}
+                activeScale={0.95}
+                className="flex-row items-center px-4 py-2 rounded-full bg-[#8B5CF6] self-start mt-4 justify-between"
+              >
+                <Play color="#FFFFFF" size={10} strokeWidth={3.0} fill="#FFFFFF" className="mr-1.5" />
+                <Text className="text-white font-bold text-[11px] tracking-tight">
+                  Continue Revising
+                </Text>
+                <ChevronRight color="#FFFFFF" size={11} strokeWidth={3.0} className="ml-2" />
+              </SpringPressable>
+            </View>
+
+            {/* Right Column: Dynamic Vector-styled Illustration */}
+            <View className="relative w-24 h-24 items-center justify-center">
+              {/* Background circular glow */}
+              <View className="absolute w-20 h-20 rounded-full bg-[#8B5CF6]/5 opacity-5" />
+              
+              {/* Stacking Book Layer 1 */}
+              <View 
+                className="absolute w-14 h-9 rounded-lg bg-[#E8E3FA] border border-[#DCD3F5]"
+                style={{
+                  transform: [{ rotate: '-8deg' }, { translateY: 6 }, { translateX: -4 }],
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.08,
+                  shadowRadius: 5,
+                }}
+              />
+              
+              {/* Stacking Book Layer 2 */}
+              <View 
+                className="absolute w-14 h-9 rounded-lg bg-[#F1EEFE] border border-[#E5E0FB]"
+                style={{
+                  transform: [{ rotate: '4deg' }, { translateY: -2 }, { translateX: 2 }],
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.08,
+                  shadowRadius: 5,
+                }}
+              />
+              
+              {/* Stacking Book Layer 3 (Top) */}
+              <View 
+                className="absolute w-14 h-9 rounded-lg bg-white border border-[#F1EEFE] items-center justify-center"
+                style={{
+                  transform: [{ rotate: '-2deg' }, { translateY: -10 }],
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 6 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 8,
+                  elevation: 2,
+                }}
+              >
+                {/* Book cover spine marker line */}
+                <View className="w-8 h-1 bg-[#8B5CF6]/30 rounded-full mb-1" />
+                <View className="w-6 h-1 bg-[#8B5CF6]/20 rounded-full" />
+              </View>
+              
+              {/* Plant branch leaf decorations */}
+              <View 
+                className="absolute w-2 h-5 rounded-full bg-[#10B981]/15"
+                style={{
+                  top: 14,
+                  right: 8,
+                  transform: [{ rotate: '25deg' }],
+                }}
+              />
+              <View 
+                className="absolute w-1.5 h-3 rounded-full bg-[#10B981]/10"
+                style={{
+                  top: 28,
+                  right: 4,
+                  transform: [{ rotate: '45deg' }],
+                }}
+              />
+            </View>
           </View>
         </View>
 
@@ -683,8 +809,8 @@ export default function PersonalScreen() {
             COGNITIVE CORES: 4 PERMANENT SMART CORES
             ========================================== */}
         <View className="px-6 mt-4">
-          <Text className="text-[#0F172A] text-[15px] font-black uppercase tracking-wider mb-3">
-            Pinned Memory Cores
+          <Text className="text-[#0B1327] text-[16px] font-black tracking-tight mb-4">
+            Focus areas
           </Text>
 
           {playlistsLoading ? (
@@ -692,10 +818,11 @@ export default function PersonalScreen() {
               {[1, 2, 3, 4].map((i) => (
                 <View
                   key={i}
-                  className="w-[48%] p-5 rounded-[28px] border border-slate-200 bg-slate-50 h-[100px] justify-between animate-pulse"
+                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px] justify-between animate-pulse"
+                  style={{ borderColor: 'rgba(148,163,184,0.08)' }}
                 >
-                  <View className="w-8 h-8 rounded-xl bg-slate-100" />
-                  <View className="h-4 w-12 bg-slate-100 rounded-full" />
+                  <View className="w-8 h-8 rounded-xl bg-slate-100/50" />
+                  <View className="h-4 w-12 bg-slate-100/50 rounded-full" />
                 </View>
               ))}
             </View>
@@ -706,10 +833,10 @@ export default function PersonalScreen() {
                   key={pl.id}
                   playlist={pl}
                   onPress={() => {
-                    router.push({
-                      pathname: '/(protected)/playlist/[playlistId]',
-                      params: { playlistId: pl.id }
-                    });
+                      router.push({
+                        pathname: '/(protected)/playlist/[playlistId]',
+                        params: { playlistId: pl.id }
+                      });
                   }}
                 />
               ))}
@@ -721,21 +848,21 @@ export default function PersonalScreen() {
             MY PLAYLISTS (SELF-MADE PLAYLISTS ONLY)
             ========================================== */}
         <View className="px-6 mt-6">
-          <View className="flex-row items-center justify-between mb-4">
+          <View className="flex-row items-center justify-between mb-4 mt-2">
             <View className="flex-row items-center gap-2">
-              <Compass color="#8B5CF6" size={16} strokeWidth={2.5} />
-              <Text className="text-[#0F172A] text-[15px] font-black uppercase tracking-wider">
-                My Playlists
+              <Folder color="#8B5CF6" size={18} strokeWidth={2.0} />
+              <Text className="text-[#0B1327] text-[16px] font-black tracking-tight">
+                Playlists
               </Text>
             </View>
 
             <SpringPressable
               onPress={() => isGuest ? promptSignIn() : setIsCreating(true)}
               activeScale={0.9}
-              className="px-3.5 py-1.5 rounded-full border border-violet-100 bg-[#F5F3FF] shadow-sm flex-row items-center gap-1.5"
+              className="px-3.5 py-1.5 rounded-full bg-[#F3E8FF]/60 flex-row items-center gap-1"
             >
-              <Plus color="#8B5CF6" size={12} strokeWidth={3} />
-              <Text className="text-[#8B5CF6] font-extrabold text-[10px] uppercase tracking-wider">New Playlist</Text>
+              <Plus color="#8B5CF6" size={12} strokeWidth={2.5} />
+              <Text className="text-[#8B5CF6] font-bold text-[11px]">New playlist</Text>
             </SpringPressable>
           </View>
 
@@ -744,7 +871,8 @@ export default function PersonalScreen() {
               {[1, 2].map((i) => (
                 <View
                   key={i}
-                  className="w-[48%] p-5 rounded-[28px] border border-slate-200 bg-slate-50 h-[100px] animate-pulse"
+                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px] animate-pulse"
+                  style={{ borderColor: 'rgba(148,163,184,0.08)' }}
                 />
               ))}
             </View>
@@ -753,7 +881,8 @@ export default function PersonalScreen() {
           {playlistsError && (
             <TouchableOpacity
               onPress={() => refetch()}
-              className="p-5 rounded-[28px] border border-slate-200 bg-white items-center justify-center"
+              className="p-5 rounded-[30px] border bg-white items-center justify-center"
+              style={{ borderColor: 'rgba(148,163,184,0.08)' }}
             >
               <Text className="text-slate-500 text-xs font-semibold">Could not load playlists. Tap to retry.</Text>
             </TouchableOpacity>
@@ -778,11 +907,26 @@ export default function PersonalScreen() {
           )}
 
           {!playlistsLoading && customPlaylists.length === 0 && (
-            <View className="py-8 items-center bg-white rounded-[28px] border border-slate-100/60 px-6">
-              <BookOpen color="#94A3B8" size={24} strokeWidth={1.5} style={{ opacity: 0.8 }} />
-              <Text className="text-[#0F172A] font-extrabold text-sm mt-3 mb-1">No Playlists Yet</Text>
-              <Text className="text-slate-400 text-xs text-center leading-normal">
-                Create custom playlists dynamically to bundle tags, companies, or test preparations together.
+            <View 
+              className="py-9 items-center bg-white rounded-[30px] border px-6"
+              style={{
+                borderColor: 'rgba(148,163,184,0.08)',
+                shadowColor: '#0F172A',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.03,
+                shadowRadius: 18,
+                elevation: 2,
+              }}
+            >
+              <View 
+                className="w-12 h-12 rounded-2xl items-center justify-center bg-[#F5F3FF]/40 border mb-4"
+                style={{ borderColor: 'rgba(139, 92, 246, 0.04)' }}
+              >
+                <BookOpen color="#8B5CF6" size={20} strokeWidth={1.8} />
+              </View>
+              <Text className="text-[#0F172A] font-bold text-sm mb-1.5">No Playlists Yet</Text>
+              <Text className="text-[#64748B]/70 text-xs text-center leading-relaxed">
+                Create your own path. Bundle topics, key tags, or custom card decks into single peaceful collections.
               </Text>
             </View>
           )}
@@ -804,44 +948,56 @@ export default function PersonalScreen() {
       <Modal visible={isMenuOpen} transparent animationType="fade" onRequestClose={() => setIsMenuOpen(false)}>
         <Pressable className="flex-1 bg-black/25 justify-end" onPress={() => setIsMenuOpen(false)}>
           <View 
-            className="bg-white mx-4 mb-10 rounded-[32px] p-6 shadow-2xl border border-slate-100"
+            className="bg-white mx-4 mb-10 rounded-[32px] p-6 border bg-white"
+            style={{
+              borderColor: 'rgba(148,163,184,0.10)',
+              shadowColor: '#0F172A',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.03,
+              shadowRadius: 18,
+              elevation: 3,
+            }}
             onTouchEnd={(e) => e.stopPropagation()}
           >
-            <Text className="text-slate-400 text-[10px] font-black tracking-wider text-center uppercase mb-5">
+            <Text className="text-[#64748B] text-xs font-semibold text-center mb-5">
               {selectedPlaylist?.name}
             </Text>
 
-            <View className="gap-2">
+            <View className="gap-2.5">
               <SpringPressable
                 onPress={handleRename}
                 activeScale={0.97}
-                className="w-full py-4 rounded-[20px] bg-slate-50 border border-slate-100 items-center"
+                className="w-full py-3.5 rounded-2xl bg-[#FAF9F7] border items-center"
+                style={{ borderColor: 'rgba(148,163,184,0.08)' }}
               >
-                <Text className="text-[#0F172A] text-xs font-extrabold">Rename Collection</Text>
+                <Text className="text-[#0F172A] text-sm font-semibold">Rename collection</Text>
               </SpringPressable>
 
               <SpringPressable
                 onPress={handleDuplicate}
                 activeScale={0.97}
-                className="w-full py-4 rounded-[20px] bg-slate-50 border border-slate-100 items-center"
+                className="w-full py-3.5 rounded-2xl bg-[#FAF9F7] border items-center"
+                style={{ borderColor: 'rgba(148,163,184,0.08)' }}
               >
-                <Text className="text-[#0F172A] text-xs font-extrabold">Duplicate Collection</Text>
+                <Text className="text-[#0F172A] text-sm font-semibold">Duplicate collection</Text>
               </SpringPressable>
 
               <SpringPressable
                 onPress={handleDelete}
                 activeScale={0.97}
-                className="w-full py-4 rounded-[20px] bg-rose-50 border border-rose-100 items-center"
+                className="w-full py-3.5 rounded-2xl bg-[#FFF5F5] border items-center"
+                style={{ borderColor: 'rgba(239, 68, 68, 0.08)' }}
               >
-                <Text className="text-rose-600 text-xs font-extrabold">Delete Collection</Text>
+                <Text className="text-[#E11D48] text-sm font-semibold">Delete collection</Text>
               </SpringPressable>
 
               <SpringPressable
                 onPress={() => setIsMenuOpen(false)}
                 activeScale={0.97}
-                className="w-full py-4 mt-2 rounded-[20px] bg-white border border-slate-200 items-center"
+                className="w-full py-3.5 mt-1.5 rounded-2xl bg-white border items-center"
+                style={{ borderColor: 'rgba(148,163,184,0.10)' }}
               >
-                <Text className="text-slate-500 text-xs font-extrabold">Cancel</Text>
+                <Text className="text-[#64748B] text-sm font-semibold">Cancel</Text>
               </SpringPressable>
             </View>
           </View>
@@ -852,7 +1008,15 @@ export default function PersonalScreen() {
       <Modal visible={isRenameOpen} transparent animationType="fade" onRequestClose={() => setIsRenameOpen(false)}>
         <Pressable className="flex-1 bg-black/25 justify-center items-center px-6" onPress={() => setIsRenameOpen(false)}>
           <View 
-            className="bg-white w-full rounded-[32px] p-6 shadow-2xl border border-slate-100"
+            className="bg-white w-full rounded-[32px] p-6 border bg-white"
+            style={{
+              borderColor: 'rgba(148,163,184,0.10)',
+              shadowColor: '#0F172A',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.03,
+              shadowRadius: 18,
+              elevation: 3,
+            }}
             onTouchEnd={(e) => e.stopPropagation()}
           >
             <Text className="text-[#0F172A] text-base font-bold tracking-tight mb-4 text-center">
@@ -860,7 +1024,8 @@ export default function PersonalScreen() {
             </Text>
 
             <TextInput
-              className="border border-slate-200 text-[#0F172A] p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center bg-slate-50"
+              className="border text-[#0F172A] p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center bg-[#FAF9F7]"
+              style={{ borderColor: 'rgba(148,163,184,0.12)' }}
               placeholder="Enter name..."
               placeholderTextColor="#94A3B8"
               value={renameValue}
@@ -871,16 +1036,17 @@ export default function PersonalScreen() {
             <View className="flex-row gap-2.5">
               <SpringPressable
                 onPress={submitRename}
-                className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6] shadow-md shadow-violet-200"
+                className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
               >
-                <Text className="text-white font-bold text-xs">Save</Text>
+                <Text className="text-white font-semibold text-sm">Save</Text>
               </SpringPressable>
 
               <SpringPressable
                 onPress={() => setIsRenameOpen(false)}
-                className="flex-1 py-3.5 rounded-2xl items-center justify-center border border-slate-200 bg-white"
+                className="flex-1 py-3.5 rounded-2xl items-center justify-center border bg-white"
+                style={{ borderColor: 'rgba(148,163,184,0.10)' }}
               >
-                <Text className="text-slate-500 font-bold text-xs">Cancel</Text>
+                <Text className="text-[#64748B] font-semibold text-sm">Cancel</Text>
               </SpringPressable>
             </View>
           </View>

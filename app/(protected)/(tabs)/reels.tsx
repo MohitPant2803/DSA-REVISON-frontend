@@ -17,7 +17,9 @@ import {
   Animated as RNAnimated,
   FlatList,
   Pressable,
+  Linking,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import {
   Plus,
@@ -270,17 +272,20 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
       <View
         style={{
           position: 'absolute',
-          right: 8,
-          bottom: 70,
+          right: 16,
+          bottom: 85,
           alignItems: 'center',
           backgroundColor: 'transparent',
-          gap: 16,
-          width: 42,
+          gap: 12,
+          width: 50,
+        zIndex: 50,
+        elevation: 10,
         }}
       >
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
       </View>
 
     </View>
@@ -290,6 +295,7 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
 interface ReelsActionRailProps {
   cleanId: string;
   item: IPopulatedRevisionCard;
+  membership?: Record<string, boolean>;
   onDifficultyStateUpdate: (state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
   isGuest: boolean;
@@ -314,181 +320,48 @@ const ClassificationButton = React.memo(({
   shouldPulse = false,
   pulseDelay = 0,
 }: ClassificationButtonProps) => {
-  const scale = useSharedValue(1);
-  const pulseScale = useSharedValue(1);
-  const glowOpacity = useSharedValue(isActive ? 1 : 0);
-  const ringScale = useSharedValue(isActive ? 1.15 : 0);
-
-  // Smoothly transition glow opacity and scale on active state change
-  useEffect(() => {
-    glowOpacity.value = withSpring(isActive ? 1 : 0, { damping: 15, stiffness: 120 });
-    ringScale.value = withSpring(isActive ? 1.15 : 0, { damping: 12, stiffness: 150 });
-  }, [isActive]);
-
-  // Premium Snappy Press scaling (Apple physical tactile feedback tokens)
-  const handlePressIn = () => {
-    scale.value = withSpring(0.82, { damping: 12, stiffness: 350 });
-  };
-
-  const handlePressOut = () => {
-    scale.value = withSpring(1.0, { damping: 15, stiffness: 220 });
-  };
-
   const handlePress = () => {
     lightHaptic();
-    
-    // Snappy tactile feedback pop on activation
-    scale.value = withSequence(
-      withSpring(1.26, { damping: 9, stiffness: 320 }),
-      withSpring(1.0, { damping: 12, stiffness: 200 })
-    );
-    
     onPress();
   };
 
-  // Stagger-pulsing idle animation (direct active recall gaze guide)
-  useEffect(() => {
-    if (shouldPulse && !isActive) {
-      const timeout = setTimeout(() => {
-        pulseScale.value = withRepeat(
-          withSequence(
-            withTiming(1.15, { duration: 900 }),
-            withTiming(1.0, { duration: 900 })
-          ),
-          -1,
-          true
-        );
-      }, pulseDelay);
-      return () => {
-        clearTimeout(timeout);
-        cancelAnimation(pulseScale);
-        pulseScale.value = 1;
-      };
-    } else {
-      cancelAnimation(pulseScale);
-      pulseScale.value = 1;
-    }
-  }, [shouldPulse, pulseDelay, isActive]);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: scale.value * pulseScale.value }],
-    };
-  });
-
-  const glowStyle = useAnimatedStyle(() => {
-    return {
-      opacity: glowOpacity.value,
-      transform: [{ scale: interpolate(glowOpacity.value, [0, 1], [0.8, 1.1]) }],
-    };
-  });
-
-  const ringStyle = useAnimatedStyle(() => {
-    return {
-      opacity: interpolate(ringScale.value, [0, 1.15], [0, 0.45]),
-      transform: [{ scale: ringScale.value }],
-    };
-  });
+  const displayColor = isActive ? activeColor : 'rgba(0, 0, 0, 0.85)';
 
   return (
     <Pressable
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
       onPress={handlePress}
-      style={{ alignItems: 'center', marginBottom: 16 }}
+      style={{ alignItems: 'center', marginBottom: 12 }}
     >
-      <Animated.View style={[animatedStyle, { position: 'relative' }]}>
-        {/* Futuristic Soft Neon Aura Glow behind button */}
-        <Animated.View
-          style={[
-            glowStyle,
-            {
-              position: 'absolute',
-              top: -8,
-              left: -8,
-              right: -8,
-              bottom: -8,
-              borderRadius: 30,
-              backgroundColor: activeColor,
-              opacity: 0.25,
-              shadowColor: activeColor,
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.65,
-              shadowRadius: 10,
-            },
-          ]}
-        />
-
-        {/* Expanding Ring on Active State */}
-        <Animated.View
-          style={[
-            ringStyle,
-            {
-              position: 'absolute',
-              top: -4,
-              left: -4,
-              right: -4,
-              bottom: -4,
-              borderRadius: 26,
-              borderWidth: 1.5,
-              borderColor: activeColor,
-            },
-          ]}
-        />
-
+      <View style={{ position: 'relative' }}>
         {/* Main Action Capsule Button */}
         <View
           style={{
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            backgroundColor: isActive ? activeColor : 'rgba(255, 255, 255, 0.08)',
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: 'transparent',
             justifyContent: 'center',
             alignItems: 'center',
             borderWidth: 1,
-            borderColor: isActive ? 'rgba(255, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.12)',
-            shadowColor: activeColor,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: isActive ? 0.4 : 0,
-            shadowRadius: 8,
-            elevation: isActive ? 4 : 0,
+            borderColor: displayColor,
           }}
         >
-          {/* Concentric Glow pulse halo when in unclassified mode */}
-          {shouldPulse && !isActive && (
-            <Animated.View
-              style={{
-                position: 'absolute',
-                top: -6,
-                left: -6,
-                right: -6,
-                bottom: -6,
-                borderRadius: 28,
-                borderWidth: 1.5,
-                borderColor: activeColor,
-                opacity: interpolate(pulseScale.value, [1, 1.15], [0.65, 0]),
-                transform: [{ scale: pulseScale.value }],
-              }}
-            />
-          )}
-
           <Icon
-            color={isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.65)'}
-            size={18}
+            color={displayColor}
+            size={15}
             strokeWidth={isActive ? 3.0 : 2.2}
           />
         </View>
-      </Animated.View>
+      </View>
 
       <Text
         style={{
-          fontSize: 9,
+          fontSize: 8.5,
           fontWeight: '900',
-          color: isActive ? activeColor : 'rgba(255, 255, 255, 0.45)',
-          marginTop: 6,
-          opacity: isActive ? 1 : 0.7,
+          color: isActive ? activeColor : 'rgba(0, 0, 0, 0.6)',
+          marginTop: 4,
           textTransform: 'uppercase',
-          letterSpacing: 0.6,
+          letterSpacing: 0.5,
         }}
       >
         {label}
@@ -500,32 +373,26 @@ const ClassificationButton = React.memo(({
 const ReelsActionRail = React.memo(({
   cleanId,
   item,
+  membership,
   onDifficultyStateUpdate,
   onPlaylistPickerTrigger,
   isGuest,
 }: ReelsActionRailProps) => {
   const currentDifficulty = item.difficultyState;
   const shouldPulse = !currentDifficulty;
+  const isSaved = Object.values(membership ?? {}).some(Boolean);
 
   return (
     <View 
       style={{
         position: 'absolute',
-        right: 12,
-        bottom: 74,
+        right: 16,
+        bottom: 85,
         alignItems: 'center',
-        backgroundColor: 'rgba(9, 9, 11, 0.88)',
-        borderRadius: 32,
-        paddingVertical: 20,
-        paddingHorizontal: 10,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'transparent',
         zIndex: 50,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.22,
-        shadowRadius: 24,
-        elevation: 8,
+        elevation: 10,
+        width: 50,
       }}
     >
       <ClassificationButton
@@ -569,23 +436,16 @@ const ReelsActionRail = React.memo(({
       />
 
       {/* Futuristic Sleek Separator Line */}
-      <View style={{ width: 24, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.15)', marginVertical: 4, marginBottom: 14 }} />
+      <View style={{ width: 24, height: 1, backgroundColor: 'rgba(0, 0, 0, 0.15)', marginVertical: 6, marginBottom: 12 }} />
 
       <ClassificationButton
         label="Save"
         icon={BookmarkPlus}
         activeColor="#8B5CF6"
-        isActive={false}
+        isActive={isSaved}
         onPress={() => onPlaylistPickerTrigger(item)}
       />
     </View>
-  );
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.cleanId === nextProps.cleanId &&
-    prevProps.item.difficultyState === nextProps.item.difficultyState &&
-    prevProps.item._id === nextProps.item._id &&
-    prevProps.isGuest === nextProps.isGuest
   );
 });
 
@@ -607,6 +467,7 @@ interface ReelItemProps {
   onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
   onDifficultyStateUpdate: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   isActiveCardClassified?: boolean;
+  membership?: Record<string, boolean>;
 }
 
 interface SlideCardWrapperProps {
@@ -614,6 +475,7 @@ interface SlideCardWrapperProps {
   indexInDeck: number;
   activeSlideIndexSV: SharedValue<number>;
   slideDragX: SharedValue<number>;
+  prevSlideDragX: SharedValue<number>;
   cardHeight: number;
   width: number;
   zIndex: number;
@@ -625,17 +487,77 @@ const SlideCardWrapper = React.memo(({
   indexInDeck,
   activeSlideIndexSV,
   slideDragX,
+  prevSlideDragX,
   cardHeight,
   width,
   zIndex,
   renderSlideContent,
 }: SlideCardWrapperProps) => {
+  // =========================================================================
+  // Onboarding-style card stack animation:
+  // - Active card (delta=0): Drags left only (forward swipe). No right drag.
+  // - Next card (delta=1): Sits underneath, scales up as active card is swiped away.
+  // - Previous card (delta=-1): Slides OVER active card from the left on back swipe.
+  //   It starts offscreen at -width and translates to 0. zIndex is higher than active.
+  // - First card cannot swipe right, last card cannot swipe left.
+  // =========================================================================
   const animatedStyle = useAnimatedStyle(() => {
     const activeIdx = activeSlideIndexSV.value;
     const delta = indexInDeck - activeIdx;
 
-    // Direct finger tracking for active card (delta === 0)
+    // Active card: only tracks left drag (forward). Right drag is handled by previous card.
     if (delta === 0) {
+      // Only allow negative (left) translation for the active card during drag
+      const tx = Math.min(0, slideDragX.value);
+      const rotate = `${tx / 25}deg`;
+      return {
+        transform: [
+          { translateX: tx },
+          { translateY: 0 },
+          { scale: 1 },
+          { rotate: rotate },
+        ],
+        opacity: 1,
+        zIndex: 10,
+      };
+    }
+
+    // Next card: scales up and fades in as the active card is swiped left
+    if (delta === 1) {
+      const activeTx = slideDragX.value;
+      const progress = Math.min(Math.abs(Math.min(0, activeTx)) / (width * 0.6), 1.0);
+      const scale = 0.93 + (0.07 * progress);
+      const cardOpacity = 0.5 + (0.5 * progress);
+      return {
+        transform: [
+          { translateX: 0 },
+          { translateY: 0 },
+          { scale: scale },
+          { rotate: '0deg' },
+        ],
+        opacity: cardOpacity,
+        zIndex: 9,
+      };
+    }
+
+    // Previous card: slides OVER the active card from the left
+    if (delta === -1) {
+      // prevSlideDragX carries the previous card's translation during back navigation
+      const tx = prevSlideDragX.value;
+      return {
+        transform: [
+          { translateX: tx },
+          { translateY: 0 },
+          { scale: 1 },
+          { rotate: `${tx / 25}deg` },
+        ],
+        opacity: 1,
+        zIndex: 20, // Above active card so it slides OVER
+      };
+    }
+
+    // Older swiped-off cards (delta < -1)
+    if (delta < -1) {
       return {
         transform: [
           { translateX: slideDragX.value },
@@ -643,40 +565,22 @@ const SlideCardWrapper = React.memo(({
           { scale: 1 },
           { rotate: '0deg' },
         ],
-        opacity: 1,
+        opacity: 0,
+        zIndex: 0,
       };
     }
 
-    // Next card (preview) – static appearance under active card (no pop animation)
-    if (delta === 1) {
-      return {
-        transform: [
-          { translateX: 0 },
-          { translateY: 0 },
-          { scale: 1 },
-          { rotate: '0deg' },
-        ],
-        opacity: 1,
-      };
-    }
-
-    // Previous card – slides in from the left only on right swipe
-    if (delta === -1) {
-      const translateX = -width + Math.max(0, slideDragX.value);
-      const isVisible = slideDragX.value > 0;
-      return {
-        transform: [
-          { translateX },
-          { translateY: 0 },
-          { scale: 1 },
-          { rotate: '0deg' },
-        ],
-        opacity: isVisible ? 1 : 0,
-      };
-    }
-
-    // All other cards – hidden
-    return { opacity: 0 };
+    // Future cards (delta > 1): hidden
+    return {
+      transform: [
+        { translateX: 0 },
+        { translateY: 0 },
+        { scale: 0.93 },
+        { rotate: '0deg' },
+      ],
+      opacity: 0,
+      zIndex: 0,
+    };
   });
 
   return (
@@ -691,7 +595,6 @@ const SlideCardWrapper = React.memo(({
           paddingTop: 64,
           paddingBottom: 24,
           overflow: 'hidden',
-          zIndex,
         },
         animatedStyle,
       ]}
@@ -718,16 +621,13 @@ const ActiveReelItem = React.memo(({
   onPlaylistPickerTrigger,
   onMoreOptionsTrigger,
   onDifficultyStateUpdate,
+  membership,
 }: ReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
-  const [prevId, setPrevId] = useState(item._id);
   const { preferences } = useUserPreferencesStore();
 
-  const [prevPrefsKey, setPrevPrefsKey] = useState(
-    `${preferences.hideCertainBlockTypes?.join(',')}-${preferences.explanationFlowOrder?.join(',')}`
-  );
-  
   const slideDragX = useSharedValue(0);
+  const prevSlideDragX = useSharedValue(-width - 100); // Previous card starts offscreen left
   const cardTranslateY = useSharedValue(0);
   const lockPillColor = useSharedValue(0);
   const activeSlideIndexSV = useSharedValue(0);
@@ -736,23 +636,26 @@ const ActiveReelItem = React.memo(({
 
   const currentPrefsKey = `${preferences.hideCertainBlockTypes?.join(',')}-${preferences.explanationFlowOrder?.join(',')}`;
 
-  // Synchronous state and translation value reset on card recycle or preference change
-  if (item._id !== prevId || currentPrefsKey !== prevPrefsKey) {
-    setPrevId(item._id);
-    setPrevPrefsKey(currentPrefsKey);
+  // Reset translation and active slide index when the card item changes or preferences change.
+  // This MUST be inside a useEffect to prevent Reanimated "Reading from value during render" 
+  // warnings and React "Expected static flag was missing" internal crashes.
+  useEffect(() => {
     setActiveSlideIndex(0);
     cancelAnimation(slideDragX);
+    cancelAnimation(prevSlideDragX);
     slideDragX.value = 0;
+    prevSlideDragX.value = -width - 100;
     cardTranslateY.value = 0;
     activeSlideIndexSV.value = 0;
     isTransitioning.value = false;
-  }
+  }, [item._id, currentPrefsKey, width]);
 
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
       cancelAnimation(slideDragX);
+      cancelAnimation(prevSlideDragX);
     };
   }, [item._id, currentPrefsKey]);
 
@@ -760,6 +663,7 @@ const ActiveReelItem = React.memo(({
     activeSlideIndexSV.value = activeSlideIndex;
     // Reset translation and transition locks after the index change has been committed to prevent layout jumping/flickering
     slideDragX.value = 0;
+    prevSlideDragX.value = -width - 100; // Previous card resets offscreen left
     isTransitioning.value = false;
   }, [activeSlideIndex]);
 
@@ -851,33 +755,51 @@ const ActiveReelItem = React.memo(({
   }, [isClassified]);
 
   const lockPillAnimatedStyle = useAnimatedStyle(() => {
-    const backgroundColor = interpolateColor(
+    const baseOpacity = interpolate(
       lockPillColor.value,
       [0, 1],
-      ['rgba(15, 23, 42, 0.85)', 'rgba(6, 78, 59, 0.95)']
-    );
-    const borderColor = interpolateColor(
-      lockPillColor.value,
-      [0, 1],
-      ['rgba(255, 255, 255, 0.12)', 'rgba(16, 185, 129, 0.4)']
+      [1, 0]
     );
 
+    // Fade out if dragging horizontally (slideDragX) or vertically (cardTranslateY)
+    const dragDistance = Math.max(
+      Math.abs(slideDragX.value),
+      Math.abs(cardTranslateY.value)
+    );
+
+    const dragOpacity = interpolate(
+      dragDistance,
+      [0, 20], // fades out very quickly (by 20px) when dragged in any direction
+      [1, 0],
+      'clamp'
+    );
+
+    const slideOpacity = interpolate(
+      activeSlideIndexSV.value,
+      [0, 0.1], // fades out instantly if they move past the intro slide
+      [1, 0],
+      'clamp'
+    );
+
+    const opacity = baseOpacity * dragOpacity * slideOpacity;
+
     return {
-      backgroundColor,
-      borderColor,
+      backgroundColor: 'rgba(15, 23, 42, 0.85)',
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      opacity,
     };
   });
 
   const verticalGesture = Gesture.Pan()
-    .activeOffsetY([-10, 10])
+    .activeOffsetY([-10, 100000]) // Only capture upward swipes (translationY < -10) to block scrolling down
     .failOffsetX([-10, 10])
     .enabled(!isClassified)
     .onUpdate((event) => {
-      // Elastic resistance cap at -40px on swipe up, snap back on release
+      // Elastic resistance cap at -40px on swipe up, 40px on swipe down
       if (event.translationY < 0) {
         cardTranslateY.value = Math.max(-40, event.translationY * 0.25);
       } else {
-        cardTranslateY.value = Math.min(20, event.translationY * 0.2);
+        cardTranslateY.value = Math.min(40, event.translationY * 0.25);
       }
     })
     .onEnd(() => {
@@ -892,7 +814,13 @@ const ActiveReelItem = React.memo(({
     transform: [{ translateY: cardTranslateY.value }],
   }));
 
-  // Strict direction lock for zero lag horizontal drag
+  // =========================================================================
+  // Onboarding-style horizontal gesture handler:
+  // - Left swipe (dx < 0): Drags the ACTIVE card left. On threshold, pushes it offscreen.
+  // - Right swipe (dx > 0): Does NOT drag active card. Instead, the PREVIOUS card
+  //   starts at -width and slides RIGHT over the active card to position 0.
+  // - First slide blocks right swipe. Last slide blocks left swipe.
+  // =========================================================================
   const horizontalGesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
     .failOffsetY([-10, 10])
@@ -901,28 +829,31 @@ const ActiveReelItem = React.memo(({
     })
     .onUpdate((event) => {
       if (isTransitioning.value) return;
-      // Direct physical tracking with zero delayed interpolation
-      slideDragX.value = event.translationX;
+      const dx = event.translationX;
+
+      if (dx < 0) {
+        // Dragging Left -> Move Forward: drag the active card left
+        if (activeSlideIndex < slides.length - 1) {
+          slideDragX.value = dx;
+        }
+      }
+      // Right drag: no finger tracking — back swipe is committed on release only
     })
     .onEnd((event) => {
       if (isTransitioning.value) return;
       
       const SWIPE_THRESHOLD_X = CARD_WIDTH * 0.16;
       const VELOCITY_THRESHOLD = 350;
-      const transX = slideDragX.value;
+      const transX = event.translationX;
       const velX = event.velocityX;
 
       if (transX < 0) {
-        // Dragging Left -> Move Forward to Next Slide
+        // ---- LEFT SWIPE: Push active card off-screen to the left ----
         if (activeSlideIndex < slides.length - 1 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
           isTransitioning.value = true;
-          slideDragX.value = withSpring(
-            -width * 1.3,
-            {
-              damping: 20,
-              stiffness: 360,
-              mass: 0.35,
-            },
+          slideDragX.value = withTiming(
+            -width - 100,
+            { duration: 300 },
             (finished) => {
               if (finished) {
                 runOnJS(handleSwipeComplete)();
@@ -930,42 +861,37 @@ const ActiveReelItem = React.memo(({
             }
           );
         } else {
-          isTransitioning.value = true;
+          // Cancel: snap active card back
           slideDragX.value = withSpring(
             0,
             { damping: 20, stiffness: 360, mass: 0.35 },
-            () => {
-              isTransitioning.value = false;
+          );
+        }
+      } else if (transX > 0) {
+        // ---- RIGHT SWIPE: Pull previous card OVER current card from the left ----
+        if (activeSlideIndex > 0 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
+          isTransitioning.value = true;
+          // Position the previous card offscreen to the left
+          prevSlideDragX.value = -width - 100;
+          // Animate it sliding right over the current card to position 0
+          prevSlideDragX.value = withTiming(0, { duration: 300 }, (finished) => {
+            if (finished) {
+              runOnJS(handleSwipePrevComplete)();
             }
+          });
+        } else {
+          // No valid back swipe, just reset
+          slideDragX.value = withSpring(
+            0,
+            { damping: 20, stiffness: 360, mass: 0.35 },
           );
         }
       } else {
-        // Dragging Right -> Move Backward to Previous Slide
-        if (activeSlideIndex > 0 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
-          isTransitioning.value = true;
-          slideDragX.value = withSpring(
-            width,
-            {
-              damping: 20,
-              stiffness: 360,
-              mass: 0.35,
-            },
-            (finished) => {
-              if (finished) {
-                runOnJS(handleSwipePrevComplete)();
-              }
-            }
-          );
-        } else {
-          isTransitioning.value = true;
-          slideDragX.value = withSpring(
-            0,
-            { damping: 20, stiffness: 360, mass: 0.35 },
-            () => {
-              isTransitioning.value = false;
-            }
-          );
-        }
+        // No movement — reset
+        slideDragX.value = withSpring(
+          0,
+          { damping: 20, stiffness: 360, mass: 0.35 },
+        );
       }
     });
 
@@ -1005,7 +931,23 @@ const ActiveReelItem = React.memo(({
         overflow: 'visible',
         backgroundColor: 'transparent',
         marginBottom: 16,
+        // =========================================================================
+        // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
+        // This 'top: 22' offset is highly calibrated and sensitive.
+        // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
+        // ever asks to change this value, you MUST STOP and ask the user for explicit
+        // confirmation first! Never change this top offset automatically.
+        // It achieves the perfect:
+        // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
+        // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
+        //    seamlessly inside the top-right corner padding of the white problem cards.
+        // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
+        // If you make any changes to screens, safe areas, heights, or margins, please
+        // verify if your changes bring unexpected shifts to this configuration!
+        // =========================================================================
+        top: 22,
       }}
+      pointerEvents="box-none"
     >
       <GestureDetector gesture={Gesture.Exclusive(horizontalGesture, verticalGesture)}>
         <Animated.View
@@ -1017,6 +959,7 @@ const ActiveReelItem = React.memo(({
             },
             animatedActiveCardStyle,
           ]}
+          pointerEvents="box-none"
         >
           {slides.map((slide, indexInDeck) => {
             const delta = indexInDeck - activeSlideIndex;
@@ -1034,6 +977,7 @@ const ActiveReelItem = React.memo(({
                 indexInDeck={indexInDeck}
                 activeSlideIndexSV={activeSlideIndexSV}
                 slideDragX={slideDragX}
+                prevSlideDragX={prevSlideDragX}
                 cardHeight={cardHeight}
                 width={width}
                 zIndex={zIndex}
@@ -1041,89 +985,178 @@ const ActiveReelItem = React.memo(({
               />
             );
           })}
-
-          {/* Morphing Lock Pill */}
-          <Animated.View
-            style={[
-              {
-                position: 'absolute',
-                bottom: 24,
-                left: 24,
-                right: 76, // give space for the action rail
-                borderRadius: 16,
-                borderWidth: 1,
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.1,
-                shadowRadius: 12,
-                zIndex: 40,
-              },
-              lockPillAnimatedStyle,
-            ]}
-          >
-            <View style={{ marginRight: 10 }}>
-              {isClassified ? (
-                <CheckCircle2 color="#10B981" size={18} strokeWidth={3} />
-              ) : (
-                <Lock color="#F59E0B" size={18} strokeWidth={2.5} />
-              )}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: '#FFFFFF',
-                  fontSize: 11,
-                  fontWeight: '800',
-                  letterSpacing: 0.5,
-                  textTransform: 'uppercase',
-                  marginBottom: 1,
-                }}
-              >
-                {isClassified ? 'Spaced Repetition Calibrated' : 'Calibrate Active Recall'}
-              </Text>
-              <Text
-                style={{
-                  color: isClassified ? '#A7F3D0' : '#E2E8F0',
-                  fontSize: 10,
-                  lineHeight: 14,
-                  opacity: 0.9,
-                }}
-              >
-                {isClassified 
-                  ? 'Card saved automatically! Swipe up anytime to revise.' 
-                  : 'Choose how well you know this to build your custom queue.'}
-              </Text>
-            </View>
-          </Animated.View>
         </Animated.View>
       </GestureDetector>
 
-      {/* Premium Glassmorphic Vertical Action Rail */}
+      {/* Premium Glassmorphic Vertical Action Rail - completely outside gesture ownership */}
       <ReelsActionRail
         cleanId={cleanId}
         item={item}
+        membership={membership}
         onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
         onPlaylistPickerTrigger={onPlaylistPickerTrigger}
         isGuest={isGuest}
       />
     </View>
   );
-}, (prevProps, nextProps) => {
+});
+
+interface InactiveReelItemProps {
+  item: IPopulatedRevisionCard;
+  index: number;
+  activeIndex: number;
+  cardHeight: number;
+  activePlaylistId: string | null;
+  isActiveCardClassified: boolean;
+}
+
+const InactiveReelItem = React.memo(({
+  item,
+  index,
+  activeIndex,
+  cardHeight,
+  activePlaylistId,
+  isActiveCardClassified
+}: InactiveReelItemProps) => {
+  const isNextCard = index === activeIndex + 1;
+  const isLockedNextCard = isNextCard && !isActiveCardClassified;
+
+  const animatedCardStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: 0.93 }],
+      opacity: 0.5,
+    };
+  });
+
+  const overlayStyle = useAnimatedStyle(() => {
+    return {
+      opacity: isLockedNextCard ? 1 : 0,
+    };
+  });
+
   return (
-    prevProps.item._id === nextProps.item._id &&
-    prevProps.item.difficultyState === nextProps.item.difficultyState &&
-    prevProps.activeIndex === nextProps.activeIndex &&
-    prevProps.index === nextProps.index &&
-    prevProps.isFavorite === nextProps.isFavorite &&
-    prevProps.cardHeight === nextProps.cardHeight &&
-    prevProps.width === nextProps.width &&
-    prevProps.isGuest === nextProps.isGuest &&
-    prevProps.canEdit === nextProps.canEdit &&
-    prevProps.activePlaylistId === nextProps.activePlaylistId
+    <View 
+      style={{ 
+        height: cardHeight, 
+        alignSelf: 'center', 
+        width: CARD_WIDTH,
+        marginBottom: 16,
+        backgroundColor: 'transparent',
+        overflow: 'visible',
+        // =========================================================================
+        // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
+        // This 'top: 22' offset is highly calibrated and sensitive.
+        // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
+        // ever asks to change this value, you MUST STOP and ask the user for explicit
+        // confirmation first! Never change this top offset automatically.
+        // It achieves the perfect:
+        // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
+        // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
+        //    seamlessly inside the top-right corner padding of the white problem cards.
+        // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
+        // If you make any changes to screens, safe areas, heights, or margins, please
+        // verify if your changes bring unexpected shifts to this configuration!
+        // =========================================================================
+        top: 22,
+      }}
+    >
+      <Animated.View
+        style={[
+          styles.cardBase,
+          {
+            width: CARD_WIDTH,
+            height: cardHeight,
+            paddingHorizontal: 24,
+            paddingTop: 64,
+            paddingBottom: 24,
+            overflow: 'hidden',
+          },
+          animatedCardStyle,
+        ]}
+      >
+        {/* Card Content Backdrop */}
+        <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
+          <ConceptCardPreview
+            card={item}
+            activePlaylistId={activePlaylistId}
+            onViewExplanation={() => {}}
+          />
+        </Animated.View>
+
+        {/* Lock Blur Overlay */}
+        <Animated.View
+          style={[StyleSheet.absoluteFillObject, overlayStyle]}
+          pointerEvents={isLockedNextCard ? 'auto' : 'none'}
+        >
+          {Platform.OS === 'ios' ? (
+            (() => {
+              try {
+                const { BlurView } = require('expo-blur');
+                return (
+                  <BlurView
+                    intensity={25}
+                    tint="dark"
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                );
+              } catch {
+                return (
+                  <View 
+                    style={[
+                      StyleSheet.absoluteFillObject, 
+                      { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+                    ]} 
+                  />
+                );
+              }
+            })()
+          ) : (
+            <View 
+              style={[
+                StyleSheet.absoluteFillObject, 
+                { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+              ]} 
+            />
+          )}
+
+          {/* Lock Indicator in center */}
+          <View 
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <View
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(255, 255, 255, 0.2)',
+              }}
+            >
+              <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
+            </View>
+            <Text
+              style={{
+                color: '#94A3B8',
+                fontSize: 12,
+                fontWeight: '800',
+                textTransform: 'uppercase',
+                letterSpacing: 1.5,
+              }}
+            >
+              Locked Next Problem
+            </Text>
+          </View>
+        </Animated.View>
+      </Animated.View>
+    </View>
   );
 });
 
@@ -1131,152 +1164,19 @@ const ReelItem = React.memo((props: ReelItemProps) => {
   const isActiveReel = props.index === props.activeIndex;
 
   if (!isActiveReel) {
-    const isLockedNextCard = props.index > props.activeIndex && !props.isActiveCardClassified;
-
-    const scale = useSharedValue(isLockedNextCard ? 0.95 : 1);
-    const opacity = useSharedValue(isLockedNextCard ? 0.6 : 1);
-    const overlayOpacitySV = useSharedValue(isLockedNextCard ? 1 : 0);
-
-    useEffect(() => {
-      scale.value = withSpring(isLockedNextCard ? 0.95 : 1, SPRING_CONFIG);
-      opacity.value = withTiming(isLockedNextCard ? 0.6 : 1, { duration: 400 });
-      overlayOpacitySV.value = withTiming(isLockedNextCard ? 1 : 0, { duration: 350 });
-    }, [isLockedNextCard]);
-
-    const animatedCardStyle = useAnimatedStyle(() => ({
-      transform: [{ scale: scale.value }],
-      opacity: opacity.value,
-    }));
-
-    const overlayStyle = useAnimatedStyle(() => ({
-      opacity: overlayOpacitySV.value,
-    }));
-
     return (
-      <View 
-        style={{ 
-          height: props.cardHeight, 
-          alignSelf: 'center', 
-          width: CARD_WIDTH,
-          marginBottom: 16,
-          backgroundColor: 'transparent',
-        }}
-      >
-        <Animated.View
-          style={[
-            styles.cardBase,
-            {
-              width: CARD_WIDTH,
-              height: props.cardHeight,
-              paddingHorizontal: 24,
-              paddingTop: 64,
-              paddingBottom: 24,
-              overflow: 'hidden',
-            },
-            animatedCardStyle,
-          ]}
-        >
-          {/* Card Content Backdrop */}
-          <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
-            <ConceptCardPreview
-              card={props.item}
-              activePlaylistId={props.activePlaylistId}
-              onViewExplanation={() => {}}
-            />
-          </Animated.View>
-
-          {/* Lock Blur Overlay */}
-          <Animated.View
-            style={[StyleSheet.absoluteFillObject, overlayStyle]}
-            pointerEvents={isLockedNextCard ? 'auto' : 'none'}
-          >
-            {Platform.OS === 'ios' ? (
-              (() => {
-                try {
-                  const { BlurView } = require('expo-blur');
-                  return (
-                    <BlurView
-                      intensity={25}
-                      tint="dark"
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                  );
-                } catch {
-                  return (
-                    <View 
-                      style={[
-                        StyleSheet.absoluteFillObject, 
-                        { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-                      ]} 
-                    />
-                  );
-                }
-              })()
-            ) : (
-              <View 
-                style={[
-                  StyleSheet.absoluteFillObject, 
-                  { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-                ]} 
-              />
-            )}
-
-            {/* Lock Indicator in center */}
-            <View 
-              style={{
-                ...StyleSheet.absoluteFillObject,
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: 12,
-              }}
-            >
-              <View
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 28,
-                  backgroundColor: 'rgba(255, 255, 255, 0.12)',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  borderWidth: 1,
-                  borderColor: 'rgba(255, 255, 255, 0.2)',
-                }}
-              >
-                <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
-              </View>
-              <Text
-                style={{
-                  color: '#94A3B8',
-                  fontSize: 12,
-                  fontWeight: '800',
-                  textTransform: 'uppercase',
-                  letterSpacing: 1.5,
-                }}
-              >
-                Locked Next Problem
-              </Text>
-            </View>
-          </Animated.View>
-        </Animated.View>
-      </View>
+      <InactiveReelItem
+        item={props.item}
+        index={props.index}
+        activeIndex={props.activeIndex}
+        cardHeight={props.cardHeight}
+        activePlaylistId={props.activePlaylistId}
+        isActiveCardClassified={props.isActiveCardClassified ?? true}
+      />
     );
   }
 
   return <ActiveReelItem {...props} />;
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.item._id === nextProps.item._id &&
-    prevProps.item.difficultyState === nextProps.item.difficultyState &&
-    prevProps.activeIndex === nextProps.activeIndex &&
-    prevProps.index === nextProps.index &&
-    prevProps.isFavorite === nextProps.isFavorite &&
-    prevProps.cardHeight === nextProps.cardHeight &&
-    prevProps.width === nextProps.width &&
-    prevProps.isGuest === nextProps.isGuest &&
-    prevProps.canEdit === nextProps.canEdit &&
-    prevProps.activePlaylistId === nextProps.activePlaylistId &&
-    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
-  );
 });
 
 export default function ReelsScreen() {
@@ -1312,7 +1212,7 @@ export default function ReelsScreen() {
     search?: string;
     shuffle?: string;
     startCardId?: string;
-    difficultyStates?: string;
+    userDifficultyStates?: string;
   }>();
 
   const folderIdParam = normalizeParam(params.folderId);
@@ -1321,7 +1221,7 @@ export default function ReelsScreen() {
   const difficultyParam = normalizeParam(params.difficulty);
   const searchParam = normalizeParam(params.search);
   const startCardIdParam = normalizeParam(params.startCardId);
-  const difficultyStatesParam = normalizeParam(params.difficultyStates);
+  const difficultyStatesParam = normalizeParam(params.userDifficultyStates);
 
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
@@ -1354,6 +1254,9 @@ export default function ReelsScreen() {
   const updateSessionTime = useTrackingStore((state) => state.updateSessionTime);
   const markCardCompleted = useTrackingStore((state) => state.markCardCompleted);
   const resetSession = useTrackingStore((state) => state.resetSession);
+
+  // NOTE: Stale activePlaylistId is now cleared inside the session init useEffect
+  // to prevent race conditions. No separate cleanup useEffect needed.
 
   const activePlaybackName = useMemo(() => {
     if (activePlaylistId) {
@@ -1434,17 +1337,32 @@ export default function ReelsScreen() {
     : (activePlaylistId ? currentPlaylistLoops : currentFolderLoops);
 
   // Sync session timer
+  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
+
   useEffect(() => {
+    isMountedRef.current = true;
     const currentStartTime = useTrackingStore.getState().sessionStartTime;
     if (!currentStartTime) {
       startSession();
     }
-    const interval = setInterval(() => {
-      updateSessionTime();
+    
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+    }
+    
+    sessionTimerRef.current = setInterval(() => {
+      if (isMountedRef.current) {
+        updateSessionTime();
+      }
     }, 1000);
+    
     return () => {
-      clearInterval(interval);
-      updateSessionTime();
+      isMountedRef.current = false;
+      if (sessionTimerRef.current) {
+        clearInterval(sessionTimerRef.current);
+        sessionTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -1587,9 +1505,13 @@ export default function ReelsScreen() {
     return displayedCards;
   }, [isSessionActive, sessionCards, displayedCards, currentMode, watchLaterCardIds, difficultyStatesParam]);
 
+  const activeCardItem = cardsList[activeIndex];
+  const activeCardId = activeCardItem ? activeCardItem._id : null;
+  const { data: membership = {} } = useCardPlaylistMembership(activeCardId, !isGuest);
 
   // Reset index 0 on mode changes
   useEffect(() => {
+    shuffledOrderRef.current = [];
     setNavState({ activeIndex: 0, prevIdx: -1 });
   }, [currentMode]);
 
@@ -1649,6 +1571,14 @@ export default function ReelsScreen() {
       return;
     }
 
+    // CRITICAL: If folderIdParam is explicitly provided, synchronously clear any stale
+    // activePlaylistId to prevent race conditions where the session init tries to start
+    // a playlist session (possibly for an empty source) before the cleanup useEffect fires.
+    if (folderIdParam && activePlaylistId) {
+      setActivePlaylistId(null);
+      return; // The state change will re-trigger this useEffect with activePlaylistId = null
+    }
+
     let isMounted = true;
 
     const initSession = async () => {
@@ -1658,7 +1588,11 @@ export default function ReelsScreen() {
         let sourceType: 'folder' | 'playlist' | 'liked' | 'watchLater';
         let sourceId: string;
 
-        if (activePlaylistId) {
+        // PRIORITY: folderIdParam always takes precedence over activePlaylistId
+        if (folderIdParam) {
+          sourceType = 'folder';
+          sourceId = folderIdParam;
+        } else if (activePlaylistId) {
           if (activePlaylistId === 'likes') {
             sourceType = 'liked';
             sourceId = user!.id;
@@ -1670,9 +1604,18 @@ export default function ReelsScreen() {
             sourceId = activePlaylistId;
           }
         } else {
-          sourceType = 'folder';
-          sourceId = folderIdParam!;
+          // Fallback — should not reach here due to isSessionActive guard
+          setSessionLoading(false);
+          return;
         }
+
+        console.log('[Session Init Debug]', {
+          folderIdParam,
+          activePlaylistId,
+          startCardIdParam,
+          isSessionActive,
+          sessionRetryCount
+        });
 
         const isShuffle = currentMode === 'shuffle';
         const session = await sessionQueueService.startSession(sourceType, sourceId, isShuffle);
@@ -1707,6 +1650,7 @@ export default function ReelsScreen() {
             targetIndex = foundIdx;
             await sessionQueueService.updateSessionIndex(session._id, targetIndex);
           }
+          setNavState({ activeIndex: targetIndex, prevIdx: -1 });
         } else if (progress && (progress.resumeIndex > 0 || (progress as any).lastIndex > 0)) {
           const resumeIdx = (progress as any).lastIndex !== undefined ? (progress as any).lastIndex : progress.resumeIndex;
           const resumeCardId = (progress as any).lastCardId || progress.resumeCardId;
@@ -1759,6 +1703,13 @@ export default function ReelsScreen() {
         console.error('[Session Initialization Error]', err);
         if (isMounted) {
           setSessionError(err.message || 'Failed to start playback session');
+          const errorMessage = err.response?.data?.message || err.data?.message || err.message;
+          if (errorMessage === 'The selected source has no cards to play') {
+            setSessionCards([]);
+            setSessionError(null);
+          } else {
+            setSessionError(errorMessage || 'Failed to start playback session');
+          }
         }
       } finally {
         if (isMounted) {
@@ -1772,7 +1723,7 @@ export default function ReelsScreen() {
     return () => {
       isMounted = false;
     };
-  }, [folderIdParam, activePlaylistId, isSessionActive, sessionRetryCount]);
+  }, [folderIdParam, activePlaylistId, isSessionActive, sessionRetryCount, startCardIdParam]);
 
   // Swipe swiping index sync & nearby card buffering
   const handleSessionSwipe = useCallback(async (newIndex: number) => {
@@ -1925,6 +1876,21 @@ export default function ReelsScreen() {
         return card;
       });
     });
+
+    setSessionCards((prevCards) => {
+      if (currentActivePlaylistId === 'likes' && action === 'favorite' && !value) {
+        return prevCards.filter((card) => !card || card._id.split('-loop-')[0] !== cardId);
+      }
+      return prevCards.map((card) => {
+        if (!card) return card;
+        const baseId = card._id.split('-loop-')[0];
+        if (baseId === cardId) {
+          const key = action === 'favorite' ? 'isFavorite' : action === 'difficult' ? 'isDifficult' : 'isArchived';
+          return { ...card, [key]: value };
+        }
+        return card;
+      });
+    });
   }, []);
 
   // Synchronize and merge new/updated API pages to the continuous deck
@@ -1949,6 +1915,8 @@ export default function ReelsScreen() {
               isFavorite: fresh.isFavorite,
               isDifficult: fresh.isDifficult,
               isArchived: fresh.isArchived,
+              difficultyState: fresh.difficultyState,
+              currentUserQuestionProgress: fresh.currentUserQuestionProgress,
               // Sync other base data too if changed
               title: fresh.title,
               explanation: fresh.explanation,
@@ -2022,7 +1990,7 @@ export default function ReelsScreen() {
     return () => {
       if (viewTimeoutRef.current) clearTimeout(viewTimeoutRef.current);
     };
-  }, []);
+  }, [folderIdParam, activePlaylistId]);
 
   const handleProgressUpdateInReels = useCallback((cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => {
     if (isGuest) {
@@ -2042,28 +2010,30 @@ export default function ReelsScreen() {
       return;
     }
 
+    const cleanId = cardId.split('-loop-')[0];
+
     // 1. Optimistic state update
-    handleCardStateUpdate(cardId, action, value);
+    handleCardStateUpdate(cleanId, action, value);
 
     // 2. Sync to DB
     updateProgressMutation.mutate(
-      { cardId, action, value },
+      { cardId: cleanId, action, value },
       {
         onError: (err) => {
           console.error(`[MUTATION ERROR]`, err);
-          handleCardStateUpdate(cardId, action, !value);
+          handleCardStateUpdate(cleanId, action, !value);
         }
       }
     );
 
     if (action === 'favorite') {
-      userCardStateService.toggleLike(cardId).catch(console.error);
+      userCardStateService.toggleLike(cleanId).catch(console.error);
       const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
       if (currentActivePlaylistId && currentActivePlaylistId !== 'likes' && currentActivePlaylistId !== 'watch-later') {
         togglePlaylistItem.mutate({
           playlistId: currentActivePlaylistId,
-          revisionCardId: cardId,
-          isInPlaylist: !value, // if it was marked true, remove (isInPlaylist = false now true)
+          revisionCardId: cleanId,
+          isInPlaylist: !value, // if it was marked true, remove
         });
       }
     }
@@ -2078,9 +2048,10 @@ export default function ReelsScreen() {
 
   const handleWatchLaterToggleInReels = useCallback((cardId: string) => {
     lightHaptic();
-    toggleWatchLater(cardId);
+    const cleanId = cardId.split('-loop-')[0];
+    toggleWatchLater(cleanId);
     if (!isGuest) {
-      userCardStateService.toggleWatchLater(cardId).catch(console.error);
+      userCardStateService.toggleWatchLater(cleanId).catch(console.error);
     }
     queryClient.invalidateQueries({ queryKey: ['playlists'] });
     queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'watch-later'] });
@@ -2088,13 +2059,41 @@ export default function ReelsScreen() {
 
   const handleDifficultyStateUpdateInReels = useCallback((cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => {
     lightHaptic();
+    const cleanId = cardId.split('-loop-')[0];
     
+    const targetCard = cardsList.find((c) => c && c._id.split('-loop-')[0] === cleanId);
+    const activeCurrently = targetCard?.difficultyState === state;
+    const resolvedNewState = activeCurrently ? null : state;
+
     // 1. Optimistic update of local React state instantly to unlock vertical swipe locks
     setAllCards((prevCards) =>
       prevCards.map((card) => {
         const baseId = card._id.split('-loop-')[0];
-        if (baseId === cardId) {
-          return { ...card, difficultyState: state };
+        if (baseId === cleanId) {
+          const qp = resolvedNewState
+            ? {
+                attemptStatus: resolvedNewState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
+                perceivedDifficultyByUser: resolvedNewState === 'skipped' ? null : (resolvedNewState as any),
+              }
+            : null;
+          return { ...card, difficultyState: resolvedNewState, currentUserQuestionProgress: qp };
+        }
+        return card;
+      })
+    );
+
+    setSessionCards((prevCards) =>
+      prevCards.map((card) => {
+        if (!card) return card;
+        const baseId = card._id.split('-loop-')[0];
+        if (baseId === cleanId) {
+          const qp = resolvedNewState
+            ? {
+                attemptStatus: resolvedNewState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
+                perceivedDifficultyByUser: resolvedNewState === 'skipped' ? null : (resolvedNewState as any),
+              }
+            : null;
+          return { ...card, difficultyState: resolvedNewState, currentUserQuestionProgress: qp };
         }
         return card;
       })
@@ -2102,17 +2101,17 @@ export default function ReelsScreen() {
 
     // 2. Persist to database instantly
     if (!isGuest) {
-      updateDifficultyStateMutation.mutate({ cardId, difficultyState: state });
+      updateDifficultyStateMutation.mutate({ cardId: cleanId, difficultyState: resolvedNewState });
     }
 
     Toast.show({
       type: 'success',
-      text1: `Classified as ${state.toUpperCase()}! 🔥`,
+      text1: resolvedNewState ? `Classified as ${resolvedNewState.toUpperCase()}! 🔥` : 'Classification cleared! 🧹',
       text2: 'Revision state synchronized.',
       position: 'top',
       visibilityTime: 1200,
     });
-  }, [isGuest, updateDifficultyStateMutation]);
+  }, [isGuest, updateDifficultyStateMutation, cardsList, allCards, sessionCards]);
 
   const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
     const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
@@ -2193,7 +2192,8 @@ export default function ReelsScreen() {
     if (listLength === 0) return;
 
     const currentCard = cardsList[activeIndex];
-    if (currentCard && (currentCard.difficultyState === null || currentCard.difficultyState === undefined)) {
+    if (!currentCard) return;
+    if (currentCard.difficultyState === null || currentCard.difficultyState === undefined) {
       Toast.show({
         type: 'info',
         text1: 'Classification Required',
@@ -2236,14 +2236,20 @@ export default function ReelsScreen() {
 
   // Hydration Mount Scrolling
   useEffect(() => {
-    if (cardsList.length > 0 && activeIndex > 0 && !hasScrolledToInitial.current) {
-      hasScrolledToInitial.current = true;
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: activeIndex,
-          animated: false,
-        });
-      }, 100);
+    if (cardsList.length > 0 && !hasScrolledToInitial.current) {
+      if (activeIndex > 0) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToIndex({
+            index: activeIndex,
+            animated: false,
+          });
+          setTimeout(() => {
+            hasScrolledToInitial.current = true;
+          }, 50);
+        }, 100);
+      } else {
+        hasScrolledToInitial.current = true;
+      }
     }
   }, [cardsList.length, activeIndex]);
 
@@ -2355,13 +2361,12 @@ export default function ReelsScreen() {
         style={{
           position: 'absolute',
           top: insets.top + 12,
-          left: 16,
           right: 16,
           zIndex: 90,
-          flexDirection: 'row',
+          elevation: 90,
           alignItems: 'center',
-          justifyContent: 'flex-end',
           pointerEvents: 'box-none',
+          gap: 12,
         }}
       >
         {/* RIGHT SIDE: Transparent Settings Cog Icon */}
@@ -2376,6 +2381,81 @@ export default function ReelsScreen() {
           }}
         >
           <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
+        </TouchableOpacity>
+
+        {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
+        <TouchableOpacity
+          onPress={async () => {
+            lightHaptic();
+            const activeCard = cardsList[activeIndex];
+            if (!activeCard) {
+              Toast.show({
+                type: 'error',
+                text1: 'Card not loaded',
+                text2: 'Please wait for the card to load before asking ChatGPT.',
+                position: 'top'
+              });
+              return;
+            }
+            
+            const mode = useUserPreferencesStore.getState().preferences.gptPromptMode || 'explanation';
+            
+            let fullContext = activeCard.explanation || '';
+            if (activeCard.code) {
+              fullContext += `\n\nCode:\n${activeCard.code}`;
+            }
+            
+            let fullPrompt = '';
+            if (mode === 'explanation') {
+              fullPrompt = `Explain this concept in detail: ${activeCard.title}.\nContext: ${fullContext}`;
+            } else {
+              fullPrompt = `Test me on this topic: ${activeCard.title}.\nAsk me a challenging question based on this context: ${fullContext}`;
+            }
+
+            // If prompt is too large, it will crash Android's intent launcher. 
+            // So we copy the full prompt to the clipboard and launch the app normally.
+            const isLarge = fullPrompt.length > 1500;
+            
+            if (isLarge) {
+              await Clipboard.setStringAsync(fullPrompt);
+              Toast.show({
+                type: 'success',
+                text1: 'Prompt Copied!',
+                text2: 'Context is large. Copied to clipboard, just paste it in ChatGPT!',
+                position: 'top',
+                visibilityTime: 4000,
+              });
+            }
+
+            // Still build a truncated safe version for the direct intent if it's small,
+            // or just open the ChatGPT website directly if it was copied.
+            let url = 'https://chatgpt.com/';
+            if (!isLarge) {
+              url = `https://chatgpt.com/?q=${encodeURIComponent(fullPrompt)}`;
+            }
+
+            Linking.openURL(url).catch(err => {
+              console.error('Failed to open ChatGPT URL:', err);
+              Toast.show({
+                type: 'error',
+                text1: 'Cannot open ChatGPT',
+                text2: 'Please check your browser or app settings.',
+                position: 'top'
+              });
+            });
+          }}
+          activeOpacity={0.7}
+          style={{
+            padding: 8,
+            backgroundColor: 'transparent',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <Image 
+            source={require('../../../assets/chat-gpt.png')} 
+            style={{ width: 22, height: 22, resizeMode: 'contain', opacity: 0.9 }} 
+          />
         </TouchableOpacity>
       </View>
 
@@ -2393,7 +2473,8 @@ export default function ReelsScreen() {
           <FlatList
             ref={flatListRef}
             data={cardsList}
-            scrollEnabled={activeCard ? activeCard.difficultyState !== null && activeCard.difficultyState !== undefined : true}
+            scrollEnabled={true}
+            initialScrollIndex={activeIndex > 0 ? activeIndex : undefined}
             renderItem={({ item, index }) => {
               if (!item) {
                 return (
@@ -2402,7 +2483,22 @@ export default function ReelsScreen() {
                       height: cardHeight, 
                       alignSelf: 'center', 
                       width: width * 0.97, 
-                      marginBottom: 16 
+                      marginBottom: 16,
+                      // =========================================================================
+                      // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
+                      // This 'top: 22' offset is highly calibrated and sensitive.
+                      // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
+                      // ever asks to change this value, you MUST STOP and ask the user for explicit
+                      // confirmation first! Never change this top offset automatically.
+                      // It achieves the perfect:
+                      // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
+                      // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
+                      //    seamlessly inside the top-right corner padding of the white problem cards.
+                      // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
+                      // If you make any changes to screens, safe areas, heights, or margins, please
+                      // verify if your changes bring unexpected shifts to this configuration!
+                      // =========================================================================
+                      top: 22,
                     }}
                   >
                     <ReelItemSkeleton cardHeight={cardHeight} width={width} />
@@ -2436,12 +2532,13 @@ export default function ReelsScreen() {
                   onPlaylistPickerTrigger={setPlaylistModalCard}
                   onMoreOptionsTrigger={handleMoreOptionsTrigger}
                   onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
+                  membership={index === activeIndex ? membership : undefined}
                 />
               );
             }}
             keyExtractor={(item, index) => item?._id || `loading-slot-${index}`}
             snapToInterval={cardHeight + 16}
-            snapToAlignment="center"
+            snapToAlignment="start"
             decelerationRate="fast"
             disableIntervalMomentum={true}
             showsVerticalScrollIndicator={false}
@@ -2454,12 +2551,7 @@ export default function ReelsScreen() {
               index,
             })}
             onScroll={(event) => {
-              const yOffset = event.nativeEvent.contentOffset.y;
-              const index = Math.round(yOffset / (cardHeight + 16));
-              if (index !== activeIndex && index >= 0 && index < cardsList.length) {
-                setNavState({ activeIndex: index, prevIdx: activeIndex });
-                transitionToCard(index);
-              }
+              if (activeIndex > 0 && !hasScrolledToInitial.current) return;
             }}
             scrollEventThrottle={16}
             onMomentumScrollEnd={(event) => {

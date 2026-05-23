@@ -9,6 +9,7 @@ export interface UserLearningPreferences {
   showHintsEarly: boolean;
   hideCertainBlockTypes: string[];
   theme?: 'light' | 'dark';
+  gptPromptMode?: 'explanation' | 'quiz';
 }
 
 interface PreferencesState {
@@ -29,6 +30,7 @@ export const useUserPreferencesStore = create<PreferencesState>()(
         showHintsEarly: false,
         hideCertainBlockTypes: [],
         theme: 'light',
+        gptPromptMode: 'explanation',
       },
       updatePreference: (key, value) =>
         set((state) => ({

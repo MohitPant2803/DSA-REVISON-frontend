@@ -107,7 +107,7 @@ function TabButton({ focused, icon, onPress }: TabButtonProps) {
 function TabLayoutInner() {
   useAppBackHandler();
   const insets = useSafeAreaInsets();
-  const dockBottom = Math.max(insets.bottom, 10) + 12; // Extra padding from bottom for detached floating dock
+  const dockBottom = Math.max(insets.bottom, 10) + 6; // Extra padding from bottom for detached floating dock resting on surface
   const segments = useSegments();
   const isReels = segments[segments.length - 1] === 'reels';
 
@@ -145,17 +145,17 @@ function TabLayoutInner() {
           left: 32,
           right: 32,
           height: 64,
-          borderRadius: 32,
+          borderRadius: 36,
           backgroundColor: '#FFFFFF', // Solid pristine white
           borderWidth: 1,
-          borderColor: '#E5E7EB', // Crisp solid neutral border
+          borderColor: 'rgba(148, 163, 184, 0.05)', // Reduced border visibility
           paddingTop: 4,
           paddingBottom: 4,
-          elevation: 0,
+          elevation: 2,
           shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 12 },
-          shadowOpacity: 0.06,
-          shadowRadius: 28,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.02,
+          shadowRadius: 18,
         },
       }}
     >

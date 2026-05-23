@@ -41,7 +41,7 @@ const MOTIVATIONAL_LINES = [
   "Your mind is a beautiful forest. Nourish it with calm exploration."
 ];
 
-const GENRE_ICON_MAP: Record<string, React.ComponentType<{ color: string; size: number }>> = {
+const GENRE_ICON_MAP: Record<string, React.ComponentType<{ color: string; size: number; strokeWidth?: number }>> = {
   folder: Folder,
   layers: Layers,
   graphs: GitBranch,
@@ -54,10 +54,10 @@ const GENRE_ICON_MAP: Record<string, React.ComponentType<{ color: string; size: 
 
 // Subtle accent per sheet — used for a single left-border stripe
 const SHEET_ACCENT_MAP: Record<string, string> = {
-  'Striver SDE Sheet': '#7C3AED',
-  'Blind 75':          '#E11D48',
-  'NeetCode 150':      '#059669',
-  'Grind 75':          '#2563EB',
+  'Striver SDE Sheet': '#8B5CF6',
+  'Blind 75':          '#FB7185',
+  'NeetCode 150':      '#34D399',
+  'Grind 75':          '#60A5FA',
 };
 
 export default function DashboardScreen() {
@@ -113,20 +113,16 @@ export default function DashboardScreen() {
   const consistencyByDay = stats?.consistencyByDay || [];
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAFAFC]" edges={['top', 'left', 'right']}>
+    <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
 
       <ScrollView className="flex-1 px-6 pt-6" showsVerticalScrollIndicator={false}>
         {/* Personalized Header Section */}
         <Animated.View entering={FadeInDown.duration(400)} className="mb-8 flex-row justify-between items-center">
           <View className="flex-1 pr-4">
-            <View className="flex-row items-center mb-1">
-              <Leaf color="#8B5CF6" size={14} strokeWidth={2.5} />
-              <Text className="text-[#8B5CF6] text-xs font-black ml-2 uppercase tracking-widest">
-                {getGreeting()}, {user?.name?.split(' ')[0] || 'friend'}
-              </Text>
-            </View>
-            <Text className="text-slate-900 text-3xl font-black tracking-tight leading-tight">Your learning rhythm</Text>
-            <Text className="text-slate-500 text-sm mt-2 font-medium leading-relaxed">
+            <Text className="text-[#0F172A] text-2xl font-bold tracking-tight leading-normal">
+              {getGreeting()}, {user?.name?.split(' ')[0] || 'friend'}
+            </Text>
+            <Text className="text-[#64748B] text-sm mt-1.5 font-medium leading-relaxed">
               {quote}
             </Text>
           </View>
@@ -134,20 +130,19 @@ export default function DashboardScreen() {
           {/* Profile Avatar */}
           <View className="relative">
             <View 
-              className="w-12 h-12 rounded-full justify-center items-center border-2 border-white shadow-sm"
+              className="w-11 h-11 rounded-full justify-center items-center border bg-white"
               style={{
-                backgroundColor: '#EDE9FE',
-                shadowColor: '#8B5CF6',
+                borderColor: 'rgba(148,163,184,0.10)',
+                shadowColor: '#0F172A',
                 shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.15,
+                shadowOpacity: 0.02,
                 shadowRadius: 8,
               }}
             >
-              <Text className="text-violet-700 font-extrabold text-base tracking-wider">
+              <Text className="text-[#8B5CF6] font-bold text-sm tracking-wider">
                 {user?.name ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'ME'}
               </Text>
             </View>
-            <View className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" />
           </View>
         </Animated.View>
 
@@ -225,70 +220,70 @@ export default function DashboardScreen() {
 
         {stats && (
           <>
-            {/* HERO SECTION: Cute Simplistic Continue Revising Card */}
-            <Animated.View entering={FadeInUp.duration(450)} className="mb-8">
+            {/* HERO SECTION: Calm Tactile Continue Session Card */}
+            <Animated.View entering={FadeInUp.duration(450)} className="mb-6">
               <View
-                className="rounded-[24px] overflow-hidden border border-violet-400/20 shadow-md"
+                className="bg-white border p-6 rounded-[28px]"
                 style={{
-                  shadowColor: '#7C3AED',
-                  shadowOffset: { width: 0, height: 8 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 16,
-                  elevation: 4,
-                  backgroundColor: '#7C3AED',
+                  borderColor: 'rgba(148,163,184,0.10)',
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.03,
+                  shadowRadius: 14,
+                  shadowOffset: { width: 0, height: 6 },
+                  elevation: 2,
                 }}
               >
-                <View className="p-6 flex-row items-center justify-between h-[160px]">
-                  <View className="flex-1 pr-4" style={{ zIndex: 1 }}>
-                    <Text className="text-violet-200 text-[10px] font-black uppercase tracking-widest mb-1.5">
-                      Active Journey
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-1 pr-6">
+                    <Text className="text-[#8B5CF6] text-[10px] font-bold tracking-wider uppercase mb-1.5">
+                      Continue your session
                     </Text>
-                    <Text className="text-white text-2xl font-bold tracking-tight mb-2">
-                      Continue revising
+                    <Text className="text-[#0F172A] text-2xl font-bold tracking-tight leading-snug">
+                      Keep the flow going
                     </Text>
-                    <Text className="text-violet-100 text-xs leading-relaxed mb-4">
-                      {stats.totalRevisions} cards completed · {Math.round(stats.totalTimeSpent / 60)} min of calm focus.
+                    <Text className="text-[#64748B] text-xs mt-1.5 leading-relaxed">
+                      You have completed {stats.totalRevisions} cards. Let's pick up where you left off.
                     </Text>
                     
                     <SpringPressable
                       onPress={() => router.push('/(protected)/(tabs)/reels')}
-                      className="flex-row items-center bg-white rounded-full px-5 py-3 self-start shadow-sm"
+                      className="flex-row items-center bg-[#8B5CF6] rounded-full px-4.5 py-2.5 mt-5 self-start shadow-sm shadow-violet-100/50"
                     >
-                      <Text className="text-violet-700 font-extrabold text-xs uppercase tracking-wider mr-1.5">
-                        Resume Session
+                      <Text className="text-white font-bold text-xs mr-1.5">
+                        Resume session
                       </Text>
-                      <ArrowRight size={14} color="#7C3AED" strokeWidth={3} />
+                      <ArrowRight size={13} color="#FFFFFF" strokeWidth={2.5} />
                     </SpringPressable>
                   </View>
 
                   {/* Progress Ring */}
-                  <View className="items-center justify-center relative" style={{ width: 88, height: 88, zIndex: 1 }}>
-                    <Svg width={88} height={88}>
+                  <View className="items-center justify-center relative" style={{ width: 84, height: 84 }}>
+                    <Svg width={84} height={84}>
                       <Circle
-                        cx={44}
-                        cy={44}
-                        r={34}
-                        stroke="rgba(255, 255, 255, 0.15)"
-                        strokeWidth={8}
+                        cx={42}
+                        cy={42}
+                        r={32}
+                        stroke="rgba(139, 92, 246, 0.08)"
+                        strokeWidth={7}
                         fill="transparent"
                       />
                       <Circle
-                        cx={44}
-                        cy={44}
-                        r={34}
-                        stroke="#ffffff"
-                        strokeWidth={8}
-                        strokeDasharray={2 * Math.PI * 34}
-                        strokeDashoffset={2 * Math.PI * 34 * (1 - Math.min(stats.streakCount / 10, 0.85))}
+                        cx={42}
+                        cy={42}
+                        r={32}
+                        stroke="#8B5CF6"
+                        strokeWidth={7}
+                        strokeDasharray={2 * Math.PI * 32}
+                        strokeDashoffset={2 * Math.PI * 32 * (1 - Math.min(stats.streakCount / 10, 0.85))}
                         strokeLinecap="round"
                         fill="transparent"
-                        transform="rotate(-90 44 44)"
+                        transform="rotate(-90 42 42)"
                       />
                     </Svg>
                     <View className="absolute items-center justify-center">
-                      <Sparkles size={20} color="#fff" />
-                      <Text className="text-white text-[10px] font-black mt-1">
-                        {stats.streakCount}D
+                      <Sparkles size={16} color="#8B5CF6" />
+                      <Text className="text-[#0F172A] text-[11px] font-bold mt-0.5">
+                        {stats.streakCount}d
                       </Text>
                     </View>
                   </View>
@@ -296,28 +291,81 @@ export default function DashboardScreen() {
               </View>
             </Animated.View>
 
+            {/* Quick Actions Row */}
+            <Animated.View entering={FadeInUp.delay(20).duration(450)} className="flex-row justify-between mb-8" style={{ gap: 10 }}>
+              <SpringPressable
+                onPress={() => router.push('/(protected)/(tabs)/reels')}
+                className="flex-1 bg-white border p-3.5 rounded-[20px] flex-row items-center justify-center"
+                style={{
+                  borderColor: 'rgba(148,163,184,0.10)',
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.015,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 1,
+                }}
+              >
+                <BookOpen color="#8B5CF6" size={14} strokeWidth={2.2} />
+                <Text className="text-[#0F172A] text-xs font-bold ml-2">Continue Revision</Text>
+              </SpringPressable>
+
+              <SpringPressable
+                onPress={() => {
+                  router.push({ pathname: '/(protected)/(tabs)/reels', params: { explain: 'true' } });
+                }}
+                className="flex-1 bg-white border p-3.5 rounded-[20px] flex-row items-center justify-center"
+                style={{
+                  borderColor: 'rgba(148,163,184,0.10)',
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.015,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 1,
+                }}
+              >
+                <Sparkles color="#8B5CF6" size={14} strokeWidth={2.2} />
+                <Text className="text-[#0F172A] text-xs font-bold ml-2">Explain to GPT</Text>
+              </SpringPressable>
+
+              <SpringPressable
+                onPress={() => router.push({ pathname: '/(protected)/playlist/[playlistId]', params: { playlistId: 'hard' } })}
+                className="flex-1 bg-white border p-3.5 rounded-[20px] flex-row items-center justify-center"
+                style={{
+                  borderColor: 'rgba(148,163,184,0.10)',
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.015,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 1,
+                }}
+              >
+                <Brain color="#8B5CF6" size={14} strokeWidth={2.2} />
+                <Text className="text-[#0F172A] text-xs font-bold ml-2">Hard Problems</Text>
+              </SpringPressable>
+            </Animated.View>
+
             {/* DSA SHEETS SECTION — clean editorial list style */}
             {sheets.length > 0 && (
               <Animated.View entering={FadeInUp.delay(40).duration(400)} className="mb-8">
                 <View className="flex-row justify-between items-center mb-3">
-                  <Text className="text-slate-800 text-base font-bold tracking-tight">Study sheets</Text>
+                  <Text className="text-[#0F172A] text-base font-bold tracking-tight">Study sheets</Text>
                   <SpringPressable onPress={() => router.push('/(protected)/(tabs)/learn')}>
-                    <Text className="text-slate-400 text-xs font-semibold">See all</Text>
+                    <Text className="text-[#64748B] text-xs font-semibold">See all</Text>
                   </SpringPressable>
                 </View>
 
                 <View
                   style={{
-                    backgroundColor: '#fff',
-                    borderRadius: 20,
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: 28,
                     borderWidth: 1,
-                    borderColor: '#F1F5F9',
+                    borderColor: 'rgba(148,163,184,0.10)',
                     overflow: 'hidden',
                     shadowColor: '#0F172A',
-                    shadowOffset: { width: 0, height: 4 },
+                    shadowOffset: { width: 0, height: 6 },
                     shadowOpacity: 0.03,
-                    shadowRadius: 12,
-                    elevation: 1,
+                    shadowRadius: 14,
+                    elevation: 2,
                   }}
                 >
                   {sheets.map((sheet, idx) => {
@@ -340,34 +388,36 @@ export default function DashboardScreen() {
                           paddingVertical: 14,
                           paddingHorizontal: 16,
                           borderBottomWidth: isLast ? 0 : 1,
-                          borderBottomColor: '#F8FAFC',
+                          borderBottomColor: '#F1F5F9',
                         }}
                       >
-                        {/* Accent stripe + icon */}
+                        {/* Soft icon container */}
                         <View
                           style={{
                             width: 38,
                             height: 38,
                             borderRadius: 12,
-                            backgroundColor: accent + '12',
+                            backgroundColor: '#FFFFFF',
                             justifyContent: 'center',
                             alignItems: 'center',
                             marginRight: 14,
                             borderWidth: 1,
-                            borderColor: accent + '22',
+                            borderColor: 'rgba(148, 163, 184, 0.12)',
                           }}
                         >
-                          <IconComp color={accent} size={17} />
+                          <IconComp color={accent} size={15} strokeWidth={2.2} />
                         </View>
 
                         {/* Text */}
                         <View style={{ flex: 1 }}>
-                          <Text style={{ color: '#1E293B', fontSize: 13.5, fontWeight: '700', letterSpacing: -0.2 }}>
+                          <Text style={{ color: '#0B1327', fontSize: 14, fontWeight: '700', letterSpacing: -0.15 }}>
                             {sheet.title}
                           </Text>
-                          <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '500', marginTop: 1 }}>
-                            {cardCount} cards
-                          </Text>
+                          {sheet.hasSubfolders === false && (
+                            <Text style={{ color: '#8B5CF6', fontSize: 11, fontWeight: '700', marginTop: 2 }}>
+                              {cardCount === 1 ? '1 card' : `${cardCount} cards`}
+                            </Text>
+                          )}
                         </View>
 
                         <ArrowRight size={14} color="#CBD5E1" strokeWidth={2} />
@@ -382,36 +432,31 @@ export default function DashboardScreen() {
             {consistencyByDay.length > 0 && (
               <Animated.View entering={FadeInUp.delay(80).duration(450)} className="mb-8">
                 <View 
-                  className="bg-white rounded-[24px] p-6 border border-slate-100 shadow-sm"
+                  className="bg-white rounded-[28px] p-6 border"
                   style={{
+                    borderColor: 'rgba(148,163,184,0.10)',
                     shadowColor: '#0F172A',
                     shadowOffset: { width: 0, height: 6 },
-                    shadowOpacity: 0.02,
-                    shadowRadius: 12,
-                    elevation: 1,
+                    shadowOpacity: 0.03,
+                    shadowRadius: 14,
+                    elevation: 2,
                   }}
                 >
                   <View className="flex-row items-center justify-between mb-4">
                     <View>
-                      <Text className="text-violet-600 text-[10px] font-black uppercase tracking-widest mb-1">
+                      <Text className="text-[#8B5CF6] text-[10px] font-bold uppercase tracking-wider mb-1.5">
                         Consistency Rhythm
                       </Text>
-                      <Text className="text-slate-800 text-lg font-black tracking-tight">
+                      <Text className="text-[#0F172A] text-lg font-bold tracking-tight">
                         Streak momentum
                       </Text>
                     </View>
                     
                     <View 
-                      className="flex-row items-center bg-violet-50 border border-violet-100 rounded-full px-3 py-1.5"
-                      style={{
-                        shadowColor: '#8B5CF6',
-                        shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: 0.05,
-                        shadowRadius: 4,
-                      }}
+                      className="flex-row items-center bg-[#F5F3FF] border border-[#E2E8F0] rounded-full px-3 py-1.5"
                     >
-                      <View className="w-2.5 h-2.5 bg-violet-500 rounded-full mr-1.5" />
-                      <Text className="text-violet-700 font-extrabold text-[11px] uppercase tracking-wide">
+                      <View className="w-2 h-2 bg-[#8B5CF6] rounded-full mr-1.5 animate-pulse" />
+                      <Text className="text-[#8B5CF6] font-extrabold text-[10px] uppercase tracking-wider">
                         {stats.streakCount} Day Streak
                       </Text>
                     </View>
@@ -424,17 +469,17 @@ export default function DashboardScreen() {
                       
                       return (
                         <View key={day.date} className="items-center flex-1">
-                          <View className="relative items-center justify-end w-4.5 h-16 rounded-full bg-slate-100/80 overflow-hidden">
+                          <View className="relative items-center justify-end w-5 h-16 rounded-full bg-[#F1F5F9] overflow-hidden border border-[#E2E8F0]/30">
                             {isCompleted ? (
                               <View 
-                                className="w-full bg-violet-600 rounded-full shadow-sm"
+                                className="w-full rounded-full"
                                 style={{
                                   height: '100%',
                                   backgroundColor: '#8B5CF6',
                                 }}
                               />
                             ) : (
-                              <View className="w-2.5 h-2.5 rounded-full bg-slate-200 mb-1" />
+                              <View className="w-2 h-2 rounded-full bg-slate-200 mb-1.5" />
                             )}
                           </View>
                           <Text className="text-[10px] text-slate-400 font-black mt-2 tracking-tighter">
@@ -464,12 +509,12 @@ export default function DashboardScreen() {
                       paddingHorizontal: 16,
                       paddingVertical: 8,
                       borderRadius: 100,
-                      backgroundColor: '#F8FAFC',
+                      backgroundColor: 'rgba(139, 92, 246, 0.05)',
                       borderWidth: 1,
-                      borderColor: '#E2E8F0',
+                      borderColor: 'rgba(139, 92, 246, 0.12)',
                     }}
                   >
-                    <Text style={{ color: '#475569', fontSize: 12.5, fontWeight: '600' }}>{topic}</Text>
+                    <Text style={{ color: '#64748B', fontSize: 12, fontWeight: '600' }}>{topic}</Text>
                   </SpringPressable>
                 ))}
               </ScrollView>
@@ -478,7 +523,7 @@ export default function DashboardScreen() {
             {/* WEAK TOPICS */}
             {(stats.weakTopics || []).length > 0 && (
               <Animated.View entering={FadeInUp.delay(160).duration(400)} className="mb-8">
-                <Text className="text-slate-800 text-base font-bold tracking-tight mb-3">Needs more practice</Text>
+                <Text className="text-[#0F172A] text-base font-bold tracking-tight mb-3">Topics you're revisiting</Text>
                 {(stats.weakTopics || []).map((wt) => (
                   <SpringPressable
                     key={wt.topic}
@@ -487,13 +532,18 @@ export default function DashboardScreen() {
                       flexDirection: 'row',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      backgroundColor: '#fff',
-                      borderRadius: 14,
-                      paddingVertical: 12,
-                      paddingHorizontal: 16,
-                      marginBottom: 8,
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 28,
+                      paddingVertical: 14,
+                      paddingHorizontal: 18,
+                      marginBottom: 10,
                       borderWidth: 1,
-                      borderColor: '#F1F5F9',
+                      borderColor: 'rgba(148,163,184,0.10)',
+                      shadowColor: '#0F172A',
+                      shadowOffset: { width: 0, height: 6 },
+                      shadowOpacity: 0.03,
+                      shadowRadius: 14,
+                      elevation: 2,
                     }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -508,10 +558,12 @@ export default function DashboardScreen() {
 
             {/* RECENTLY REVISED */}
             <Animated.View entering={FadeInUp.delay(200).duration(400)} className="mb-10">
-              <Text className="text-slate-800 text-base font-bold tracking-tight mb-3">Recently studied</Text>
+              <Text className="text-[#0F172A] text-base font-bold tracking-tight mb-3">Pick up where you left off</Text>
               {(stats.recentlyRevised || []).length === 0 ? (
-                <View style={{ backgroundColor: '#FAFAFA', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: '#F1F5F9' }}>
-                  <Text style={{ color: '#94A3B8', textAlign: 'center', fontSize: 13, fontWeight: '500' }}>
+                <View 
+                  style={{ backgroundColor: '#FFFFFF', borderRadius: 28, padding: 24, borderWidth: 1, borderColor: 'rgba(148,163,184,0.10)' }}
+                >
+                  <Text style={{ color: '#64748B', textAlign: 'center', fontSize: 13, fontWeight: '500' }}>
                     Swipe through cards — your history will appear here.
                   </Text>
                 </View>
@@ -526,13 +578,18 @@ export default function DashboardScreen() {
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
-                        backgroundColor: '#fff',
-                        borderRadius: 14,
-                        paddingVertical: 12,
-                        paddingHorizontal: 16,
-                        marginBottom: 8,
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 28,
+                        paddingVertical: 14,
+                        paddingHorizontal: 18,
+                        marginBottom: 10,
                         borderWidth: 1,
-                        borderColor: '#F1F5F9',
+                        borderColor: 'rgba(148,163,184,0.10)',
+                        shadowColor: '#0F172A',
+                        shadowOffset: { width: 0, height: 6 },
+                        shadowOpacity: 0.03,
+                        shadowRadius: 14,
+                        elevation: 2,
                       }}
                     >
                       <View style={{ flex: 1 }}>
@@ -557,21 +614,22 @@ export default function DashboardScreen() {
         {/* BOTTOM REDIRECT TO FOLDER SECTION */}
         <SpringPressable
           onPress={() => router.push('/(protected)/(tabs)/learn')}
-          className="flex-row items-center bg-white rounded-[24px] p-6 mb-24 border border-slate-100 shadow-sm"
+          className="flex-row items-center bg-white rounded-[28px] p-6 mb-24 border"
           style={{
+            borderColor: 'rgba(148,163,184,0.10)',
             shadowColor: '#0F172A',
             shadowOffset: { width: 0, height: 6 },
-            shadowOpacity: 0.02,
-            shadowRadius: 12,
-            elevation: 1,
+            shadowOpacity: 0.03,
+            shadowRadius: 14,
+            elevation: 2,
           }}
         >
-          <View className="bg-violet-50 p-3.5 rounded-2xl mr-4 border border-violet-100 shadow-sm">
-            <BookOpen color="#8B5CF6" size={22} strokeWidth={2.5} />
+          <View className="bg-[#F5F3FF] p-3.5 rounded-2xl mr-4 border" style={{ borderColor: 'rgba(139, 92, 246, 0.08)' }}>
+            <BookOpen color="#8B5CF6" size={20} strokeWidth={2.5} />
           </View>
           <View className="flex-1">
-            <Text className="text-slate-800 font-black text-base tracking-tight mb-0.5">Explore collections</Text>
-            <Text className="text-slate-400 font-semibold text-xs">Dive into custom curation folders</Text>
+            <Text className="text-[#0F172A] font-bold text-base tracking-tight mb-0.5">Explore collections</Text>
+            <Text className="text-[#64748B] font-medium text-xs">Dive into custom curation folders</Text>
           </View>
           <Sparkles color="#8B5CF6" size={18} />
         </SpringPressable>

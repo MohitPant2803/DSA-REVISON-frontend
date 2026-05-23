@@ -32,12 +32,18 @@ const Chip = React.memo(({
 }: ChipProps) => (
   <TouchableOpacity
     onPress={onPress}
-    className={`px-3.5 py-1.5 rounded-full mr-2 mb-2 border ${
-      active ? 'bg-violet-50/80 border-violet-100' : 'border-slate-100'
-    }`}
-    style={{ backgroundColor: active ? undefined : 'rgba(255,255,255,0.82)' }}
+    className="px-4 py-1.5 rounded-[20px] mr-2 mb-2 border"
+    style={{ 
+      backgroundColor: active ? 'rgba(139, 92, 246, 0.04)' : '#FFFFFF', 
+      borderColor: active ? 'rgba(139, 92, 246, 0.12)' : 'rgba(148,163,184,0.08)',
+      shadowColor: '#0F172A',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.015,
+      shadowRadius: 8,
+      elevation: 1,
+    }}
   >
-    <Text className={`text-[14px] font-normal ${active ? 'text-violet-600' : 'text-[#64748B]'}`}>
+    <Text className={`text-[13px] font-semibold ${active ? 'text-[#8B5CF6]' : 'text-[#64748B]'}`}>
       {label}
     </Text>
   </TouchableOpacity>
@@ -64,8 +70,16 @@ export function SearchFilterBar({
   return (
     <View className="mb-5">
       <View
-        className="flex-row items-center rounded-2xl px-4 py-3 border border-slate-100/80"
-        style={{ backgroundColor: 'rgba(255, 255, 255, 0.82)' }}
+        className="flex-row items-center rounded-[24px] px-6 py-3 border"
+        style={{ 
+          backgroundColor: '#FFFFFF',
+          borderColor: 'rgba(148, 163, 184, 0.08)',
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.035,
+          shadowRadius: 16,
+          elevation: 2,
+        }}
       >
         <Search color="#94A3B8" size={18} strokeWidth={2} />
         <TextInput
@@ -121,9 +135,9 @@ export function SearchFilterBar({
                 onDifficultyChange?.(undefined);
                 onTagChange?.(undefined);
               }}
-              className="px-3.5 py-1.5 rounded-full bg-slate-50 mr-2"
+              className="px-4 py-1.5 rounded-[20px] bg-slate-50 mr-2 border border-slate-100"
             >
-              <Text className="text-slate-500 text-sm font-medium">Clear</Text>
+              <Text className="text-slate-500 text-xs font-semibold">Clear</Text>
             </TouchableOpacity>
           )}
         </ScrollView>

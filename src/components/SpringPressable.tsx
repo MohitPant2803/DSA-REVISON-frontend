@@ -15,7 +15,7 @@ interface SpringPressableProps extends PressableProps {
 
 export function SpringPressable({
   children,
-  activeScale = 0.98,
+  activeScale = 0.985,
   style,
   ...props
 }: SpringPressableProps) {
@@ -29,15 +29,15 @@ export function SpringPressable({
 
   const handlePressIn = () => {
     scale.value = withSpring(activeScale, {
-      damping: 20,
-      stiffness: 300,
+      damping: 22,
+      stiffness: 200,
     });
   };
 
   const handlePressOut = () => {
     scale.value = withSpring(1, {
       damping: 18,
-      stiffness: 280,
+      stiffness: 180,
     });
   };
 

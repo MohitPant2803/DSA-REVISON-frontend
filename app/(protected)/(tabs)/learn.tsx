@@ -151,136 +151,35 @@ export default function LearnScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView
-        className="flex-1 px-6 pt-4"
+        className="flex-1 px-6 pt-6"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 140 }}
         refreshControl={
           <RefreshControl refreshing={isRefetching || isStatsRefetching} onRefresh={handleRefetchAll} tintColor="#8B5CF6" />
         }
       >
         
-        {/* Futuristic Dashboard Header */}
+        {/* Calm Tactile Header */}
         <CinematicFadeIn delay={100} style={styles.headerBlock}>
-          <View style={styles.tagWrapper}>
-            <Sparkles color="#8B5CF6" size={13} />
-            <Text style={styles.tagText}>REVISION OPERATING SYSTEM</Text>
-          </View>
           <Text style={styles.welcomeText}>Welcome back, {firstName}</Text>
-          <Text style={styles.greetingSub}>AI personalization engine is synchronized.</Text>
+          <Text style={styles.greetingSub}>A quiet space to notice patterns — no rush, no rankings.</Text>
         </CinematicFadeIn>
 
-        {/* 1. HERO COMPONENT: Today's Momentum */}
-        <CinematicFadeIn delay={250} style={styles.section}>
-          <GlassPanel style={styles.heroPanel} intensity={18} tint="dark">
-            <View style={styles.heroHeader}>
-              <Activity color="#8B5CF6" size={16} />
-              <Text style={styles.heroTitle}>TODAY'S HABIT MOMENTUM</Text>
-            </View>
 
-            <View style={styles.metricsRow}>
-              {/* Streak Pill */}
-              <View style={styles.metricPill}>
-                <Flame color="#EF4444" size={24} style={styles.pillIcon} />
-                <View>
-                  <Text style={styles.metricVal}>{streak} Days</Text>
-                  <Text style={styles.metricLbl}>Active Streak</Text>
-                </View>
-              </View>
 
-              {/* Count Pill */}
-              <View style={styles.metricPill}>
-                <Brain color="#10B981" size={24} style={styles.pillIcon} />
-                <View>
-                  <Text style={styles.metricVal}>{cardsRevised} Cards</Text>
-                  <Text style={styles.metricLbl}>Revised Total</Text>
-                </View>
-              </View>
-            </View>
 
-            {/* Glowing Master Launcher Pressable */}
-            <SuperchargedPressable
-              onPress={() => router.push('/(protected)/(tabs)/reels')}
-              activeScale={0.96}
-              style={styles.masterLauncher}
-            >
-              <Text style={styles.launcherText}>Start Active Recall Feed</Text>
-              <ArrowRight color="#FFFFFF" size={16} strokeWidth={2} />
-            </SuperchargedPressable>
-          </GlassPanel>
-        </CinematicFadeIn>
 
-        {/* 2. DYNAMIC OS COMPILER QUICK ACTION GRID */}
-        <CinematicFadeIn delay={350} style={styles.section}>
-          <Text style={styles.sectionTitle}>Compilers & Playbacks</Text>
-          <View style={styles.grid}>
-            
-            {/* Grid 1: Continue Revision */}
-            <SuperchargedPressable
-              onPress={() => router.push('/(protected)/(tabs)/reels')}
-              style={styles.gridItem}
-            >
-              <GlassPanel style={styles.gridGlass} intensity={14} tint="dark">
-                <Clock color="#8B5CF6" size={20} />
-                <Text style={styles.gridLabel}>Continue Revision</Text>
-                <Text style={styles.gridSub}>Resume last session</Text>
-              </GlassPanel>
-            </SuperchargedPressable>
-
-            {/* Grid 2: Explain to GPT */}
-            <SuperchargedPressable
-              onPress={() => router.push({ pathname: '/(protected)/(tabs)/reels', params: { shuffle: 'true' } })}
-              style={styles.gridItem}
-            >
-              <GlassPanel style={styles.gridGlass} intensity={14} tint="dark">
-                <Brain color="#6366F1" size={20} />
-                <Text style={styles.gridLabel}>Explain to GPT</Text>
-                <Text style={styles.gridSub}>Speech AI comparisons</Text>
-              </GlassPanel>
-            </SuperchargedPressable>
-
-            {/* Grid 3: Hard Problems */}
-            <SuperchargedPressable
-              onPress={() => router.push({ pathname: '/(protected)/(tabs)/reels', params: { difficultyStates: 'hard' } })}
-              style={styles.gridItem}
-            >
-              <GlassPanel style={styles.gridGlass} intensity={14} tint="dark">
-                <Skull color="#EF4444" size={20} />
-                <Text style={styles.gridLabel}>Hard Problems</Text>
-                <Text style={styles.gridSub}>Target weak scheduled cards</Text>
-              </GlassPanel>
-            </SuperchargedPressable>
-          </View>
-        </CinematicFadeIn>
-
-        {/* 3. ALGORITHMIC PAIN POINTS (Seed parameters visualizer) */}
-        <CinematicFadeIn delay={450} style={styles.section}>
-          <Text style={styles.sectionTitle}>Active Seeding Pain Points</Text>
-          <Text style={styles.sectionSubtitle}>These topics are weighted 40% more frequently in active recall loops.</Text>
-          <View style={styles.chipRow}>
-            {weakTopics.map((topic, idx) => (
-              <GlassPanel key={topic} style={styles.weakChipGlass} intensity={12} tint="dark">
-                <View style={styles.chipContent}>
-                  <Zap color="#8B5CF6" size={13} />
-                  <Text style={styles.chipText}>{topic}</Text>
-                </View>
-              </GlassPanel>
-            ))}
-          </View>
-        </CinematicFadeIn>
-
-        {/* 4. REVISION COLLECTIONS (Sheets) */}
+        {/* 4. REVISION JOURNALS */}
         <CinematicFadeIn delay={550} style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Revision Sheets</Text>
+            <View />
             {canManageContent && (
               <TouchableOpacity onPress={openCreate} style={styles.addSheetBtn}>
-                <Plus color="#8B5CF6" size={16} />
-                <Text style={styles.addSheetText}>New Sheet</Text>
+                <Plus color="#64748B" size={15} strokeWidth={2.2} />
+                <Text style={styles.addSheetText}>New journal</Text>
               </TouchableOpacity>
             )}
           </View>
-
-          <SearchFilterBar search={search} onSearchChange={setSearch} placeholder="Search revision sheets..." />
 
           {/* Render collections grid list */}
           <View style={styles.collectionsList}>
@@ -322,17 +221,17 @@ export default function LearnScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0F19', // Dark premium spatial operating system canvas
+    backgroundColor: '#FAF9F7', // Warm off-white canvas
   },
   headerBlock: {
-    marginBottom: 28,
+    marginBottom: 36, // Increased by 30% for breathing space
   },
   tagWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    backgroundColor: 'rgba(139, 92, 246, 0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.15)',
+    borderColor: 'rgba(139, 92, 246, 0.10)',
     paddingVertical: 5,
     paddingHorizontal: 12,
     borderRadius: 20,
@@ -347,31 +246,32 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   welcomeText: {
-    color: '#F8FAFC',
-    fontSize: 26,
-    fontWeight: 'normal',
+    color: '#0F172A',
+    fontSize: 30,
+    fontWeight: '700',
     letterSpacing: -0.5,
   },
   greetingSub: {
     color: '#64748B',
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 13,
+    marginTop: 6,
+    lineHeight: 20,
   },
   section: {
-    marginBottom: 36,
+    marginBottom: 48, // Spacing increased by 30% to let cards "rest"
   },
   sectionTitle: {
-    color: '#F8FAFC',
-    fontSize: 18,
-    fontWeight: 'normal',
-    marginBottom: 14,
+    color: '#0F172A',
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 16, // Breathing room below titles
     letterSpacing: -0.2,
   },
   sectionSubtitle: {
     color: '#64748B',
     fontSize: 13,
     marginTop: -8,
-    marginBottom: 16,
+    marginBottom: 20,
     lineHeight: 18,
   },
   sectionHeaderRow: {
@@ -381,7 +281,16 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   heroPanel: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.10)',
     padding: 24,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.03,
+    shadowRadius: 18,
+    elevation: 2,
   },
   heroHeader: {
     flexDirection: 'row',
@@ -393,7 +302,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.0,
-    marginLeft: 8,
+    marginLeft: 6,
+    textTransform: 'uppercase',
   },
   metricsRow: {
     flexDirection: 'row',
@@ -406,20 +316,21 @@ const styles = StyleSheet.create({
     width: '48%',
   },
   pillIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   metricVal: {
-    color: '#F8FAFC',
-    fontSize: 18,
-    fontWeight: '600',
+    color: '#0F172A',
+    fontSize: 16,
+    fontWeight: '700',
   },
   metricLbl: {
-    color: '#64748B',
-    fontSize: 12,
-    marginTop: 1,
+    color: '#94A3B8',
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: '500',
   },
   masterLauncher: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#8B5CF6', // The ONE intentional accent color on screen
     height: 52,
     borderRadius: 26,
     flexDirection: 'row',
@@ -427,13 +338,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 3,
   },
   launcherText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '600',
     marginRight: 8,
   },
   grid: {
@@ -444,19 +356,30 @@ const styles = StyleSheet.create({
   gridItem: {
     width: (width - 60) / 3,
     marginHorizontal: 6,
-    height: 105,
-    borderRadius: 22,
+    height: 84, // Sleeker and compact height since subtext is removed
+    borderRadius: 24,
   },
   gridGlass: {
-    padding: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.10)',
+    borderRadius: 24,
+    padding: 12,
     height: '100%',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.02,
+    shadowRadius: 12,
+    elevation: 1,
   },
   gridLabel: {
-    color: '#F8FAFC',
-    fontSize: 13,
-    fontWeight: '500',
+    color: '#64748B', // Soft contrast secondary focus text
+    fontSize: 11,
+    fontWeight: '700',
     marginTop: 6,
+    textAlign: 'center',
   },
   gridSub: {
     color: '#64748B',
@@ -469,34 +392,46 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     marginHorizontal: -4,
   },
-  weakChipGlass: {
+  weakChip: {
     margin: 4,
-    borderRadius: 16,
+    borderRadius: 100,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.08)',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.015,
+    shadowRadius: 8,
+    elevation: 1,
   },
   chipContent: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
   },
   chipText: {
-    color: '#94A3B8',
+    color: '#64748B', // Muted slate gray instead of loud lavender accent
     fontSize: 12,
-    fontWeight: '500',
-    marginLeft: 6,
+    fontWeight: '600',
   },
   addSheetBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.15)',
+    borderColor: 'rgba(148, 163, 184, 0.08)',
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.015,
+    shadowRadius: 8,
+    elevation: 1,
   },
   addSheetText: {
-    color: '#8B5CF6',
+    color: '#64748B',
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 6,

@@ -17,6 +17,7 @@ export interface QueryRevisionCardsInput {
   tags?: string;
   sort?: string;
   excludeSlides?: string;
+  userDifficultyStates?: string;
 }
 
 export const getRevisionCards = async (
@@ -31,6 +32,7 @@ export const getRevisionCards = async (
     params.difficulty,
     params.tags,
     params.excludeSlides,
+    params.userDifficultyStates,
   ]);
   try {
     const response = await api.get<PaginatedRevisionCards>('/revisions', {
@@ -59,7 +61,7 @@ export const getCardsByFolder = async (
   folderId: string,
   params?: QueryRevisionCardsInput
 ): Promise<PaginatedRevisionCards> => {
-  const key = cacheKey(['cards_folder', folderId, params?.page, params?.search, params?.topic, params?.excludeSlides]);
+  const key = cacheKey(['cards_folder', folderId, params?.page, params?.search, params?.topic, params?.excludeSlides, params?.userDifficultyStates]);
   try {
     const response = await api.get<PaginatedRevisionCards>(`/revisions/folder/${folderId}`, {
       params: {

@@ -52,6 +52,11 @@ export interface IRevisionCard {
   updatedAt: string;
 }
 
+export interface ICurrentUserQuestionProgress {
+  attemptStatus: 'attempted' | 'skipped';
+  perceivedDifficultyByUser: 'easy' | 'medium' | 'hard' | null;
+}
+
 export interface IPopulatedRevisionCard extends Omit<IRevisionCard, 'createdBy' | 'folderId'> {
   createdBy: PopulatedUser;
   folderId: FolderRef | string;
@@ -59,6 +64,7 @@ export interface IPopulatedRevisionCard extends Omit<IRevisionCard, 'createdBy' 
   isDifficult?: boolean;
   isArchived?: boolean;
   difficultyState?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
+  currentUserQuestionProgress?: ICurrentUserQuestionProgress | null;
 }
 
 export type CreateRevisionCardDTO = {

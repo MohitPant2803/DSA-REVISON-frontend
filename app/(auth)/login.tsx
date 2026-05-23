@@ -9,17 +9,14 @@ import Animated, {
   withSpring,
   withRepeat,
   withSequence,
-  FadeInDown,
-  FadeInUp,
+  cancelAnimation,
 } from 'react-native-reanimated';
-import { Sparkles, ArrowRight, Shield, Brain, Laptop, Flame } from 'lucide-react-native';
+import { Sparkles, ArrowRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
 import api from '@/services/api';
-import { GlassPanel } from '@/components/motion/GlassPanel';
 import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable';
 import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
-import { springPresets, easings } from '@/theme/motion';
 import { hapticFeedback } from '@/utils/haptics';
 
 const { width } = Dimensions.get('window');
@@ -34,28 +31,20 @@ export default function LoginScreen() {
   const router = useRouter();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-  // Background glow orbs animations
-  const glowScale = useSharedValue(0.9);
-  const glowOpacity = useSharedValue(0.2);
+  // Logo floating / breathing shared value
+  const logoScale = useSharedValue(0.95);
 
   useEffect(() => {
-    // Breathing continuous background orb
-    glowScale.value = withRepeat(
+    // Elegant slow breathing pulse for logo
+    logoScale.value = withRepeat(
       withSequence(
-        withTiming(1.15, { duration: 3000, easing: easings.cubicBezier }),
-        withTiming(0.9, { duration: 3000, easing: easings.cubicBezier })
+        withTiming(1.05, { duration: 2500 }),
+        withTiming(0.95, { duration: 2500 })
       ),
       -1,
       true
     );
-    glowOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.35, { duration: 3000, easing: easings.cubicBezier }),
-        withTiming(0.2, { duration: 3000, easing: easings.cubicBezier })
-      ),
-      -1,
-      true
-    );
+    return () => cancelAnimation(logoScale);
   }, []);
 
   const handleSkipLogin = async () => {
@@ -75,7 +64,7 @@ export default function LoginScreen() {
       // Set guest session parameters
       await login(mockToken, mockUser);
       
-      // Funnel Guest directly into Onboarding Step 0 to build emotional attachment first
+      // Funnel Guest directly into Onboarding for the initial experience
       router.replace('/(auth)/onboarding');
       setIsAuthenticating(false);
     } catch (error) {
@@ -103,8 +92,6 @@ export default function LoginScreen() {
         }
 
         console.log('[DEBUG] Google Sign-In Successful! Exchanging token with backend...');
-        console.log('[DEBUG] Target Backend URL:', api.defaults.baseURL ? `${api.defaults.baseURL}/auth/google` : 'UNDEFINED');
-
         const res = await api.post('/auth/google', { idToken });
         const { token, user: rawUser } = res.data.data;
 
@@ -117,8 +104,6 @@ export default function LoginScreen() {
         };
 
         await login(token, user);
-        
-        // Target dashboard home instead of feed
         router.replace('/(protected)/(tabs)/learn');
       } else {
         setIsAuthenticating(false);
@@ -132,67 +117,33 @@ export default function LoginScreen() {
     }
   };
 
-  const glowAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: glowScale.value }],
-    opacity: glowOpacity.value,
+  const logoAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: logoScale.value }],
   }));
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Drifting Iridescent Background Glow */}
-      <Animated.View style={[styles.glowOrb, glowAnimatedStyle]} />
-
       <View style={styles.content}>
         
-        {/* Branding header staggered entry */}
+        {/* TOP: Floating app logo with breathing animation */}
         <CinematicFadeIn delay={100} style={styles.brandingBlock}>
-          <View style={styles.logoTile}>
-            <Sparkles color="#8B5CF6" size={26} strokeWidth={1.5} />
-          </View>
-          <Text style={styles.title}>DSA Revision</Text>
-          <Text style={styles.subtitle}>Mastering algorithms through active recall.</Text>
+          <Animated.View style={[styles.logoTile, logoAnimatedStyle]}>
+            <Sparkles color="#8B5CF6" size={32} strokeWidth={1.5} />
+          </Animated.View>
         </CinematicFadeIn>
 
-        {/* Cinematic Value Propositions Card */}
-        <CinematicFadeIn delay={300} style={styles.valuesBlock}>
-          <GlassPanel style={styles.valuesGlass} intensity={14} tint="dark">
-            <View style={styles.valuesHeader}>
-              <Text style={styles.valuesHeaderLabel}>SYNCHRONIZATION ADVANTAGES</Text>
-            </View>
-
-            {/* Row 1: Streak Protection */}
-            <View style={styles.valueRow}>
-              <Flame color="#EF4444" size={18} style={styles.rowIcon} />
-              <View style={styles.rowTextCol}>
-                <Text style={styles.rowTitle}>Streak Protection</Text>
-                <Text style={styles.rowDesc}>Lock in daily recall targets; never lose streak progress.</Text>
-              </View>
-            </View>
-
-            {/* Row 2: AI Voice Reviews */}
-            <View style={styles.valueRow}>
-              <Brain color="#8B5CF6" size={18} style={styles.rowIcon} />
-              <View style={styles.rowTextCol}>
-                <Text style={styles.rowTitle}>AI Voice Evaluation</Text>
-                <Text style={styles.rowDesc}>Explain solutions verbally; GPT compares complexity.</Text>
-              </View>
-            </View>
-
-            {/* Row 3: Multi-device sync */}
-            <View style={styles.valueRow}>
-              <Laptop color="#6366F1" size={18} style={styles.rowIcon} />
-              <View style={styles.rowTextCol}>
-                <Text style={styles.rowTitle}>Cloud Multi-Device Sync</Text>
-                <Text style={styles.rowDesc}>Access saved playlists and custom sheets anywhere.</Text>
-              </View>
-            </View>
-          </GlassPanel>
+        {/* CENTER: Typography content */}
+        <CinematicFadeIn delay={250} style={styles.typographyBlock}>
+          <Text style={styles.title}>Build real DSA intuition.</Text>
+          <Text style={styles.subtitle}>
+            Short revisions, playlists, and active recall in one calm place.
+          </Text>
         </CinematicFadeIn>
 
-        {/* CTA Actions Group */}
-        <CinematicFadeIn delay={500} style={styles.actionBlock}>
+        {/* BOTTOM: CTAs & Trust Microcopy */}
+        <CinematicFadeIn delay={400} style={styles.actionBlock}>
           
-          {/* PRIMARY CTA: Gradient Google Button */}
+          {/* PRIMARY CTA: Google Pill Button */}
           <SuperchargedPressable
             disabled={isAuthenticating}
             onPress={handleGoogleLogin}
@@ -203,22 +154,20 @@ export default function LoginScreen() {
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <View style={styles.btnContent}>
-                <Text style={styles.primaryBtnText}>Sync with Google</Text>
-                <ArrowRight color="#FFFFFF" size={16} strokeWidth={2} style={styles.btnArrow} />
+                <Text style={styles.primaryBtnText}>Continue with Google</Text>
+                <ArrowRight color="#FFFFFF" size={16} strokeWidth={2.5} style={styles.btnArrow} />
               </View>
             )}
           </SuperchargedPressable>
 
-          {/* SECONDARY CTA: See Trial First */}
+          {/* SECONDARY CTA: Calm guest session text link */}
           <TouchableOpacity
             disabled={isAuthenticating}
             onPress={handleSkipLogin}
-            activeOpacity={0.8}
+            activeOpacity={0.6}
             style={styles.secondaryBtn}
           >
-            <GlassPanel style={styles.secondaryGlass} intensity={10} tint="dark">
-              <Text style={styles.secondaryBtnText}>See Trial First</Text>
-            </GlassPanel>
+            <Text style={styles.secondaryBtnText}>See how it works first</Text>
           </TouchableOpacity>
 
           <Text style={styles.termsText}>
@@ -233,101 +182,63 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0F19', // Dark premium spatial operating system canvas
+    backgroundColor: '#FAF9F7', // Warm off-white
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  glowOrb: {
-    position: 'absolute',
-    width: width * 0.9,
-    height: width * 0.9,
-    borderRadius: (width * 0.9) / 2,
-    backgroundColor: '#8B5CF6',
-    filter: 'blur(100px)' as any,
   },
   content: {
     flex: 1,
-    paddingHorizontal: 32,
+    paddingHorizontal: 36,
     justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 24,
+    paddingTop: 80,
+    paddingBottom: 40,
     width: '100%',
-    zIndex: 2,
+    alignItems: 'center',
   },
   brandingBlock: {
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 20,
   },
   logoTile: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    width: 76,
+    height: 76,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(226, 232, 240, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
-    shadowColor: '#8B5CF6',
+    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.03,
     shadowRadius: 16,
+    elevation: 2,
+  },
+  typographyBlock: {
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 8,
+    marginVertical: 40,
   },
   title: {
-    color: '#F8FAFC',
-    fontSize: 32,
-    fontWeight: 'normal',
+    color: '#0F172A', // Dark Navy
+    fontSize: 28,
+    fontWeight: 'bold',
     letterSpacing: -0.5,
+    textAlign: 'center',
+    lineHeight: 36,
+    marginBottom: 12,
   },
   subtitle: {
-    color: '#64748B',
+    color: '#475569', // Soft Charcoal
     fontSize: 15,
-    marginTop: 6,
+    lineHeight: 22,
     textAlign: 'center',
-  },
-  valuesBlock: {
-    width: '100%',
-  },
-  valuesGlass: {
-    padding: 20,
-  },
-  valuesHeader: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-    paddingBottom: 12,
-    marginBottom: 16,
-  },
-  valuesHeaderLabel: {
-    color: '#8B5CF6',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-  },
-  valueRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  rowIcon: {
-    marginRight: 14,
-    marginTop: 2,
-  },
-  rowTextCol: {
-    flex: 1,
-  },
-  rowTitle: {
-    color: '#F8FAFC',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  rowDesc: {
-    color: '#64748B',
-    fontSize: 12,
-    marginTop: 2,
-    lineHeight: 16,
+    paddingHorizontal: 12,
   },
   actionBlock: {
     width: '100%',
+    alignItems: 'center',
   },
   primaryBtn: {
     backgroundColor: '#8B5CF6',
@@ -338,9 +249,10 @@ const styles = StyleSheet.create({
     width: '100%',
     shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    marginBottom: 14,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 3,
+    marginBottom: 16,
   },
   btnContent: {
     flexDirection: 'row',
@@ -349,32 +261,27 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
   btnArrow: {
     marginLeft: 8,
   },
   secondaryBtn: {
     width: '100%',
-    height: 52,
-    borderRadius: 26,
-    overflow: 'hidden',
-  },
-  secondaryGlass: {
-    height: '100%',
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   secondaryBtnText: {
-    color: '#64748B',
-    fontSize: 15,
-    fontWeight: '500',
+    color: '#475569',
+    fontSize: 14,
+    fontWeight: '600',
   },
   termsText: {
-    color: '#64748B',
+    color: '#94A3B8',
     fontSize: 11,
     textAlign: 'center',
-    marginTop: 16,
+    marginTop: 24,
+    lineHeight: 16,
   },
 });
