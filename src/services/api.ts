@@ -7,7 +7,7 @@ const baseURL = process.env.EXPO_PUBLIC_API_URL;
 // 2. Create Axios Instance with sane defaults
 const api = axios.create({
   baseURL,
-  timeout: 10000, // 10 seconds timeout
+  timeout: 30000, // 30 seconds timeout to handle serverless cold starts
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
