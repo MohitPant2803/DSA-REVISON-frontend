@@ -2514,20 +2514,24 @@ export default function ReelsScreen() {
               });
             }
 
-            // Still build a truncated safe version for the direct intent if it's small,
-            // or just open the ChatGPT website directly if it was copied.
-            let url = 'https://chatgpt.com/';
-            if (!isLarge) {
-              url = `https://chatgpt.com/?q=${encodeURIComponent(fullPrompt)}`;
-            }
+            // Launch the native ChatGPT app if installed, otherwise fallback to web URL
+            const nativeUrl = isLarge 
+              ? 'chatgpt://' 
+              : `chatgpt://chat?q=${encodeURIComponent(fullPrompt)}`;
+            const webUrl = isLarge 
+              ? 'https://chatgpt.com/' 
+              : `https://chatgpt.com/?q=${encodeURIComponent(fullPrompt)}`;
 
-            Linking.openURL(url).catch(err => {
-              console.error('Failed to open ChatGPT URL:', err);
-              Toast.show({
-                type: 'error',
-                text1: 'Cannot open ChatGPT',
-                text2: 'Please check your browser or app settings.',
-                position: 'top'
+            Linking.openURL(nativeUrl).catch(() => {
+              // Native app link failed or not installed, fallback to web browser
+              Linking.openURL(webUrl).catch(err => {
+                console.error('Failed to open ChatGPT URL:', err);
+                Toast.show({
+                  type: 'error',
+                  text1: 'Cannot open ChatGPT',
+                  text2: 'Please check your browser or app settings.',
+                  position: 'top'
+                });
               });
             });
           }}
