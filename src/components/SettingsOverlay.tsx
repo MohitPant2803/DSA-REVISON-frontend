@@ -11,12 +11,16 @@ import {
   Platform,
   Pressable,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, LogOut, LogIn, Moon, Sun } from 'lucide-react-native';
+import { X, LogOut, LogIn, Moon, Sun, CheckSquare, Square, Folder as FolderIcon } from 'lucide-react-native';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useGetFolders } from '@/hooks/useFolders';
+import * as reelsFeedService from '@/services/reelsFeedService';
+import { useQueryClient } from '@tanstack/react-query';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -318,6 +322,82 @@ export const ReelsSettingsOverlay = React.memo(({
 }: ReelsSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
   const { currentMode, setMode } = useTrackingStore();
+  const { user } = useAuthStore();
+  const isGuest = user?.id === 'guest-user';
+  const queryClient = useQueryClient();
+
+  const { data: foldersData } = useGetFolders({ limit: 100 });
+  const rootFolders = React.useMemo(() => {
+    return foldersData?.results?.filter((f: any) => f.parentFolderId === null || !f.parentFolderId) || [];
+  }, [foldersData]);
+
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
+  const [prefLoading, setPrefLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && !isGuest) {
+      const fetchPrefs = async () => {
+        try {
+          setPrefLoading(true);
+          const prefs = await reelsFeedService.getReelPreferences();
+          setSelectedFolderIds(prefs.selectedRootFolderIds);
+        } catch (err) {
+          console.error('[Prefs Fetch Error]', err);
+        } finally {
+          setPrefLoading(false);
+        }
+      };
+      fetchPrefs();
+    }
+  }, [isOpen, isGuest]);
+
+  const handleToggleFolder = async (folderId: string) => {
+    if (isGuest) return;
+    const isAlreadySelected = selectedFolderIds.includes(folderId);
+    let nextSelected: string[];
+    
+    if (isAlreadySelected) {
+      nextSelected = selectedFolderIds.filter(id => id !== folderId);
+      if (nextSelected.length === 0) {
+        if (Platform.OS === 'web') {
+          alert('You must select at least one folder for study content.');
+        } else {
+          Alert.alert('Selection Locked', 'You must select at least one folder for study content.');
+        }
+        return;
+      }
+    } else {
+      nextSelected = [...selectedFolderIds, folderId];
+    }
+
+    // Calculate total cards in the next selection
+    const totalCardsInNextSelection = rootFolders
+      .filter((f: any) => nextSelected.includes(f._id))
+      .reduce((sum: number, f: any) => sum + (f.cardCount || 0), 0);
+
+    if (totalCardsInNextSelection === 0) {
+      if (Platform.OS === 'web') {
+        alert('Warning: No cards will be available to preview in the selected folder(s).');
+      } else {
+        Alert.alert(
+          'Empty Selection Warning', 
+          'Warning: The selected folder(s) contain 0 cards. Please select at least one folder with cards to study.'
+        );
+      }
+      return;
+    }
+
+    setSelectedFolderIds(nextSelected);
+
+    try {
+      await reelsFeedService.updateReelPreferences(nextSelected);
+      queryClient.invalidateQueries({ queryKey: ['reelFeed'] });
+    } catch (err) {
+      console.error('[Prefs Save Error]', err);
+      // Rollback
+      setSelectedFolderIds(selectedFolderIds);
+    }
+  };
 
   const [shouldRender, setShouldRender] = useState(isOpen);
   const backdropOpacity = useSharedValue(0);
@@ -435,6 +515,38 @@ export const ReelsSettingsOverlay = React.memo(({
                 onChange={(id) => updatePreference('gptPromptMode', id as 'explanation' | 'quiz')}
               />
             </View>
+
+            {/* Select Reel Content Folder Checklist */}
+            {!isGuest && rootFolders.length > 0 && (
+              <View style={[styles.settingGroup, { marginTop: 18 }]}>
+                <Text style={styles.groupLabel}>Select Reel Content</Text>
+                <View style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(226, 232, 240, 0.6)', padding: 12, gap: 10 }}>
+                  {rootFolders.map((folder: any) => {
+                    const isChecked = selectedFolderIds.includes(folder._id);
+                    return (
+                      <TouchableOpacity
+                        key={folder._id}
+                        onPress={() => handleToggleFolder(folder._id)}
+                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <FolderIcon size={16} color={folder.color || '#7c3aed'} />
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: '#0F172A' }}>
+                            {folder.title} ({folder.cardCount ?? 0})
+                          </Text>
+                        </View>
+                        {isChecked ? (
+                          <CheckSquare size={18} color="#8B5CF6" strokeWidth={2.5} />
+                        ) : (
+                          <Square size={18} color="#94A3B8" strokeWidth={2} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
           </ScrollView>
         </Animated.View>
       </View>

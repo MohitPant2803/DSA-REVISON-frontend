@@ -84,6 +84,7 @@ import { normalizeParam } from '@/utils/routeParams';
 import { usePlaylists, usePlaylistCards, useTogglePlaylistItem, useCreatePlaylist } from '@/hooks/usePlaylists';
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import * as sessionQueueService from '@/services/sessionQueueService';
+import * as reelsFeedService from '@/services/reelsFeedService';
 import * as userCardStateService from '@/services/userCardStateService';
 import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
 import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
@@ -656,6 +657,9 @@ const ActiveReelItem = React.memo(({
       isMounted.current = false;
       cancelAnimation(slideDragX);
       cancelAnimation(prevSlideDragX);
+      cancelAnimation(cardTranslateY);
+      cancelAnimation(lockPillColor);
+      cancelAnimation(activeSlideIndexSV);
     };
   }, [item._id, currentPrefsKey]);
 
@@ -1279,7 +1283,8 @@ export default function ReelsScreen() {
 
   // Decide if playback session is active
   const isGuest = user?.id === 'guest-user';
-  const isSessionActive = !isGuest && (!!folderIdParam || !!activePlaylistId);
+  const isSessionActive = !isGuest;
+  const isReelsFeedActive = isSessionActive && !folderIdParam && !activePlaylistId;
 
   const [showRunConfig, setShowRunConfig] = useState(false);
 
@@ -1616,6 +1621,23 @@ export default function ReelsScreen() {
       setSessionLoading(true);
       setSessionError(null);
       try {
+        if (isReelsFeedActive) {
+          console.log('[Reels Feed Init Debug]');
+          const slice = await reelsFeedService.getReelFeedSlice();
+          
+          if (!isMounted) return;
+          setSessionId('reels-feed-active');
+          
+          const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.queueLength).fill(null);
+          slice.cardsSlice.forEach((c, idx) => {
+            initialCards[slice.startIdx + idx] = c;
+          });
+          setSessionCards(initialCards);
+          setNavState({ activeIndex: slice.currentIndex, prevIdx: -1 });
+          setSessionLoading(false);
+          return;
+        }
+
         let sourceType: 'folder' | 'playlist' | 'liked' | 'watchLater';
         let sourceId: string;
 
@@ -1635,7 +1657,6 @@ export default function ReelsScreen() {
             sourceId = activePlaylistId;
           }
         } else {
-          // Fallback — should not reach here due to isSessionActive guard
           setSessionLoading(false);
           return;
         }
@@ -1760,6 +1781,23 @@ export default function ReelsScreen() {
   const handleSessionSwipe = useCallback(async (newIndex: number) => {
     if (!sessionId) return;
     try {
+      if (isReelsFeedActive) {
+        await reelsFeedService.updateReelIndex(newIndex, Date.now());
+        const slice = await reelsFeedService.getReelFeedSlice();
+        
+        setSessionCards(prev => {
+          const next = [...prev];
+          if (next.length !== slice.queueLength) {
+            next.length = slice.queueLength;
+          }
+          slice.cardsSlice.forEach((c, idx) => {
+            next[slice.startIdx + idx] = c;
+          });
+          return next;
+        });
+        return;
+      }
+
       await sessionQueueService.updateSessionIndex(sessionId, newIndex);
       const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
       
@@ -1786,7 +1824,7 @@ export default function ReelsScreen() {
     } catch (err) {
       console.error('[Session Swipe Update Error]', err);
     }
-  }, [sessionId]);
+  }, [sessionId, isReelsFeedActive]);
 
   // Session-specific shuffle handler
   const handleToggleShuffleInSession = async (shuffleValue: boolean) => {
@@ -2524,6 +2562,11 @@ export default function ReelsScreen() {
             scrollEnabled={true}
             initialScrollIndex={activeIndex > 0 ? activeIndex : undefined}
             renderItem={({ item, index }) => {
+              const isWithinRenderWindow = Math.abs(index - activeIndex) <= 4;
+              if (!isWithinRenderWindow) {
+                return <View style={{ height: cardHeight + 16, width: width * 0.97 }} />;
+              }
+
               if (!item) {
                 return (
                   <View 
