@@ -209,6 +209,8 @@ export default function LearnScreen() {
 
   // 1. Initial Soft Entry & Ambient Variable Typing Engine
   useEffect(() => {
+    let isActive = true;
+    
     // Reset timeline progress on quote change
     timelineProgress.value = 0;
 
@@ -230,6 +232,8 @@ export default function LearnScreen() {
 
     // Recursive variable typing pace generator for realistic human pacing
     const typeNextChar = () => {
+      if (!isActive) return;
+
       if (index < selectedQuote.text.length) {
         setDisplayedMessage((prev) => prev + selectedQuote.text.charAt(index));
         index++;
@@ -249,10 +253,11 @@ export default function LearnScreen() {
 
     // Soft delay before start typing
     const startDelay = setTimeout(() => {
-      typeNextChar();
+      if (isActive) typeNextChar();
     }, 400);
 
     return () => {
+      isActive = false;
       clearTimeout(startDelay);
       if (timer) clearTimeout(timer);
     };
@@ -260,6 +265,7 @@ export default function LearnScreen() {
 
   // 2. Continuous Typewriter Timeout Warning with Natural Pause
   useEffect(() => {
+    let isActive = true;
     let timer: NodeJS.Timeout;
     
     if (phase === 'timeoutWarning' && isTypingComplete && !isWarningStarted) {
@@ -267,10 +273,14 @@ export default function LearnScreen() {
       
       // Natural, patient 1-second pause to imply system waiting calmly
       timer = setTimeout(() => {
+        if (!isActive) return;
+        
         const warningText = "  Check your internet connection. Still trying to prepare your workspace...";
         let index = 0;
         
         const typeWarningChar = () => {
+          if (!isActive) return;
+          
           if (index < warningText.length) {
             setDisplayedMessage((prev) => prev + warningText.charAt(index));
             index++;
@@ -285,6 +295,7 @@ export default function LearnScreen() {
     }
 
     return () => {
+      isActive = false;
       if (timer) clearTimeout(timer);
     };
   }, [phase, isTypingComplete, isWarningStarted]);
