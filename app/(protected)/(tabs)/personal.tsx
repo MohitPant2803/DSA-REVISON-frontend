@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,6 @@ import {
   Modal,
   Pressable,
   TouchableOpacity,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,46 +18,32 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
   ListMusic,
-  Clock,
-  Settings2,
   BookOpen,
   Check,
   Flame,
   Zap,
-  Skull,
   SkipForward,
-  Sparkles,
-  TrendingUp,
   Brain,
-  Compass,
-  ArrowRight,
-  ShieldCheck,
-  Lock,
   Folder,
   Smile,
   Play,
   ChevronRight,
   MoreHorizontal,
+  Settings2,
+  Lock,
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuthStore } from '@/store/useAuthStore';
 import { usePlaylists, useCreatePlaylist, useDeletePlaylist, useUpdatePlaylist, useDuplicatePlaylist } from '@/hooks/usePlaylists';
 import { useDashboard } from '@/hooks/useDashboard';
 import { MySpaceSettingsOverlay } from '@/components/SettingsOverlay';
-import { StatsCard } from '@/components/StatsCard';
-import { SpringPressable } from '@/components/SpringPressable';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withRepeat,
-  withSequence,
-  withTiming,
-  interpolate,
-  cancelAnimation,
-} from 'react-native-reanimated';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import api from '@/services/api';
 
-const { width } = Dimensions.get('window');
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  offlineAccess: true,
+});
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -77,21 +62,6 @@ interface SmartPlaylistCardProps {
 }
 
 const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardProps) => {
-  // Spring lift configurations on touch
-  const scale = useSharedValue(1);
-
-  const handlePressIn = () => {
-    scale.value = withSpring(0.95, { damping: 20, stiffness: 350 });
-  };
-
-  const handlePressOut = () => {
-    scale.value = withSpring(1.0, { damping: 18, stiffness: 280 });
-  };
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
   const getCardTheme = () => {
     switch (playlist.id) {
       case 'easy':
@@ -150,11 +120,10 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
   const IconComponent = theme.icon;
 
   return (
-    <Animated.View style={[animatedStyle, { width: '48%', marginBottom: 12 }]}>
-      <Pressable
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+    <View style={{ width: '48%', marginBottom: 12 }}>
+      <TouchableOpacity
         onPress={onPress}
+        activeOpacity={0.85}
         className="w-full p-5 rounded-[26px] border relative overflow-hidden"
         style={{
           backgroundColor: theme.bg,
@@ -206,8 +175,8 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
         >
           {theme.statusText}
         </Text>
-      </Pressable>
-    </Animated.View>
+      </TouchableOpacity>
+    </View>
   );
 });
 
@@ -221,35 +190,12 @@ interface CustomPlaylistCardProps {
 }
 
 const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: CustomPlaylistCardProps) => {
-  const scale = useSharedValue(1);
-
-  const handlePressIn = () => {
-    scale.value = withSpring(0.96, { damping: 20, stiffness: 300 });
-  };
-
-  const handlePressOut = () => {
-    scale.value = withSpring(1.0, { damping: 18, stiffness: 280 });
-  };
-
-  const handleLongPress = () => {
-    lightHaptic();
-    scale.value = withSequence(
-      withSpring(1.05, { damping: 10, stiffness: 200 }),
-      withSpring(1.0, { damping: 15, stiffness: 250 })
-    );
-    onLongPress();
-  };
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
   return (
-    <Animated.View style={[animatedStyle, { width: '48%', marginBottom: 12 }]}>
-      <Pressable
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+    <View style={{ width: '48%', marginBottom: 12 }}>
+      <TouchableOpacity
         onPress={onPress}
+        onLongPress={onLongPress}
+        activeOpacity={0.85}
         className="w-full flex-row items-center p-4 rounded-[22px] border bg-white justify-between"
         style={{
           borderColor: 'rgba(148,163,184,0.08)',
@@ -290,8 +236,8 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
         >
           <MoreHorizontal color="#A0AEC0" size={16} />
         </TouchableOpacity>
-      </Pressable>
-    </Animated.View>
+      </TouchableOpacity>
+    </View>
   );
 });
 
@@ -355,9 +301,10 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
           />
 
           <View className="flex-row gap-2.5">
-            <SpringPressable
+            <TouchableOpacity
               onPress={handleCreate}
               disabled={createPlaylistMutation.isPending}
+              activeOpacity={0.8}
               className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
               style={{ opacity: createPlaylistMutation.isPending ? 0.7 : 1 }}
             >
@@ -366,16 +313,140 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
               ) : (
                 <Text className="text-white font-semibold text-sm">Create</Text>
               )}
-            </SpringPressable>
+            </TouchableOpacity>
 
-            <SpringPressable
+            <TouchableOpacity
               onPress={onClose}
               disabled={createPlaylistMutation.isPending}
+              activeOpacity={0.85}
               className="flex-1 py-3.5 rounded-2xl items-center justify-center border bg-white"
               style={{ borderColor: 'rgba(148,163,184,0.10)' }}
             >
               <Text className="text-[#64748B] font-semibold text-sm">Cancel</Text>
-            </SpringPressable>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+});
+
+// -------------------------------------------------------------
+// PREMIUM SIGN-IN REQUIRED MODAL
+// -------------------------------------------------------------
+interface SignInPromptModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProps) => {
+  const { login } = useAuthStore();
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  const handleSignIn = async () => {
+    lightHaptic();
+    try {
+      setIsAuthenticating(true);
+      await GoogleSignin.hasPlayServices();
+      try {
+        await GoogleSignin.signOut();
+      } catch {}
+
+      const userInfo = await GoogleSignin.signIn();
+
+      if (userInfo.type === 'success') {
+        const { idToken } = userInfo.data;
+        if (!idToken) {
+          throw new Error('Google Sign-In failed: No ID Token returned.');
+        }
+
+        console.log('[DEBUG] Google Sign-In Successful! Exchanging token with backend...');
+        const res = await api.post('/auth/google', { idToken });
+        const { token, user: rawUser } = res.data.data;
+
+        const user = {
+          id: rawUser._id,
+          name: rawUser.name,
+          email: rawUser.email,
+          avatarUrl: rawUser.profilePicture,
+          role: rawUser.role,
+        };
+
+        await login(token, user);
+        onClose();
+        Toast.show({ type: 'success', text1: 'Welcome!', text2: `Signed in as ${user.name}` });
+      }
+    } catch (error: any) {
+      console.log("FULL GOOGLE ERROR:", JSON.stringify(error, null, 2));
+      if (error.code !== statusCodes.SIGN_IN_CANCELLED) {
+        console.error('Google Sign-In Error:', error);
+        Toast.show({ type: 'error', text1: 'Authentication Failed', text2: 'Please try again' });
+      }
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  return (
+    <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable className="flex-1 bg-black/35 justify-center items-center px-6" onPress={onClose}>
+        <View 
+          className="bg-white w-full rounded-[32px] p-6 border"
+          style={{
+            borderColor: 'rgba(148,163,184,0.12)',
+            shadowColor: '#0F172A',
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.05,
+            shadowRadius: 20,
+            elevation: 4,
+          }}
+          onTouchEnd={(e) => e.stopPropagation()}
+        >
+          {/* Top glowing lock icon */}
+          <View className="items-center mb-5">
+            <View 
+              className="w-14 h-14 rounded-2xl items-center justify-center bg-[#F5F3FF] border mb-1"
+              style={{ borderColor: 'rgba(139, 92, 246, 0.08)' }}
+            >
+              <Lock color="#8B5CF6" size={24} strokeWidth={2.0} />
+            </View>
+          </View>
+
+          {/* Heading */}
+          <Text className="text-[#0B1327] text-lg font-black tracking-tight text-center mb-2 leading-tight">
+            Sign In Required
+          </Text>
+
+          {/* Body */}
+          <Text className="text-[#7F8A9E] text-[13px] font-semibold text-center leading-relaxed mb-6 px-4">
+            Connect a secure account to create custom playlists, back up your progress, and protect your revision streak.
+          </Text>
+
+          {/* Buttons */}
+          <View className="gap-2.5">
+            <TouchableOpacity
+              onPress={handleSignIn}
+              disabled={isAuthenticating}
+              activeOpacity={0.8}
+              className="w-full py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
+              style={{ opacity: isAuthenticating ? 0.75 : 1 }}
+            >
+              {isAuthenticating ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text className="text-white font-bold text-sm">Continue with Google</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={onClose}
+              disabled={isAuthenticating}
+              activeOpacity={0.85}
+              className="w-full py-3.5 rounded-2xl items-center justify-center border bg-[#FAF9F7]"
+              style={{ borderColor: 'rgba(148,163,184,0.10)' }}
+            >
+              <Text className="text-[#64748B] font-semibold text-sm">Maybe Later</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Pressable>
@@ -401,6 +472,7 @@ export default function PersonalScreen() {
 
   const [isCreating, setIsCreating] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false);
 
   // Custom long-press menu context
   const [selectedPlaylist, setSelectedPlaylist] = useState<any | null>(null);
@@ -409,24 +481,6 @@ export default function PersonalScreen() {
   const [renameValue, setRenameValue] = useState('');
 
   const isGuest = user?.id === 'guest-user';
-
-  // Floating background ambient glowing orb shared value
-  const bgFloatY = useSharedValue(0);
-  useEffect(() => {
-    bgFloatY.value = withRepeat(
-      withSequence(
-        withTiming(15, { duration: 4000 }),
-        withTiming(-15, { duration: 4000 })
-      ),
-      -1,
-      true
-    );
-    return () => cancelAnimation(bgFloatY);
-  }, []);
-
-  const ambientOrbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: bgFloatY.value }],
-  }));
 
   // Smart split lists sorted exactly like the reference screenshot grid layout
   const smartPlaylists = useMemo(() => {
@@ -537,29 +591,7 @@ export default function PersonalScreen() {
   };
 
   const promptSignIn = () => {
-    Alert.alert(
-      "Sign In Required",
-      "Please sign in with a secure account to create custom playlists, back up archives, and keep streaking.",
-      [
-        { text: "Maybe Later", style: "cancel" },
-        { 
-          text: "Sign In", 
-          onPress: async () => {
-            queryClient.clear();
-            await logout();
-          } 
-        }
-      ]
-    );
-  };
-
-  const formatTotalTime = (totalSeconds: number): string => {
-    if (!totalSeconds || totalSeconds <= 0) return '0 min';
-    const minutes = Math.floor(totalSeconds / 60);
-    if (minutes < 60) return `${minutes} min${minutes !== 1 ? 's' : ''}`;
-    const hours = Math.floor(minutes / 60);
-    const remainingMins = minutes % 60;
-    return remainingMins === 0 ? `${hours} hr${hours !== 1 ? 's' : ''}` : `${hours}h ${remainingMins}m`;
+    setIsSignInPromptOpen(true);
   };
 
   const handleStreakTap = () => {
@@ -572,60 +604,34 @@ export default function PersonalScreen() {
     });
   };
 
-  // Mock revision resurfacing list for instant high-end visuals in empty states
-  const suggestedResurfacings = useMemo(() => {
-    return [
-      { id: 'mock-1', title: 'Dynamic Programming: 0/1 Knapsack', difficulty: 'Hard', topic: 'DP', time: 'Last seen 4 days ago', decay: 'Decay: 78%' },
-      { id: 'mock-2', title: 'Graph BFS: Shortest Path in Matrix', difficulty: 'Medium', topic: 'Graphs', time: 'Last seen 2 days ago', decay: 'Decay: 42%' },
-      { id: 'mock-3', title: 'Two Sum: Two Pointer Approach', difficulty: 'Easy', topic: 'Arrays', time: 'Last seen 1 week ago', decay: 'Decay: 90%' },
-    ];
-  }, []);
-
-  const handleStartSuggested = (topic: string) => {
-    lightHaptic();
-    Toast.show({
-      type: 'success',
-      text1: 'Launching AI Memory Deck',
-      text2: `Queue built for: ${topic}`,
-      position: 'top',
-    });
-    router.push('/(protected)/(tabs)/reels');
-  };
-
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
       
       {/* Sleek Minimalist Background Ambient Orbs */}
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', zIndex: -1 }}>
-        <Animated.View
-          style={[
-            ambientOrbStyle,
-            {
-              position: 'absolute',
-              top: 50,
-              right: -120,
-              width: 500,
-              height: 500,
-              borderRadius: 250,
-              backgroundColor: 'rgba(139, 92, 246, 0.008)', // Reduced opacity significantly
-              filter: Platform.OS === 'web' ? 'blur(100px)' : undefined,
-            },
-          ]}
+        <View
+          style={{
+            position: 'absolute',
+            top: 50,
+            right: -120,
+            width: 500,
+            height: 500,
+            borderRadius: 250,
+            backgroundColor: 'rgba(139, 92, 246, 0.008)', // Reduced opacity significantly
+            filter: Platform.OS === 'web' ? 'blur(100px)' : undefined,
+          }}
         />
-        <Animated.View
-          style={[
-            ambientOrbStyle,
-            {
-              position: 'absolute',
-              bottom: 80,
-              left: -150,
-              width: 450,
-              height: 450,
-              borderRadius: 225,
-              backgroundColor: 'rgba(245, 158, 11, 0.006)', // Reduced opacity significantly
-              filter: Platform.OS === 'web' ? 'blur(110px)' : undefined,
-            },
-          ]}
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 80,
+            left: -150,
+            width: 450,
+            height: 450,
+            borderRadius: 225,
+            backgroundColor: 'rgba(245, 158, 11, 0.006)', // Reduced opacity significantly
+            filter: Platform.OS === 'web' ? 'blur(110px)' : undefined,
+          }}
         />
       </View>
 
@@ -651,9 +657,9 @@ export default function PersonalScreen() {
             {/* Streak & Floating Capsule Navigation */}
             <View className="flex-row items-center gap-2">
               {/* Flame Streak Pill */}
-              <SpringPressable
+              <TouchableOpacity
                 onPress={handleStreakTap}
-                activeScale={0.92}
+                activeOpacity={0.8}
                 className="flex-row items-center gap-1 px-3 py-1.5 rounded-full bg-white border"
                 style={{
                   borderColor: 'rgba(245, 158, 11, 0.1)',
@@ -668,11 +674,11 @@ export default function PersonalScreen() {
                 <Text className="text-[#B45309] font-bold text-[11px] tracking-tight">
                   {stats?.streakCount ?? 0} Days
                 </Text>
-              </SpringPressable>
+              </TouchableOpacity>
 
-              <SpringPressable
+              <TouchableOpacity
                 onPress={handlePressSettings}
-                activeScale={0.9}
+                activeOpacity={0.8}
                 className="w-8 h-8 rounded-full items-center justify-center bg-white border"
                 style={{
                   borderColor: 'rgba(148,163,184,0.08)',
@@ -684,7 +690,7 @@ export default function PersonalScreen() {
                 }}
               >
                 <Settings2 color="#7F8A9E" size={14} strokeWidth={2.0} />
-              </SpringPressable>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -725,9 +731,9 @@ export default function PersonalScreen() {
               </Text>
 
               {/* Continue button */}
-              <SpringPressable
+              <TouchableOpacity
                 onPress={() => router.push('/(protected)/(tabs)/reels')}
-                activeScale={0.95}
+                activeOpacity={0.85}
                 className="flex-row items-center px-4 py-2 rounded-full bg-[#8B5CF6] self-start mt-4 justify-between"
               >
                 <Play color="#FFFFFF" size={10} strokeWidth={3.0} fill="#FFFFFF" className="mr-1.5" />
@@ -735,7 +741,7 @@ export default function PersonalScreen() {
                   Continue Revising
                 </Text>
                 <ChevronRight color="#FFFFFF" size={11} strokeWidth={3.0} className="ml-2" />
-              </SpringPressable>
+              </TouchableOpacity>
             </View>
 
             {/* Right Column: Dynamic Vector-styled Illustration */}
@@ -818,7 +824,7 @@ export default function PersonalScreen() {
               {[1, 2, 3, 4].map((i) => (
                 <View
                   key={i}
-                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px] justify-between animate-pulse"
+                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px] justify-between"
                   style={{ borderColor: 'rgba(148,163,184,0.08)' }}
                 >
                   <View className="w-8 h-8 rounded-xl bg-slate-100/50" />
@@ -856,14 +862,14 @@ export default function PersonalScreen() {
               </Text>
             </View>
 
-            <SpringPressable
+            <TouchableOpacity
               onPress={() => isGuest ? promptSignIn() : setIsCreating(true)}
-              activeScale={0.9}
+              activeOpacity={0.8}
               className="px-3.5 py-1.5 rounded-full bg-[#F3E8FF]/60 flex-row items-center gap-1"
             >
               <Plus color="#8B5CF6" size={12} strokeWidth={2.5} />
               <Text className="text-[#8B5CF6] font-bold text-[11px]">New playlist</Text>
-            </SpringPressable>
+            </TouchableOpacity>
           </View>
 
           {playlistsLoading && (
@@ -871,7 +877,7 @@ export default function PersonalScreen() {
               {[1, 2].map((i) => (
                 <View
                   key={i}
-                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px] animate-pulse"
+                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px]"
                   style={{ borderColor: 'rgba(148,163,184,0.08)' }}
                 />
               ))}
@@ -939,6 +945,12 @@ export default function PersonalScreen() {
         onClose={() => setIsSettingsOpen(false)}
       />
 
+      {/* Guest Sign-In Prompt Modal Dialog */}
+      <SignInPromptModal
+        isOpen={isSignInPromptOpen}
+        onClose={() => setIsSignInPromptOpen(false)}
+      />
+
       {/* Creation Modal Form Panel */}
       {isCreating && (
         <CreatePlaylistForm onClose={() => setIsCreating(false)} />
@@ -964,41 +976,41 @@ export default function PersonalScreen() {
             </Text>
 
             <View className="gap-2.5">
-              <SpringPressable
+              <TouchableOpacity
                 onPress={handleRename}
-                activeScale={0.97}
+                activeOpacity={0.85}
                 className="w-full py-3.5 rounded-2xl bg-[#FAF9F7] border items-center"
                 style={{ borderColor: 'rgba(148,163,184,0.08)' }}
               >
                 <Text className="text-[#0F172A] text-sm font-semibold">Rename collection</Text>
-              </SpringPressable>
+              </TouchableOpacity>
 
-              <SpringPressable
+              <TouchableOpacity
                 onPress={handleDuplicate}
-                activeScale={0.97}
+                activeOpacity={0.85}
                 className="w-full py-3.5 rounded-2xl bg-[#FAF9F7] border items-center"
                 style={{ borderColor: 'rgba(148,163,184,0.08)' }}
               >
                 <Text className="text-[#0F172A] text-sm font-semibold">Duplicate collection</Text>
-              </SpringPressable>
+              </TouchableOpacity>
 
-              <SpringPressable
+              <TouchableOpacity
                 onPress={handleDelete}
-                activeScale={0.97}
+                activeOpacity={0.85}
                 className="w-full py-3.5 rounded-2xl bg-[#FFF5F5] border items-center"
                 style={{ borderColor: 'rgba(239, 68, 68, 0.08)' }}
               >
                 <Text className="text-[#E11D48] text-sm font-semibold">Delete collection</Text>
-              </SpringPressable>
+              </TouchableOpacity>
 
-              <SpringPressable
+              <TouchableOpacity
                 onPress={() => setIsMenuOpen(false)}
-                activeScale={0.97}
+                activeOpacity={0.85}
                 className="w-full py-3.5 mt-1.5 rounded-2xl bg-white border items-center"
                 style={{ borderColor: 'rgba(148,163,184,0.10)' }}
               >
                 <Text className="text-[#64748B] text-sm font-semibold">Cancel</Text>
-              </SpringPressable>
+              </TouchableOpacity>
             </View>
           </View>
         </Pressable>
@@ -1034,20 +1046,22 @@ export default function PersonalScreen() {
             />
 
             <View className="flex-row gap-2.5">
-              <SpringPressable
+              <TouchableOpacity
                 onPress={submitRename}
+                activeOpacity={0.8}
                 className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
               >
                 <Text className="text-white font-semibold text-sm">Save</Text>
-              </SpringPressable>
+              </TouchableOpacity>
 
-              <SpringPressable
+              <TouchableOpacity
                 onPress={() => setIsRenameOpen(false)}
+                activeOpacity={0.85}
                 className="flex-1 py-3.5 rounded-2xl items-center justify-center border bg-white"
                 style={{ borderColor: 'rgba(148,163,184,0.10)' }}
               >
                 <Text className="text-[#64748B] font-semibold text-sm">Cancel</Text>
-              </SpringPressable>
+              </TouchableOpacity>
             </View>
           </View>
         </Pressable>

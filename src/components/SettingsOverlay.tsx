@@ -10,6 +10,7 @@ import {
   Vibration,
   Platform,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, LogOut, LogIn, Moon, Sun } from 'lucide-react-native';
@@ -23,6 +24,14 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import api from '@/services/api';
+
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  offlineAccess: true,
+});
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -139,8 +148,9 @@ interface MySpaceSettingsOverlayProps {
 
 export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
-  const { user, logout } = useAuthStore();
+  const { user, login, logout } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   const [shouldRender, setShouldRender] = useState(isOpen);
   const backdropOpacity = useSharedValue(0);
@@ -182,8 +192,49 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
 
   const handleAuthAction = async () => {
     lightHaptic();
-    onClose();
-    await logout();
+    if (isGuest) {
+      try {
+        setIsAuthenticating(true);
+        await GoogleSignin.hasPlayServices();
+        try {
+          await GoogleSignin.signOut();
+        } catch {}
+
+        const userInfo = await GoogleSignin.signIn();
+
+        if (userInfo.type === 'success') {
+          const { idToken } = userInfo.data;
+          if (!idToken) {
+            throw new Error('Google Sign-In failed: No ID Token returned.');
+          }
+
+          console.log('[DEBUG] Google Sign-In Successful! Exchanging token with backend...');
+          const res = await api.post('/auth/google', { idToken });
+          const { token, user: rawUser } = res.data.data;
+
+          const user = {
+            id: rawUser._id,
+            name: rawUser.name,
+            email: rawUser.email,
+            avatarUrl: rawUser.profilePicture,
+            role: rawUser.role,
+          };
+
+          await login(token, user);
+          onClose();
+        }
+      } catch (error: any) {
+        console.log("FULL GOOGLE ERROR:", JSON.stringify(error, null, 2));
+        if (error.code !== statusCodes.SIGN_IN_CANCELLED) {
+          console.error('Google Sign-In Error:', error);
+        }
+      } finally {
+        setIsAuthenticating(false);
+      }
+    } else {
+      onClose();
+      await logout();
+    }
   };
 
   return (
@@ -219,12 +270,15 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
               <TouchableOpacity
                 onPress={handleAuthAction}
                 activeOpacity={0.8}
+                disabled={isAuthenticating}
                 style={[
                   styles.authButton,
                   isGuest ? styles.authButtonSignIn : styles.authButtonSignOut
                 ]}
               >
-                {isGuest ? (
+                {isAuthenticating ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : isGuest ? (
                   <>
                     <LogIn color="#ffffff" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
                     <Text style={styles.authButtonTextSignIn}>Sign In</Text>
