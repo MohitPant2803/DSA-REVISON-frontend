@@ -2458,18 +2458,27 @@ export default function ReelsScreen() {
               ? 'https://chatgpt.com/' 
               : `https://chatgpt.com/?q=${encodeURIComponent(fullPrompt)}`;
 
-            Linking.openURL(nativeUrl).catch(() => {
-              // Native app link failed or not installed, fallback to web browser
-              Linking.openURL(webUrl).catch(err => {
-                console.error('Failed to open ChatGPT URL:', err);
-                Toast.show({
-                  type: 'error',
-                  text1: 'Cannot open ChatGPT',
-                  text2: 'Please check your browser or app settings.',
-                  position: 'top'
-                });
+            Linking.canOpenURL(nativeUrl)
+              .then((supported) => {
+                if (supported) {
+                  Linking.openURL(nativeUrl).catch(() => {
+                    Linking.openURL(webUrl).catch(err => console.error('Failed to open ChatGPT URL:', err));
+                  });
+                } else {
+                  Linking.openURL(webUrl).catch(err => {
+                    console.error('Failed to open ChatGPT URL:', err);
+                    Toast.show({
+                      type: 'error',
+                      text1: 'Cannot open ChatGPT',
+                      text2: 'Please check your browser or app settings.',
+                      position: 'top'
+                    });
+                  });
+                }
+              })
+              .catch(() => {
+                Linking.openURL(webUrl).catch(err => console.error('Failed to open ChatGPT URL:', err));
               });
-            });
           }}
           activeOpacity={0.7}
           style={{
