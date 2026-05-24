@@ -173,10 +173,10 @@ export default function LearnScreen() {
   const selectedQuote = useMemo(() => {
     if (!quotesList || quotesList.length === 0) {
       return {
-        text: "Preparing your customized workspace...",
-        author: "System",
-        collegeName: "App",
-        branch: "Manager",
+        text: "",
+        author: "",
+        collegeName: "",
+        branch: "",
         yearOfGraduation: 2026
       };
     }
@@ -209,6 +209,14 @@ export default function LearnScreen() {
 
   // 1. Initial Soft Entry & Ambient Variable Typing Engine
   useEffect(() => {
+    // If quotes are not yet loaded from DB, remain completely quiet, clean, and empty
+    if (!selectedQuote || !selectedQuote.text) {
+      setDisplayedMessage('');
+      setIsTypingComplete(false);
+      timelineProgress.value = 0;
+      return;
+    }
+
     let isActive = true;
     
     // Reset timeline progress on quote change
