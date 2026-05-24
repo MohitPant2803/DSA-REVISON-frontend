@@ -308,8 +308,6 @@ interface ClassificationButtonProps {
   activeColor: string;
   isActive: boolean;
   onPress: () => void;
-  shouldPulse?: boolean;
-  pulseDelay?: number;
 }
 
 const ClassificationButton = React.memo(({
@@ -318,42 +316,11 @@ const ClassificationButton = React.memo(({
   activeColor,
   isActive,
   onPress,
-  shouldPulse = false,
-  pulseDelay = 0,
 }: ClassificationButtonProps) => {
   const handlePress = () => {
     lightHaptic();
     onPress();
   };
-
-  const scale = useSharedValue(1);
-
-  useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    if (shouldPulse && !isActive) {
-      // Delay the start of each button's breathing pulse to create a beautiful wave effect!
-      timeoutId = setTimeout(() => {
-        scale.value = withRepeat(
-          withSequence(
-            withTiming(1.08, { duration: 900 }),
-            withTiming(1, { duration: 900 })
-          ),
-          -1,
-          true
-        );
-      }, pulseDelay);
-    } else {
-      cancelAnimation(scale);
-      scale.value = withSpring(1);
-    }
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [shouldPulse, isActive, pulseDelay]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
 
   const displayColor = isActive ? activeColor : 'rgba(0, 0, 0, 0.85)';
 
@@ -363,32 +330,30 @@ const ClassificationButton = React.memo(({
       style={{ alignItems: 'center', marginBottom: 8, paddingHorizontal: 8, paddingVertical: 4 }}
       hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
     >
-      <Animated.View style={animatedStyle}>
-        {/* Main Action Capsule Button */}
-        <View
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 21,
-            backgroundColor: isActive ? `${activeColor}15` : 'rgba(255, 255, 255, 0.9)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            borderWidth: 1.5,
-            borderColor: displayColor,
-            shadowColor: isActive ? activeColor : 'transparent',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: isActive ? 0.35 : 0,
-            shadowRadius: 6,
-            elevation: isActive ? 4 : 0,
-          }}
-        >
-          <Icon
-            color={displayColor}
-            size={18}
-            strokeWidth={isActive ? 3.0 : 2.2}
-          />
-        </View>
-      </Animated.View>
+      {/* Main Action Capsule Button */}
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          backgroundColor: isActive ? `${activeColor}15` : 'rgba(255, 255, 255, 0.9)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          borderWidth: 1.5,
+          borderColor: displayColor,
+          shadowColor: isActive ? activeColor : 'transparent',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: isActive ? 0.35 : 0,
+          shadowRadius: 6,
+          elevation: isActive ? 4 : 0,
+        }}
+      >
+        <Icon
+          color={displayColor}
+          size={14}
+          strokeWidth={isActive ? 3.0 : 2.2}
+        />
+      </View>
 
       <Text
         style={{
@@ -415,7 +380,6 @@ const ReelsActionRail = React.memo(({
   isGuest,
 }: ReelsActionRailProps) => {
   const currentDifficulty = item.difficultyState;
-  const shouldPulse = !currentDifficulty;
   const isSaved = Object.values(membership ?? {}).some(Boolean);
 
   return (
@@ -437,8 +401,6 @@ const ReelsActionRail = React.memo(({
         activeColor="#10B981"
         isActive={currentDifficulty === 'easy'}
         onPress={() => onDifficultyStateUpdate('easy')}
-        shouldPulse={shouldPulse}
-        pulseDelay={0}
       />
 
       <ClassificationButton
@@ -447,8 +409,6 @@ const ReelsActionRail = React.memo(({
         activeColor="#F59E0B"
         isActive={currentDifficulty === 'medium'}
         onPress={() => onDifficultyStateUpdate('medium')}
-        shouldPulse={shouldPulse}
-        pulseDelay={250}
       />
 
       <ClassificationButton
@@ -457,8 +417,6 @@ const ReelsActionRail = React.memo(({
         activeColor="#EF4444"
         isActive={currentDifficulty === 'hard'}
         onPress={() => onDifficultyStateUpdate('hard')}
-        shouldPulse={shouldPulse}
-        pulseDelay={500}
       />
 
       <ClassificationButton
@@ -467,8 +425,6 @@ const ReelsActionRail = React.memo(({
         activeColor="#64748B"
         isActive={currentDifficulty === 'skipped'}
         onPress={() => onDifficultyStateUpdate('skipped')}
-        shouldPulse={shouldPulse}
-        pulseDelay={750}
       />
 
       {/* Futuristic Sleek Separator Line */}
