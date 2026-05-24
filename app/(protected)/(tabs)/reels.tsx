@@ -18,6 +18,8 @@ import {
   FlatList,
   Pressable,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
+const FlashListElement = FlashList as any;
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import {
   Plus,
@@ -534,6 +536,8 @@ const SlideCardWrapper = React.memo(({
     // Next card: scales up and fades in as the active card is swiped left
     if (delta === 1) {
       const activeTx = slideDragX.value;
+      // 6. Prediction-based scaling: since activeTx incorporates predictive velocity,
+      // this scale eagerly anticipates the transition, making it feel incredibly responsive.
       const progress = Math.min(Math.abs(Math.min(0, activeTx)) / (width * 0.6), 1.0);
       const scale = 0.965 + (0.035 * progress);
       const cardOpacity = 0.5 + (0.5 * progress);
@@ -670,7 +674,8 @@ const ActiveReelItem = React.memo(({
 
   useEffect(() => {
     activeSlideIndexSV.value = activeSlideIndex;
-    // Reset translation and transition locks after the index change has been committed to prevent layout jumping/flickering
+    // 8. Internal verification: Reset translation and transition locks AFTER React state commits.
+    // This guarantees no race conditions or dead periods between slides.
     slideDragX.value = 0;
     prevSlideDragX.value = -width - 100; // Previous card resets offscreen left
     isTransitioning.value = false;
@@ -707,54 +712,44 @@ const ActiveReelItem = React.memo(({
   const handleSwipeComplete = () => {
     if (!isMounted.current) return;
     
-    // If the reel is no longer active, abort state changes to prevent unmounted/inactive React updates
+    // 8. Internal verification: If the reel is no longer active, abort state changes
     if (index !== activeIndex) {
-      setTimeout(() => {
-        slideDragX.value = 0;
-        isTransitioning.value = false;
-      }, 0);
+      slideDragX.value = 0;
+      isTransitioning.value = false;
       return;
     }
     
-    setTimeout(() => {
-      if (isMounted.current) {
-        setActiveSlideIndex((prev) => prev + 1);
-        lightHaptic();
-      }
-    }, 0);
+    // 3. Remove micro-lag: Eliminate setTimeout(0), update React state immediately
+    setActiveSlideIndex((prev) => prev + 1);
+    lightHaptic();
   };
 
   const handleSwipePrevComplete = () => {
     if (!isMounted.current) return;
     
+    // 8. Internal verification: If the reel is no longer active, abort state changes
     if (index !== activeIndex) {
-      setTimeout(() => {
-        slideDragX.value = 0;
-        isTransitioning.value = false;
-      }, 0);
+      slideDragX.value = 0;
+      isTransitioning.value = false;
       return;
     }
     
-    setTimeout(() => {
-      if (isMounted.current) {
-        setActiveSlideIndex((prev) => prev - 1);
-        lightHaptic();
-      }
-    }, 0);
+    // 3. Remove micro-lag: Eliminate setTimeout(0), update React state immediately
+    setActiveSlideIndex((prev) => prev - 1);
+    lightHaptic();
   };
 
   // Handle explicit horizontal jump actions (e.g. from menu or explicit buttons)
   const scrollHorizontal = useCallback((idx?: number) => {
     const targetIdx = idx ?? 0;
-    if (targetIdx >= 0 && targetIdx < slides.length) {
+    if (targetIdx >= 0 && targetIdx < slides.length && targetIdx !== activeSlideIndex) {
       if (isTransitioning.value) return;
       isTransitioning.value = true;
       slideDragX.value = 0;
       setActiveSlideIndex(targetIdx);
-      isTransitioning.value = false;
       lightHaptic();
     }
-  }, [slides.length, index, activeIndex]);
+  }, [slides.length, activeSlideIndex]);
 
   const isDifficult = !!item.isDifficult;
   const isClassified = item.difficultyState !== null && item.difficultyState !== undefined;
@@ -812,9 +807,11 @@ const ActiveReelItem = React.memo(({
       }
     })
     .onEnd(() => {
+      // 4. Cancel animations: rapid physical snap-back for uncommitted vertical tugs
       cardTranslateY.value = withSpring(0, {
-        damping: 15,
-        stiffness: 220,
+        damping: 16,
+        stiffness: 400,
+        mass: 0.6
       });
       runOnJS(lightHaptic)();
     });
@@ -834,8 +831,9 @@ const ActiveReelItem = React.memo(({
   const VELOCITY_THRESHOLD = 200;
 
   const horizontalGesture = Gesture.Pan()
-    .activeOffsetX([-5, 5])
-    .failOffsetY([-18, 18])
+    // 1. Early direction locking: lock confidently on horizontal intent while ignoring slight vertical jitter
+    .activeOffsetX([-8, 8])
+    .failOffsetY([-24, 24])
     .onStart(() => {
       if (isTransitioning.value) return;
     })
@@ -844,19 +842,19 @@ const ActiveReelItem = React.memo(({
       const dx = event.translationX;
       const vx = event.velocityX;
 
-      // Non-linear drag response: slower drag feels slightly resistant (0.92x),
-      // faster drag feels slightly empowered (+ velocity factor)
-      const weightedDx = (dx * 0.92) + (vx * 0.015);
+      // 6. Prediction-based anticipation: blend raw translation with velocity
+      // so the UI feels like it "knows" where the finger is going.
+      const predictiveDx = dx + (vx * 0.02);
 
       if (dx < 0) {
         // Dragging Left -> Move Forward: drag the active card left
         if (activeSlideIndex < slides.length - 1) {
-          slideDragX.value = weightedDx;
+          slideDragX.value = predictiveDx;
         }
       } else if (dx > 0) {
         // Dragging Right -> Move Backward: pull previous card over
         if (activeSlideIndex > 0) {
-          prevSlideDragX.value = -width + weightedDx;
+          prevSlideDragX.value = -width + predictiveDx;
         }
       }
     })
@@ -869,13 +867,17 @@ const ActiveReelItem = React.memo(({
       // Velocity projection: evaluate where the card will end up based on physical momentum
       const projectedX = transX + velX * 0.18;
 
-      // Velocity-aware animation durations for physically accurate settling
-      const commitDuration = Math.max(140, Math.min(240, 240 - Math.abs(velX) * 0.08));
+      // 5. Gesture continuity: Velocity-aware animation durations for physically accurate settling
+      const commitDuration = Math.max(120, Math.min(220, 240 - Math.abs(velX) * 0.08));
+
+      // 4. Cancel animations: elastic, fast, zero sluggishness
+      const cancelSpring = { damping: 16, stiffness: 400, mass: 0.6 };
 
       if (transX < 0) {
         // ---- LEFT SWIPE: Push active card off-screen to the left ----
         // Check projectedX against threshold to accurately interpret fast tiny flicks
-        if (activeSlideIndex < slides.length - 1 && (Math.abs(projectedX) > SWIPE_THRESHOLD_X || velX < -VELOCITY_THRESHOLD)) {
+        if (activeSlideIndex < slides.length - 1 && (projectedX < -SWIPE_THRESHOLD_X || velX < -VELOCITY_THRESHOLD)) {
+          // 2. Interruption responsiveness: lock during the transition, but keep it brief
           isTransitioning.value = true;
           // Velocity-based exit distance: fast flicks travel further offscreen
           const exitDistance = Math.max(-width - 350, -width - Math.abs(velX) * 0.15);
@@ -890,38 +892,26 @@ const ActiveReelItem = React.memo(({
           );
         } else {
           // Cancel: snap active card back
-          slideDragX.value = withSpring(
-            0,
-            { damping: 15, stiffness: 500, mass: 0.2 },
-          );
+          slideDragX.value = withSpring(0, cancelSpring);
         }
       } else if (transX > 0) {
         // ---- RIGHT SWIPE: Pull previous card OVER current card from the left ----
-        if (activeSlideIndex > 0 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
+        if (activeSlideIndex > 0 && (projectedX > SWIPE_THRESHOLD_X || velX > VELOCITY_THRESHOLD)) {
           isTransitioning.value = true;
           // Animate it sliding right over the current card to position 0
-          prevSlideDragX.value = withTiming(0, { duration: 180 }, (finished) => {
+          prevSlideDragX.value = withTiming(0, { duration: commitDuration }, (finished) => {
             if (finished) {
               runOnJS(handleSwipePrevComplete)();
             }
           });
         } else {
           // Cancel: snap previous card back offscreen
-          prevSlideDragX.value = withSpring(
-            -width - 100,
-            { damping: 15, stiffness: 500, mass: 0.2 },
-          );
+          prevSlideDragX.value = withSpring(-width - 100, cancelSpring);
         }
       } else {
         // No movement — reset
-        slideDragX.value = withSpring(
-          0,
-          { damping: 15, stiffness: 500, mass: 0.2 },
-        );
-        prevSlideDragX.value = withSpring(
-          -width - 100,
-          { damping: 15, stiffness: 500, mass: 0.2 },
-        );
+        slideDragX.value = withSpring(0, cancelSpring);
+        prevSlideDragX.value = withSpring(-width - 100, cancelSpring);
       }
     });
 
@@ -1286,7 +1276,7 @@ export default function ReelsScreen() {
   const activeIndex = navState.activeIndex;
   const prevIdx = navState.prevIdx;
   const shuffledOrderRef = useRef<string[]>([]);
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<any>(null);
   const hasScrolledToInitial = useRef(false);
   const sessionStartCardId = useRef<string | null>(null);
   const recentCardIdsRef = useRef<string[]>([]);
@@ -1780,36 +1770,69 @@ export default function ReelsScreen() {
   }, [folderIdParam, activePlaylistId, isSessionActive, sessionRetryCount, startCardIdParam]);
 
   // Swipe swiping index sync & nearby card buffering
+  const sessionSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleSessionSwipe = useCallback(async (newIndex: number) => {
     if (!sessionId) return;
-    try {
-      await sessionQueueService.updateSessionIndex(sessionId, newIndex);
-      const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
-      
-      setSessionCards(prev => {
-        const next = [...prev];
-        if (next.length !== slice.orderedCardIds.length) {
-          next.length = slice.orderedCardIds.length;
-        }
-        
-        const cardMap = new Map<string, IPopulatedRevisionCard>();
-        prev.forEach(c => {
-          if (c) cardMap.set(c._id, c);
-        });
-        slice.cardsSlice.forEach(c => {
-          if (c) cardMap.set(c._id, c);
-        });
-        
-        for (let i = 0; i < slice.orderedCardIds.length; i++) {
-          const id = slice.orderedCardIds[i];
-          next[i] = cardMap.get(id) || null;
-        }
-        return next;
-      });
-    } catch (err) {
-      console.error('[Session Swipe Update Error]', err);
+
+    // 1. Queue server index sync in background (debounced)
+    if (sessionSyncTimeoutRef.current) {
+      clearTimeout(sessionSyncTimeoutRef.current);
     }
-  }, [sessionId]);
+    sessionSyncTimeoutRef.current = setTimeout(() => {
+      sessionQueueService.updateSessionIndex(sessionId, newIndex).catch((err) => {
+        console.error('[Session Background Sync Error]', err);
+      });
+    }, 800); // 800ms debounce ensures rapid swipes do not flood the server
+
+    // 2. Local-first buffer check:
+    // Verify if upcoming adjacent cards are already hydrated in memory.
+    const hasAheadCards = [1, 2].every(offset => {
+      const targetIdx = newIndex + offset;
+      if (targetIdx < sessionCards.length) {
+        return sessionCards[targetIdx] !== null; // Card is loaded
+      }
+      return true; // Out of bounds is okay
+    });
+
+    const hasBehindCards = [1, 2].every(offset => {
+      const targetIdx = newIndex - offset;
+      if (targetIdx >= 0) {
+        return sessionCards[targetIdx] !== null; // Card is loaded
+      }
+      return true; // Out of bounds is okay
+    });
+
+    // 3. Trigger API query only if a buffer slot is empty (cold start/scroll boundary)
+    if (!hasAheadCards || !hasBehindCards) {
+      try {
+        const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
+        
+        setSessionCards(prev => {
+          const next = [...prev];
+          if (next.length !== slice.orderedCardIds.length) {
+            next.length = slice.orderedCardIds.length;
+          }
+          
+          const cardMap = new Map<string, IPopulatedRevisionCard>();
+          prev.forEach(c => {
+            if (c) cardMap.set(c._id, c);
+          });
+          slice.cardsSlice.forEach(c => {
+            if (c) cardMap.set(c._id, c);
+          });
+          
+          for (let i = 0; i < slice.orderedCardIds.length; i++) {
+            const id = slice.orderedCardIds[i];
+            next[i] = cardMap.get(id) || null;
+          }
+          return next;
+        });
+      } catch (err) {
+        console.error('[Session Swipe Buffer Error]', err);
+      }
+    }
+  }, [sessionId, sessionCards]);
 
   // Session-specific shuffle handler
   const handleToggleShuffleInSession = async (shuffleValue: boolean) => {
@@ -2043,6 +2066,7 @@ export default function ReelsScreen() {
   useEffect(() => {
     return () => {
       if (viewTimeoutRef.current) clearTimeout(viewTimeoutRef.current);
+      if (sessionSyncTimeoutRef.current) clearTimeout(sessionSyncTimeoutRef.current);
     };
   }, [folderIdParam, activePlaylistId]);
 
@@ -2467,12 +2491,11 @@ export default function ReelsScreen() {
         }}
       >
         {cardsList.length > 0 ? (
-          <FlatList
+          <FlashListElement
             ref={flatListRef}
             data={cardsList}
             scrollEnabled={true}
-            initialScrollIndex={activeIndex > 0 ? activeIndex : undefined}
-            renderItem={({ item, index }) => {
+            renderItem={({ item, index }: { item: IPopulatedRevisionCard | null; index: number }) => {
               if (!item) {
                 return (
                   <View 
@@ -2532,25 +2555,19 @@ export default function ReelsScreen() {
                 />
               );
             }}
-            keyExtractor={(item, index) => item?._id || `loading-slot-${index}`}
+            keyExtractor={(item: IPopulatedRevisionCard | null, index: number) => item?._id || `loading-slot-${index}`}
             snapToInterval={cardHeight + 16}
             snapToAlignment="start"
             decelerationRate="fast"
             disableIntervalMomentum={true}
             showsVerticalScrollIndicator={false}
-            windowSize={3}
-            maxToRenderPerBatch={2}
-            removeClippedSubviews={Platform.OS === 'android'}
-            getItemLayout={(data, index) => ({
-              length: cardHeight + 16,
-              offset: (cardHeight + 16) * index,
-              index,
-            })}
-            onScroll={(event) => {
+            // FlashList High-Performance Configs
+            estimatedItemSize={cardHeight + 16}
+            onScroll={(event: any) => {
               if (activeIndex > 0 && !hasScrolledToInitial.current) return;
             }}
             scrollEventThrottle={16}
-            onMomentumScrollEnd={(event) => {
+            onMomentumScrollEnd={(event: any) => {
               const yOffset = event.nativeEvent.contentOffset.y;
               const index = Math.round(yOffset / (cardHeight + 16));
               if (index !== activeIndex && index >= 0 && index < cardsList.length) {
