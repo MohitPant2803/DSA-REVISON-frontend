@@ -2382,6 +2382,18 @@ export default function ReelsScreen() {
   if (isError || (activePlaylistId && playlistCardsError) || (isSessionActive && sessionError)) {
     return (
       <View className="flex-1 justify-center items-center bg-[#F8FAFC] p-6">
+        {/* Render ReelsSettingsOverlay inside error screen if open */}
+        {isSettingsOpen && (
+          <ReelsSettingsOverlay
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            playlistName={activePlaybackName}
+            sessionTimer={formatTime(sessionTotalTime)}
+            questionsRevised={completedCardsCount}
+            showReelContentSelect={isReelsFeedActive}
+          />
+        )}
+
         <Text className="text-[#64748B] text-lg text-center mb-4 font-medium">
           {sessionError 
             ? sessionError 
@@ -2389,20 +2401,32 @@ export default function ReelsScreen() {
               ? 'Could not load playlist' 
               : error?.message || 'An error occurred'}
         </Text>
-        <TouchableOpacity
-          onPress={() => {
-            if (isSessionActive && sessionError) {
-              setSessionRetryCount(prev => prev + 1);
-            } else if (activePlaylistId) {
-              refetchPlaylistCards();
-            } else {
-              refetch();
-            }
-          }}
-          className="px-8 py-3.5 rounded-full bg-[#8B5CF6] shadow-md shadow-violet-500/20 active:scale-[0.98]"
-        >
-          <Text className="text-white font-medium">Try again</Text>
-        </TouchableOpacity>
+        
+        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (isSessionActive && sessionError) {
+                setSessionRetryCount(prev => prev + 1);
+              } else if (activePlaylistId) {
+                refetchPlaylistCards();
+              } else {
+                refetch();
+              }
+            }}
+            className="px-6 py-3.5 rounded-full bg-[#8B5CF6] shadow-md shadow-violet-500/20 active:scale-[0.98]"
+          >
+            <Text className="text-white font-medium">Try again</Text>
+          </TouchableOpacity>
+
+          {isReelsFeedActive && (
+            <TouchableOpacity
+              onPress={() => setIsSettingsOpen(true)}
+              className="px-6 py-3.5 rounded-full bg-[#E2E8F0] border border-[#CBD5E1] active:scale-[0.98]"
+            >
+              <Text className="text-[#0F172A] font-medium">Choose Folders</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
   }
