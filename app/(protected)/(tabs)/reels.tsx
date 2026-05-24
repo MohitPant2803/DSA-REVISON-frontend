@@ -1622,7 +1622,6 @@ export default function ReelsScreen() {
       setSessionError(null);
       try {
         if (isReelsFeedActive) {
-          console.log('[Reels Feed Init Debug]');
           const slice = await reelsFeedService.getReelFeedSlice();
           
           if (!isMounted) return;
@@ -1661,13 +1660,7 @@ export default function ReelsScreen() {
           return;
         }
 
-        console.log('[Session Init Debug]', {
-          folderIdParam,
-          activePlaylistId,
-          startCardIdParam,
-          isSessionActive,
-          sessionRetryCount
-        });
+
 
         const isShuffle = currentMode === 'shuffle';
         const session = await sessionQueueService.startSession(sourceType, sourceId, isShuffle);
