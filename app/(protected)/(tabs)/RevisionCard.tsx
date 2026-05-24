@@ -162,8 +162,6 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
   const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
   const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role, user.id, card.createdBy) : false);
 
-  console.log(`[RevisionCard] Permission Check: ${card.title} | canEdit: ${canEdit} | Role: ${role}`);
-
   const handleProgressUpdate = (action: 'favorite' | 'difficult' | 'archived') => {
     const key =
       action === 'favorite' ? 'isFavorite' : action === 'difficult' ? 'isDifficult' : 'isArchived';
