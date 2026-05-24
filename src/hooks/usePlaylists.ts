@@ -40,7 +40,7 @@ export function mapApiPlaylist(p: playlistService.ApiPlaylist, index = 0): UIPla
     color2: p.color2 || fallback2,
     itemCount: p.itemCount ?? 0,
     completedLoops: p.completedLoops ?? useTrackingStore.getState().loopsCompleted[p._id] ?? 0,
-    orderedCardIds: p.orderedCardIds ?? [],
+    orderedCardIds: p.cardIds ?? p.orderedCardIds ?? [],
   };
 }
 
@@ -273,7 +273,9 @@ export const useReorderPlaylist = () => {
       }
     },
     onSettled: (data, err, { playlistId }) => {
+      const isAuthenticated = useAuthStore.getState().isAuthenticated;
       qc.invalidateQueries({ queryKey: [PLAYLIST_DETAIL_KEY, playlistId] });
+      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY, isAuthenticated] });
     },
   });
 };
