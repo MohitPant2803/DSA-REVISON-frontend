@@ -67,43 +67,7 @@ import Animated, {
 
 const { width, height } = Dimensions.get('window');
 
-const SAMPLE_QUOTES = [
-  {
-    text: "DSA is not a sprint, it's a marathon. Focus on pattern matching over rote memorization.",
-    author: "Abhinav Sharma",
-    collegeName: "IIT Delhi",
-    branch: "Computer Science",
-    yearOfGraduation: 2024
-  },
-  {
-    text: "Notice how problems are built. Dynamic Programming is just subproblem sorting. Stay consistent!",
-    author: "Riya Patel",
-    collegeName: "NSUT",
-    branch: "Information Technology",
-    yearOfGraduation: 2023
-  },
-  {
-    text: "Don't count the problems you solve; make the problems you solve count. Solve 150 high-quality ones deeply.",
-    author: "Mohit Pant",
-    collegeName: "DTU",
-    branch: "Electronics & Communication",
-    yearOfGraduation: 2025
-  },
-  {
-    text: "The silent hours you spend understanding the graph traversal will pay off when you least expect it.",
-    author: "Sneha Reddy",
-    collegeName: "BITS Pilani",
-    branch: "Computer Science",
-    yearOfGraduation: 2024
-  },
-  {
-    text: "Calm minds learn faster. When you get stuck, step away, breathe, and look at the recursion tree.",
-    author: "Vikram Malhotra",
-    collegeName: "IIIT Hyderabad",
-    branch: "Computer Science",
-    yearOfGraduation: 2023
-  }
-];
+
 
 // Staggered Chained Card Drag-Chain Momentum Component with Stretch and Compress Physics
 const StaggeredCard = ({
@@ -187,8 +151,8 @@ export default function LearnScreen() {
   const [displayedMessage, setDisplayedMessage] = useState('');
   const [seniorModalVisible, setSeniorModalVisible] = useState(false);
 
-  // Dynamic MongoDB Quote integration with client-side fallbacks
-  const [quotesList, setQuotesList] = useState<any[]>(SAMPLE_QUOTES);
+  // Dynamic MongoDB Quote integration
+  const [quotesList, setQuotesList] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchQuotes = async () => {
@@ -207,6 +171,15 @@ export default function LearnScreen() {
 
   // Selected Quote Selection for Ghost Typing - deterministically shifts to the next quote every 12 hours (at 12:00 AM and 12:00 PM)
   const selectedQuote = useMemo(() => {
+    if (!quotesList || quotesList.length === 0) {
+      return {
+        text: "Preparing your customized workspace...",
+        author: "System",
+        collegeName: "App",
+        branch: "Manager",
+        yearOfGraduation: 2026
+      };
+    }
     const twelveHourIntervals = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
     return quotesList[twelveHourIntervals % quotesList.length];
   }, [quotesList]);
