@@ -113,6 +113,8 @@ const StaggeredCard = ({
   );
 };
 
+let hasAppBeenAnimated = false;
+
 export default function LearnScreen() {
   useAppBackHandler();
   const insets = useSafeAreaInsets();
@@ -141,21 +143,12 @@ export default function LearnScreen() {
 
   const folders = useMemo(() => data?.results ?? [], [data]);
 
-  // Explicit cinematic loading phases
-  const [phase, setPhase] = useState<'typing' | 'waitingForContent' | 'contentReady' | 'timeoutWarning' | 'settled'>('typing');
-  const [showAuthor, setShowAuthor] = useState(false);
-  const [isTypingComplete, setIsTypingComplete] = useState(false);
-  const [isWarningStarted, setIsWarningStarted] = useState(false);
-  const [displayedMessage, setDisplayedMessage] = useState('');
-  const [seniorModalVisible, setSeniorModalVisible] = useState(false);
-
   // Dynamic MongoDB Quote integration
   const [quotesList, setQuotesList] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchQuotes = async () => {
       try {
-        // Prepend is omitted because api baseURL already concludes with /api
         const response = await api.get('/senior-quotes');
         if (response.data?.success && response.data?.data && response.data.data.length > 0) {
           setQuotesList(response.data.data);
@@ -182,8 +175,20 @@ export default function LearnScreen() {
     return quotesList[twelveHourIntervals % quotesList.length];
   }, [quotesList]);
 
+  // Explicit cinematic loading phases
+  const [phase, setPhase] = useState<'typing' | 'waitingForContent' | 'contentReady' | 'timeoutWarning' | 'settled'>(
+    hasAppBeenAnimated ? 'settled' : 'typing'
+  );
+  const [showAuthor, setShowAuthor] = useState(hasAppBeenAnimated);
+  const [isTypingComplete, setIsTypingComplete] = useState(hasAppBeenAnimated);
+  const [isWarningStarted, setIsWarningStarted] = useState(false);
+  const [displayedMessage, setDisplayedMessage] = useState(
+    hasAppBeenAnimated && selectedQuote ? selectedQuote.text : ''
+  );
+  const [seniorModalVisible, setSeniorModalVisible] = useState(false);
+
   // Master timeline progress representation (0% to 100%)
-  const timelineProgress = useSharedValue(0);
+  const timelineProgress = useSharedValue(hasAppBeenAnimated ? 100 : 0);
 
   // Math-calibrated center offset so the quote is drawn exactly in the vertical center of the screen
   const quoteInitialY = 245;
@@ -207,6 +212,12 @@ export default function LearnScreen() {
 
   // 1. Initial Soft Entry & Ambient Variable Typing Engine
   useEffect(() => {
+    if (hasAppBeenAnimated) {
+      if (selectedQuote && selectedQuote.text) {
+        setDisplayedMessage(selectedQuote.text);
+      }
+      return;
+    }
     // If quotes are not yet loaded from DB, remain completely quiet, clean, and empty
     if (!selectedQuote || !selectedQuote.text) {
       setDisplayedMessage('');
@@ -341,6 +352,7 @@ export default function LearnScreen() {
 
   // 4. Content Reveal Transition with Premium Easing (Text pulls cards upward)
   useEffect(() => {
+    if (hasAppBeenAnimated) return;
     if (phase === 'contentReady') {
       // Luxurious cinematic workspace assembly timeline animation (T = 30 to 100)
       timelineProgress.value = withTiming(100, {
@@ -350,11 +362,19 @@ export default function LearnScreen() {
 
       const timer = setTimeout(() => {
         setPhase('settled');
+        hasAppBeenAnimated = true; // Mark as animated!
       }, 2500);
 
       return () => clearTimeout(timer);
     }
   }, [phase]);
+
+  // Synchronize and update the static quote instantly if the app has already been animated once
+  useEffect(() => {
+    if (hasAppBeenAnimated && selectedQuote && selectedQuote.text) {
+      setDisplayedMessage(selectedQuote.text);
+    }
+  }, [selectedQuote]);
 
   // Master Orchestrated Reanimated Style Mappings
   const welcomeAnimatedStyle = useAnimatedStyle(() => {
