@@ -11,6 +11,7 @@ export interface IReelPreferences {
 
 export interface IReelFeedSlice {
   queueLength: number;
+  startIdx: number;
   currentIndex: number;
   deepestIndexReached: number;
   queueVersion: number;

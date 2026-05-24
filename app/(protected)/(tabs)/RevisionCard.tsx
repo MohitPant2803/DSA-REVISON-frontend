@@ -199,7 +199,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
     <StyledView className="flex-1 bg-transparent pr-14">
       <StyledView className="flex-1 pt-2 pb-6">
         <StyledScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
-          <AnimatedView entering={FadeInDown.duration(400)} className="gap-y-5">
+          <StyledView className="gap-y-5">
             
             {/* Premium Apple-style Badge Row */}
             <StyledView className="flex-row flex-wrap gap-2 items-center">
@@ -412,7 +412,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
                 </StyledText>
               </StyledView>
             )}
-          </AnimatedView>
+          </StyledView>
         </StyledScrollView>
       </StyledView>
     </StyledView>

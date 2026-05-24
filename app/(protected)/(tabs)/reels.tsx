@@ -657,6 +657,7 @@ const ActiveReelItem = React.memo(({
   onPlaylistPickerTrigger,
   onMoreOptionsTrigger,
   onDifficultyStateUpdate,
+  isActiveCardClassified,
   membership,
 }: ReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
@@ -830,9 +831,9 @@ const ActiveReelItem = React.memo(({
   });
 
   const verticalGesture = Gesture.Pan()
+    .enabled(index === activeIndex && !isClassified)
     .activeOffsetY([-10, 100000]) // Only capture upward swipes (translationY < -10) to block scrolling down
     .failOffsetX([-10, 10])
-    .enabled(!isClassified)
     .onUpdate((event) => {
       // Elastic resistance cap at -40px on swipe up, 40px on swipe down
       if (event.translationY < 0) {
@@ -849,9 +850,16 @@ const ActiveReelItem = React.memo(({
       runOnJS(lightHaptic)();
     });
 
-  const animatedActiveCardStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: cardTranslateY.value }],
-  }));
+  const isNextCard = index === activeIndex + 1;
+  const isLockedNextCard = isNextCard && !isActiveCardClassified;
+
+  const animatedActiveCardStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateY: cardTranslateY.value },
+      ],
+    };
+  });
 
   // =========================================================================
   // Onboarding-style horizontal gesture handler:
@@ -861,6 +869,7 @@ const ActiveReelItem = React.memo(({
   // - First slide blocks right swipe. Last slide blocks left swipe.
   // =========================================================================
   const horizontalGesture = Gesture.Pan()
+    .enabled(index === activeIndex)
     .activeOffsetX([-10, 10])
     .failOffsetY([-10, 10])
     .onStart(() => {
@@ -1028,193 +1037,67 @@ const ActiveReelItem = React.memo(({
       </GestureDetector>
 
       {/* Premium Glassmorphic Vertical Action Rail - completely outside gesture ownership */}
-      <ReelsActionRail
-        cleanId={cleanId}
-        item={item}
-        membership={membership}
-        onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
-        onPlaylistPickerTrigger={onPlaylistPickerTrigger}
-        isGuest={isGuest}
-      />
-    </View>
-  );
-});
+      {index === activeIndex && (
+        <ReelsActionRail
+          cleanId={cleanId}
+          item={item}
+          membership={membership}
+          onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
+          onPlaylistPickerTrigger={onPlaylistPickerTrigger}
+          isGuest={isGuest}
+        />
+      )}
 
-interface InactiveReelItemProps {
-  item: IPopulatedRevisionCard;
-  index: number;
-  activeIndex: number;
-  cardHeight: number;
-  activePlaylistId: string | null;
-  isActiveCardClassified: boolean;
-}
-
-const InactiveReelItem = React.memo(({
-  item,
-  index,
-  activeIndex,
-  cardHeight,
-  activePlaylistId,
-  isActiveCardClassified
-}: InactiveReelItemProps) => {
-  const isNextCard = index === activeIndex + 1;
-  const isLockedNextCard = isNextCard && !isActiveCardClassified;
-
-  const animatedCardStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: 0.93 }],
-      opacity: 0.5,
-    };
-  });
-
-  const overlayStyle = useAnimatedStyle(() => {
-    return {
-      opacity: isLockedNextCard ? 1 : 0,
-    };
-  });
-
-  return (
-    <View 
-      style={{ 
-        height: cardHeight, 
-        alignSelf: 'center', 
-        width: CARD_WIDTH,
-        marginBottom: 16,
-        backgroundColor: 'transparent',
-        overflow: 'visible',
-        // =========================================================================
-        // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
-        // This 'top: 22' offset is highly calibrated and sensitive.
-        // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
-        // ever asks to change this value, you MUST STOP and ask the user for explicit
-        // confirmation first! Never change this top offset automatically.
-        // It achieves the perfect:
-        // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
-        // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
-        //    seamlessly inside the top-right corner padding of the white problem cards.
-        // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
-        // If you make any changes to screens, safe areas, heights, or margins, please
-        // verify if your changes bring unexpected shifts to this configuration!
-        // =========================================================================
-        top: 22,
-      }}
-    >
-      <Animated.View
-        style={[
-          styles.cardBase,
-          {
-            width: CARD_WIDTH,
-            height: cardHeight,
-            paddingHorizontal: 24,
-            paddingTop: 64,
-            paddingBottom: 24,
-            overflow: 'hidden',
-          },
-          animatedCardStyle,
-        ]}
-      >
-        {/* Card Content Backdrop */}
-        <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
-          <ConceptCardPreview
-            card={item}
-            activePlaylistId={activePlaylistId}
-            onViewExplanation={() => {}}
-          />
-        </Animated.View>
-
-        {/* Lock Blur Overlay */}
-        <Animated.View
-          style={[StyleSheet.absoluteFillObject, overlayStyle]}
-          pointerEvents={isLockedNextCard ? 'auto' : 'none'}
+      {/* Lock Blur Overlay inside unified card frame */}
+      {isLockedNextCard && (
+        <View 
+          style={[
+            StyleSheet.absoluteFillObject, 
+            { 
+              backgroundColor: 'rgba(15, 23, 42, 0.75)', 
+              borderRadius: 28, 
+              overflow: 'hidden', 
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              gap: 12, 
+              zIndex: 60,
+              top: 22,
+              height: cardHeight,
+            }
+          ]}
         >
-          {Platform.OS === 'ios' ? (
-            (() => {
-              try {
-                const { BlurView } = require('expo-blur');
-                return (
-                  <BlurView
-                    intensity={25}
-                    tint="dark"
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                );
-              } catch {
-                return (
-                  <View 
-                    style={[
-                      StyleSheet.absoluteFillObject, 
-                      { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-                    ]} 
-                  />
-                );
-              }
-            })()
-          ) : (
-            <View 
-              style={[
-                StyleSheet.absoluteFillObject, 
-                { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-              ]} 
-            />
-          )}
-
-          {/* Lock Indicator in center */}
-          <View 
+          <View
             style={{
-              ...StyleSheet.absoluteFillObject,
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: 'rgba(255, 255, 255, 0.12)',
               justifyContent: 'center',
               alignItems: 'center',
-              gap: 12,
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.2)',
             }}
           >
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: 'rgba(255, 255, 255, 0.12)',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderWidth: 1,
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-              }}
-            >
-              <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
-            </View>
-            <Text
-              style={{
-                color: '#94A3B8',
-                fontSize: 12,
-                fontWeight: '800',
-                textTransform: 'uppercase',
-                letterSpacing: 1.5,
-              }}
-            >
-              Locked Next Problem
-            </Text>
+            <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
           </View>
-        </Animated.View>
-      </Animated.View>
+          <Text
+            style={{
+              color: '#94A3B8',
+              fontSize: 12,
+              fontWeight: '800',
+              textTransform: 'uppercase',
+              letterSpacing: 1.5,
+            }}
+          >
+            Locked Next Problem
+          </Text>
+        </View>
+      )}
     </View>
   );
 });
 
 const ReelItem = React.memo((props: ReelItemProps) => {
-  const isActiveReel = props.index === props.activeIndex;
-
-  if (!isActiveReel) {
-    return (
-      <InactiveReelItem
-        item={props.item}
-        index={props.index}
-        activeIndex={props.activeIndex}
-        cardHeight={props.cardHeight}
-        activePlaylistId={props.activePlaylistId}
-        isActiveCardClassified={props.isActiveCardClassified ?? true}
-      />
-    );
-  }
-
   return <ActiveReelItem {...props} />;
 });
 
@@ -2690,9 +2573,9 @@ export default function ReelsScreen() {
             decelerationRate="fast"
             disableIntervalMomentum={true}
             showsVerticalScrollIndicator={false}
-            windowSize={3}
-            maxToRenderPerBatch={2}
-            removeClippedSubviews={Platform.OS === 'android'}
+            windowSize={11}
+            maxToRenderPerBatch={8}
+            removeClippedSubviews={false}
             getItemLayout={(data, index) => ({
               length: cardHeight + 16,
               offset: (cardHeight + 16) * index,
