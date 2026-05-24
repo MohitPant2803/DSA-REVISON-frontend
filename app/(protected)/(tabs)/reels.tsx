@@ -326,34 +326,69 @@ const ClassificationButton = React.memo(({
     onPress();
   };
 
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    if (shouldPulse && !isActive) {
+      // Delay the start of each button's breathing pulse to create a beautiful wave effect!
+      timeoutId = setTimeout(() => {
+        scale.value = withRepeat(
+          withSequence(
+            withTiming(1.08, { duration: 900 }),
+            withTiming(1, { duration: 900 })
+          ),
+          -1,
+          true
+        );
+      }, pulseDelay);
+    } else {
+      cancelAnimation(scale);
+      scale.value = withSpring(1);
+    }
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [shouldPulse, isActive, pulseDelay]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
   const displayColor = isActive ? activeColor : 'rgba(0, 0, 0, 0.85)';
 
   return (
     <Pressable
       onPress={handlePress}
-      style={{ alignItems: 'center', marginBottom: 12 }}
+      style={{ alignItems: 'center', marginBottom: 8, paddingHorizontal: 8, paddingVertical: 4 }}
+      hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
     >
-      <View style={{ position: 'relative' }}>
+      <Animated.View style={animatedStyle}>
         {/* Main Action Capsule Button */}
         <View
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 16,
-            backgroundColor: 'transparent',
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: isActive ? `${activeColor}15` : 'rgba(255, 255, 255, 0.9)',
             justifyContent: 'center',
             alignItems: 'center',
-            borderWidth: 1,
+            borderWidth: 1.5,
             borderColor: displayColor,
+            shadowColor: isActive ? activeColor : 'transparent',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: isActive ? 0.35 : 0,
+            shadowRadius: 6,
+            elevation: isActive ? 4 : 0,
           }}
         >
           <Icon
             color={displayColor}
-            size={15}
+            size={18}
             strokeWidth={isActive ? 3.0 : 2.2}
           />
         </View>
-      </View>
+      </Animated.View>
 
       <Text
         style={{
@@ -2425,6 +2460,7 @@ export default function ReelsScreen() {
   }
 
   const activeCard = cardsList[activeIndex];
+  const isActiveCardClassified = activeCard ? (activeCard.difficultyState !== null && activeCard.difficultyState !== undefined) : true;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} className="bg-[#F5F5F7]">
@@ -2581,7 +2617,7 @@ export default function ReelsScreen() {
           <FlatList
             ref={flatListRef}
             data={cardsList}
-            scrollEnabled={true}
+            scrollEnabled={isActiveCardClassified}
             initialScrollIndex={activeIndex > 0 ? activeIndex : undefined}
             renderItem={({ item, index }) => {
               const isWithinRenderWindow = Math.abs(index - activeIndex) <= 4;
@@ -2623,8 +2659,7 @@ export default function ReelsScreen() {
               const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
               const isFavorite = !!item.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes');
               
-              const activeCardItem = cardsList[activeIndex];
-              const isActiveCardClassified = activeCardItem ? (activeCardItem.difficultyState !== null && activeCardItem.difficultyState !== undefined) : true;
+
 
               return (
                 <ReelItem
