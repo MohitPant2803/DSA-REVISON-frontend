@@ -30,16 +30,17 @@ interface FolderCardProps {
   onPress: () => void;
   onLongPress?: () => void;
   completedLoops?: number;
+  hideCardCount?: boolean;
 }
 
-function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0 }: FolderCardProps) {
+function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0, hideCardCount = false }: FolderCardProps) {
   const IconComponent = ICON_MAP[folder.icon] || Folder;
   const count = folder.cardCount ?? 0;
   const accent = folder.color || '#8B5CF6';
 
   const isOrganizational = folder.hasSubfolders === true;
   const isLeaf = folder.hasSubfolders === false;
-  const shouldShowCardCount = isLeaf;
+  const shouldShowCardCount = isLeaf && !hideCardCount;
   
   const cardLabel = count === 1 ? '1 card' : `${count} cards`;
 
@@ -47,7 +48,7 @@ function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0 
     <SpringPressable
       onPress={onPress}
       onLongPress={onLongPress}
-      className="rounded-[30px] p-5 border mb-2.5 flex-row items-center bg-white"
+      className="rounded-[30px] p-5 border mb-4 flex-row items-center bg-white"
       style={{
         borderColor: 'rgba(148, 163, 184, 0.08)',
         shadowColor: '#0F172A',
@@ -103,6 +104,7 @@ function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0 
 export const FolderCard = React.memo(FolderCardComponent, (prevProps, nextProps) => {
   return (
     prevProps.completedLoops === nextProps.completedLoops &&
+    prevProps.hideCardCount === nextProps.hideCardCount &&
     prevProps.folder._id === nextProps.folder._id &&
     prevProps.folder.title === nextProps.folder.title &&
     prevProps.folder.description === nextProps.folder.description &&

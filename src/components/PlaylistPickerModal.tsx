@@ -17,6 +17,7 @@ import { X, ListMusic, Check, Lock, Plus } from 'lucide-react-native';
 import { usePlaylists, useCreatePlaylist, useTogglePlaylistItem } from '@/hooks/usePlaylists';
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import { useAuthStore } from '@/store/useAuthStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import Toast from 'react-native-toast-message';
 import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useQueryClient } from '@tanstack/react-query';
@@ -98,6 +99,7 @@ const CreatePlaylistOverlay = ({ onClose, onPlaylistCreated }: CreatePlaylistOve
             onChangeText={setPlaylistName}
             autoFocus
             editable={!createPlaylistMutation.isPending}
+            maxLength={25}
           />
 
           <View style={styles.createModalBtnRow}>
@@ -172,6 +174,9 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
         const isAddedNow = !!tempMembership[playlist.id];
 
         if (wasAdded !== isAddedNow) {
+          // Instantly update local Zustand store for synchronous real-time UI changes
+          usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlist.id, cleanCardId, isAddedNow);
+
           promises.push(
             togglePlaylistItem.mutateAsync({
               playlistId: playlist.id,
@@ -188,8 +193,7 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
       if (promises.length > 0) {
         Promise.all(promises)
           .then(() => {
-            queryClient.invalidateQueries({ queryKey: ['playlists'] });
-            queryClient.invalidateQueries({ queryKey: ['playlists', 'membership', cleanCardId] });
+            // Background commits remain completely silent and invisible without heavy list refreshes
             Toast.show({
               type: 'success',
               text1: 'Playlists Saved',

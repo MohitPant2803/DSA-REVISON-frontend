@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -39,6 +39,8 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { MySpaceSettingsOverlay } from '@/components/SettingsOverlay';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import api from '@/services/api';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { usePlaylistCount } from '@/hooks/usePlaylistStoreSelectors';
 
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
@@ -190,6 +192,9 @@ interface CustomPlaylistCardProps {
 }
 
 const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: CustomPlaylistCardProps) => {
+  const count = usePlaylistCount(playlist.id);
+  const displayCount = count !== undefined ? count : (playlist.itemCount ?? 0);
+
   return (
     <View style={{ width: '48%', marginBottom: 12 }}>
       <TouchableOpacity
@@ -224,7 +229,7 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
               {playlist.name}
             </Text>
             <Text className="text-[10px] font-semibold text-[#7F8A9E] mt-0.5">
-              {playlist.itemCount === 0 ? 'Empty' : `${playlist.itemCount ?? 0} cards`}
+              {displayCount === 0 ? 'Empty' : `${displayCount} cards`}
             </Text>
           </View>
         </View>
@@ -298,6 +303,7 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
             onChangeText={setPlaylistName}
             autoFocus
             editable={!createPlaylistMutation.isPending}
+            maxLength={25}
           />
 
           <View className="flex-row gap-2.5">
@@ -470,6 +476,26 @@ export default function PersonalScreen() {
   const updatePlaylistMutation = useUpdatePlaylist();
   const duplicatePlaylistMutation = useDuplicatePlaylist();
 
+  const easyCount = usePlaylistCount('easy');
+  const mediumCount = usePlaylistCount('medium');
+  const hardCount = usePlaylistCount('hard');
+  const skippedCount = usePlaylistCount('skipped');
+
+  const hydrateSmartCounts = usePlaylistStateStore((state) => state.hydrateSmartCounts);
+
+  useEffect(() => {
+    if (playlists && playlists.length > 0) {
+      const initialCounts: Record<string, number> = {};
+      playlists.forEach((p: any) => {
+        initialCounts[p.id] = p.itemCount ?? 0;
+        if (!['easy', 'medium', 'hard', 'skipped'].includes(p.id)) {
+          usePlaylistStateStore.getState().hydrateCustomPlaylistOrder(p.id, p.orderedCardIds || []);
+        }
+      });
+      hydrateSmartCounts(initialCounts);
+    }
+  }, [playlists, hydrateSmartCounts]);
+
   const [isCreating, setIsCreating] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false);
@@ -486,9 +512,21 @@ export default function PersonalScreen() {
   const smartPlaylists = useMemo(() => {
     const order = ['hard', 'easy', 'medium', 'skipped'];
     return order
-      .map(id => playlists.find(p => p.id === id))
+      .map(id => {
+        const p = playlists.find(pl => pl.id === id);
+        if (!p) return undefined;
+        let count = p.itemCount ?? 0;
+        if (id === 'easy') count = easyCount;
+        else if (id === 'medium') count = mediumCount;
+        else if (id === 'hard') count = hardCount;
+        else if (id === 'skipped') count = skippedCount;
+        return {
+          ...p,
+          itemCount: count,
+        };
+      })
       .filter((p): p is any => p !== undefined);
-  }, [playlists]);
+  }, [playlists, easyCount, mediumCount, hardCount, skippedCount]);
 
   const customPlaylists = useMemo(() => {
     return playlists.filter((p) => !['easy', 'medium', 'hard', 'skipped'].includes(p.id));
@@ -1043,6 +1081,7 @@ export default function PersonalScreen() {
               value={renameValue}
               onChangeText={setRenameValue}
               autoFocus
+              maxLength={25}
             />
 
             <View className="flex-row gap-2.5">

@@ -22,6 +22,9 @@ import { canModifyItem } from '@/utils/permissions';
 import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useCardDifficultyMap, useCardsById } from '@/hooks/usePlaylistStoreSelectors';
+import { resolveCardState } from '@/utils/resolveCardState';
 
 export default function FolderCardsScreen() {
   useAppBackHandler();
@@ -53,8 +56,13 @@ export default function FolderCardsScreen() {
   });
 
   const deleteCard = useDeleteRevisionCard();
+  const cardDifficultyMap = useCardDifficultyMap();
+  const cardsById = useCardsById();
 
-  const cards = data?.results ?? [];
+  const cards = useMemo(() => {
+    const rawCards = data?.results ?? [];
+    return rawCards.map((c) => resolveCardState(c, cardDifficultyMap, cardsById));
+  }, [data?.results, cardDifficultyMap, cardsById]);
   const subfolders = subfoldersData?.results ?? [];
   const displayTitle = folder?.title || paramTitle || 'Folder';
 

@@ -89,6 +89,9 @@ import * as userCardStateService from '@/services/userCardStateService';
 import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
 import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { resolveCardState } from '@/utils/resolveCardState';
+
 
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.97;
@@ -300,6 +303,7 @@ interface ReelsActionRailProps {
   onDifficultyStateUpdate: (state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
   isGuest: boolean;
+  localDifficulty?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
 }
 
 interface ClassificationButtonProps {
@@ -378,8 +382,9 @@ const ReelsActionRail = React.memo(({
   onDifficultyStateUpdate,
   onPlaylistPickerTrigger,
   isGuest,
+  localDifficulty,
 }: ReelsActionRailProps) => {
-  const currentDifficulty = item.difficultyState;
+  const currentDifficulty = localDifficulty !== undefined ? localDifficulty : item.difficultyState;
   const isSaved = Object.values(membership ?? {}).some(Boolean);
 
   return (
@@ -460,6 +465,7 @@ interface ReelItemProps {
   onDifficultyStateUpdate: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   isActiveCardClassified?: boolean;
   membership?: Record<string, boolean>;
+  localDifficulty?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
 }
 
 interface SlideCardWrapperProps {
@@ -615,6 +621,7 @@ const ActiveReelItem = React.memo(({
   onDifficultyStateUpdate,
   isActiveCardClassified,
   membership,
+  localDifficulty,
 }: ReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const { preferences } = useUserPreferencesStore();
@@ -1001,6 +1008,7 @@ const ActiveReelItem = React.memo(({
           onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
           onPlaylistPickerTrigger={onPlaylistPickerTrigger}
           isGuest={isGuest}
+          localDifficulty={localDifficulty}
         />
       )}
 
@@ -1103,6 +1111,20 @@ export default function ReelsScreen() {
 
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
+  
+  const cardDifficultyMap = usePlaylistStateStore((state) => state.cardDifficultyMap);
+  const cardsById = usePlaylistStateStore((state) => state.cardsById);
+  const transferCard = usePlaylistStateStore((state) => state.transferCard);
+  const revertTransfer = usePlaylistStateStore((state) => state.revertTransfer);
+  const reconcileServerState = usePlaylistStateStore((state) => state.reconcileServerState);
+  const cleanupResolvedState = usePlaylistStateStore((state) => state.cleanupResolvedState);
+  const hydratePlaylistCards = usePlaylistStateStore((state) => state.hydratePlaylistCards);
+
+  // Evict completed optimistic entries from memory on mount
+  useEffect(() => {
+    cleanupResolvedState();
+  }, [cleanupResolvedState]);
+
   const [navState, setNavState] = useState({ activeIndex: 0, prevIdx: -1 });
   const activeIndex = navState.activeIndex;
   const prevIdx = navState.prevIdx;
@@ -1126,7 +1148,6 @@ export default function ReelsScreen() {
 
   const setMode = useTrackingStore((state) => state.setMode);
   const setInfiniteLoop = useTrackingStore((state) => state.setInfiniteLoop);
-  const toggleWatchLater = useTrackingStore((state) => state.toggleWatchLater);
   const setWatchLater = useTrackingStore((state) => state.setWatchLater);
   const startSession = useTrackingStore((state) => state.startSession);
   const updateSessionTime = useTrackingStore((state) => state.updateSessionTime);
@@ -1422,6 +1443,13 @@ export default function ReelsScreen() {
     }
   }, [folderIdParam, topicParam, tagsParam, difficultyParam, searchParam, activePlaylistId, startCardIdParam]);
 
+  // Populate the normalized store cache dynamically when playlistCards load
+  useEffect(() => {
+    if (playlistCards && playlistCards.length > 0) {
+      hydratePlaylistCards(activePlaylistId || 'playlist', playlistCards);
+    }
+  }, [playlistCards, activePlaylistId, hydratePlaylistCards]);
+
   // Load playlist cards according to custom drag order
   useEffect(() => {
     if (!activePlaylistId) return;
@@ -1431,37 +1459,20 @@ export default function ReelsScreen() {
       .filter((card: any) => card && card._id);
       
     setAllCards((prevCards) => {
-      if (prevCards.length === 0) return cardsToSet;
+      if (prevCards.length === 0) {
+        return cardsToSet.map((c) => resolveCardState(c, cardDifficultyMap, cardsById));
+      }
       
       const updatedCardsMap = new Map(cardsToSet.map((c: any) => [c._id, c]));
       return prevCards.map((card) => {
         const fresh = updatedCardsMap.get(card._id);
         if (fresh) {
-          const baseId = card._id.split('-loop-')[0];
-          const isActiveCard = card._id === activeCardId || baseId === activeCardId?.split('-loop-')[0];
-          return {
-            ...card,
-            isFavorite: fresh.isFavorite,
-            isDifficult: fresh.isDifficult,
-            isArchived: fresh.isArchived,
-            // Protect active card from stale background overwrites
-            difficultyState: isActiveCard ? card.difficultyState : fresh.difficultyState,
-            currentUserQuestionProgress: isActiveCard ? card.currentUserQuestionProgress : fresh.currentUserQuestionProgress,
-            // Sync other properties
-            title: fresh.title,
-            explanation: fresh.explanation,
-            topic: fresh.topic,
-            difficulty: fresh.difficulty,
-            complexity: fresh.complexity,
-            code: fresh.code,
-            examples: fresh.examples,
-            slides: fresh.slides,
-          };
+          return resolveCardState(fresh, cardDifficultyMap, cardsById);
         }
         return card;
       });
     });
-  }, [playlistCards, activeCardId]);
+  }, [playlistCards, cardDifficultyMap, cardsById, activePlaylistId]);
 
   // Reset activeIndex and clear cards only when the active playlist actually changes
   const prevPlaylistId = useRef<string | null>(null);
@@ -1501,8 +1512,13 @@ export default function ReelsScreen() {
           if (!isMounted) return;
           setSessionId('reels-feed-active');
           
+          hydratePlaylistCards('reels-feed-active', slice.cardsSlice.filter(Boolean) as any);
+
           const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.queueLength).fill(null);
           slice.cardsSlice.forEach((c, idx) => {
+            if (c) {
+              c = resolveCardState(c, cardDifficultyMap, cardsById);
+            }
             initialCards[slice.startIdx + idx] = c;
           });
           setSessionCards(initialCards);
@@ -1545,12 +1561,17 @@ export default function ReelsScreen() {
         const slice = await sessionQueueService.getSessionCardsSlice(session._id);
         if (!isMounted) return;
 
+        hydratePlaylistCards(session._id, slice.cardsSlice.filter(Boolean) as any);
+
         // Populate sessionCards
         const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.orderedCardIds.length).fill(null);
         slice.cardsSlice.forEach(c => {
-          const idx = slice.orderedCardIds.indexOf(c._id);
-          if (idx !== -1) {
-            initialCards[idx] = c;
+          if (c) {
+            const resolved = resolveCardState(c, cardDifficultyMap, cardsById);
+            const idx = slice.orderedCardIds.indexOf(resolved._id);
+            if (idx !== -1) {
+              initialCards[idx] = resolved;
+            }
           }
         });
         setSessionCards(initialCards);
@@ -1652,12 +1673,17 @@ export default function ReelsScreen() {
         await reelsFeedService.updateReelIndex(newIndex, Date.now());
         const slice = await reelsFeedService.getReelFeedSlice();
         
+        hydratePlaylistCards('reels-feed-active', slice.cardsSlice.filter(Boolean) as any);
+
         setSessionCards(prev => {
           const next = [...prev];
           if (next.length !== slice.queueLength) {
             next.length = slice.queueLength;
           }
           slice.cardsSlice.forEach((c, idx) => {
+            if (c) {
+              c = resolveCardState(c, cardDifficultyMap, cardsById);
+            }
             next[slice.startIdx + idx] = c;
           });
           return next;
@@ -1668,6 +1694,8 @@ export default function ReelsScreen() {
       await sessionQueueService.updateSessionIndex(sessionId, newIndex);
       const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
       
+      hydratePlaylistCards(sessionId, slice.cardsSlice.filter(Boolean) as any);
+
       setSessionCards(prev => {
         const next = [...prev];
         if (next.length !== slice.orderedCardIds.length) {
@@ -1679,7 +1707,10 @@ export default function ReelsScreen() {
           if (c) cardMap.set(c._id, c);
         });
         slice.cardsSlice.forEach(c => {
-          if (c) cardMap.set(c._id, c);
+          if (c) {
+            const resolved = resolveCardState(c, cardDifficultyMap, cardsById);
+            cardMap.set(resolved._id, resolved);
+          }
         });
         
         for (let i = 0; i < slice.orderedCardIds.length; i++) {
@@ -1691,7 +1722,7 @@ export default function ReelsScreen() {
     } catch (err) {
       console.error('[Session Swipe Update Error]', err);
     }
-  }, [sessionId, isReelsFeedActive]);
+  }, [sessionId, isReelsFeedActive, cardDifficultyMap, hydratePlaylistCards]);
 
   // Session-specific shuffle handler
   const handleToggleShuffleInSession = async (shuffleValue: boolean) => {
@@ -1829,12 +1860,20 @@ export default function ReelsScreen() {
     });
   }, []);
 
+  // Populate the normalized store cache dynamically when data?.results loads
+  useEffect(() => {
+    if (data?.results) {
+      hydratePlaylistCards(activePlaylistId || 'all', data.results);
+    }
+  }, [data?.results, activePlaylistId, hydratePlaylistCards]);
+
   // Synchronize and merge new/updated API pages to the continuous deck
   useEffect(() => {
     if (activePlaylistId || !data?.results) return;
     
     if (allCards.length === 0) {
-      setAllCards(data.results);
+      const resolved = data.results.map((c) => resolveCardState(c, cardDifficultyMap, cardsById));
+      setAllCards(resolved);
       setNavState({ activeIndex: 0, prevIdx: -1 });
     } else {
       setAllCards((prevCards) => {
@@ -1846,32 +1885,16 @@ export default function ReelsScreen() {
           const baseId = card._id.split('-loop-')[0];
           const fresh = updatedCardsMap.get(baseId) || updatedCardsMap.get(card._id);
           if (fresh) {
-            const isActiveCard = card._id === activeCardId || baseId === activeCardId?.split('-loop-')[0];
-            return {
-              ...card,
-              isFavorite: fresh.isFavorite,
-              isDifficult: fresh.isDifficult,
-              isArchived: fresh.isArchived,
-              // Protect active card from stale background overwrites
-              difficultyState: isActiveCard ? card.difficultyState : fresh.difficultyState,
-              currentUserQuestionProgress: isActiveCard ? card.currentUserQuestionProgress : fresh.currentUserQuestionProgress,
-              // Sync other base data too if changed
-              title: fresh.title,
-              explanation: fresh.explanation,
-              topic: fresh.topic,
-              difficulty: fresh.difficulty,
-              complexity: fresh.complexity,
-              code: fresh.code,
-              examples: fresh.examples,
-              slides: fresh.slides,
-            };
+            return resolveCardState(fresh, cardDifficultyMap, cardsById);
           }
           return card;
         });
 
         // Find cards in the fresh results that are not in mergedCards yet (by base ID)
         const existingIds = new Set(mergedCards.map((c) => c._id.split('-loop-')[0]));
-        const newCards = data.results.filter((c: any) => !existingIds.has(c._id));
+        const newCards = data.results
+          .filter((c: any) => !existingIds.has(c._id))
+          .map((c: any) => resolveCardState(c, cardDifficultyMap, cardsById));
 
         if (newCards.length === 0) {
           return mergedCards;
@@ -1879,7 +1902,7 @@ export default function ReelsScreen() {
         return [...mergedCards, ...newCards];
       });
     }
-  }, [activePlaylistId, data?.results, activeCardId]);
+  }, [activePlaylistId, data?.results, cardDifficultyMap, cardsById]);
 
   // Prefetch adjacent pagination pages in background
   useEffect(() => {
@@ -1965,6 +1988,9 @@ export default function ReelsScreen() {
     );
 
     if (action === 'favorite') {
+      // Synchronously update the Zustand store for real-time consistency
+      usePlaylistStateStore.getState().toggleFavoriteInStore(cleanId, value);
+
       userCardStateService.toggleLike(cleanId).catch(console.error);
       const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
       if (currentActivePlaylistId && currentActivePlaylistId !== 'likes' && currentActivePlaylistId !== 'watch-later') {
@@ -1987,23 +2013,40 @@ export default function ReelsScreen() {
   const handleWatchLaterToggleInReels = useCallback((cardId: string) => {
     lightHaptic();
     const cleanId = cardId.split('-loop-')[0];
-    toggleWatchLater(cleanId);
+    const isWatchLater = useTrackingStore.getState().watchLaterCardIds.includes(cleanId);
+    const nextValue = !isWatchLater;
+    
+    // Synchronously update the Zustand store for real-time consistency
+    usePlaylistStateStore.getState().toggleWatchLaterInStore(cleanId, nextValue);
+
     if (!isGuest) {
       userCardStateService.toggleWatchLater(cleanId).catch(console.error);
     }
-    queryClient.invalidateQueries({ queryKey: ['playlists'] });
-    queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'watch-later'] });
-  }, [isGuest, toggleWatchLater, queryClient]);
+  }, [isGuest]);
 
   const handleDifficultyStateUpdateInReels = useCallback((cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => {
     lightHaptic();
     const cleanId = cardId.split('-loop-')[0];
     
     const targetCard = cardsList.find((c) => c && c._id.split('-loop-')[0] === cleanId);
-    const activeCurrently = targetCard?.difficultyState === state;
+    if (!targetCard) return;
+    
+    // ATOMIC STATE RESOLUTION:
+    // Determine the old state using cardDifficultyMap first, then fallback to item
+    const oldDifficultyObj = cardDifficultyMap[cleanId];
+    const oldDifficulty = oldDifficultyObj !== undefined 
+      ? oldDifficultyObj.difficulty 
+      : (targetCard.difficultyState || null);
+      
+    const activeCurrently = oldDifficulty === state;
     const resolvedNewState = activeCurrently ? null : state;
 
-    // 1. Optimistic update of local React state instantly to unlock vertical swipe locks
+    const timestamp = Date.now();
+
+    // 1. Update the centralized store atomically
+    transferCard(cleanId, targetCard, resolvedNewState);
+
+    // 2. Optimistic update of local React state instantly to unlock vertical swipe locks
     setAllCards((prevCards) =>
       prevCards.map((card) => {
         const baseId = card._id.split('-loop-')[0];
@@ -2037,9 +2080,54 @@ export default function ReelsScreen() {
       })
     );
 
-    // 2. Persist to database instantly
+    // 3. Persist to database instantly in background
     if (!isGuest) {
-      updateDifficultyStateMutation.mutate({ cardId: cleanId, difficultyState: resolvedNewState });
+      updateDifficultyStateMutation.mutate(
+        { cardId: cleanId, difficultyState: resolvedNewState },
+        {
+          onSuccess: () => {
+            reconcileServerState(cleanId, resolvedNewState);
+          },
+          onError: (err) => {
+            console.error('[MUTATION ERROR]', err);
+            // Revert state atomically on failure with initiation timestamp
+            revertTransfer(cleanId, oldDifficulty, resolvedNewState, timestamp);
+            
+            setAllCards((prevCards) =>
+              prevCards.map((card) => {
+                const baseId = card._id.split('-loop-')[0];
+                if (baseId === cleanId) {
+                  const qp = oldDifficulty
+                    ? {
+                        attemptStatus: oldDifficulty === 'skipped' ? ('skipped' as const) : ('attempted' as const),
+                        perceivedDifficultyByUser: oldDifficulty === 'skipped' ? null : (oldDifficulty as any),
+                      }
+                    : null;
+                  return { ...card, difficultyState: oldDifficulty, currentUserQuestionProgress: qp };
+                }
+                return card;
+              })
+            );
+
+            setSessionCards((prevCards) =>
+              prevCards.map((card) => {
+                if (!card) return card;
+                const baseId = card._id.split('-loop-')[0];
+                if (baseId === cleanId) {
+                  const qp = oldDifficulty
+                    ? {
+                        attemptStatus: oldDifficulty === 'skipped' ? ('skipped' as const) : ('attempted' as const),
+                        perceivedDifficultyByUser: oldDifficulty === 'skipped' ? null : (oldDifficulty as any),
+                      }
+                    : null;
+                  return { ...card, difficultyState: oldDifficulty, currentUserQuestionProgress: qp };
+                }
+                return card;
+              })
+            );
+          }
+        }
+      );
     }
 
     Toast.show({
@@ -2049,7 +2137,7 @@ export default function ReelsScreen() {
       position: 'top',
       visibilityTime: 1200,
     });
-  }, [isGuest, updateDifficultyStateMutation, cardsList, allCards, sessionCards]);
+  }, [isGuest, updateDifficultyStateMutation, cardsList, cardDifficultyMap, transferCard, revertTransfer, reconcileServerState]);
 
   const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
     const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
@@ -2509,6 +2597,9 @@ export default function ReelsScreen() {
               
 
 
+              const cleanId = item._id.split('-loop-')[0];
+              const localDifficulty = cardDifficultyMap[cleanId] !== undefined ? cardDifficultyMap[cleanId].difficulty : item.difficultyState;
+
               return (
                 <ReelItem
                   item={item}
@@ -2529,6 +2620,7 @@ export default function ReelsScreen() {
                   onMoreOptionsTrigger={handleMoreOptionsTrigger}
                   onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
                   membership={index === activeIndex ? membership : undefined}
+                  localDifficulty={localDifficulty}
                 />
               );
             }}

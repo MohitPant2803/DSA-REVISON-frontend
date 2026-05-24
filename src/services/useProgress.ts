@@ -296,17 +296,12 @@ export const useUpdateDifficultyState = () => {
     },
 
     onSettled: (data, error, variables, context) => {
-      queryClient.invalidateQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
-      queryClient.invalidateQueries({ queryKey: ['personalLibrary'] });
-      queryClient.invalidateQueries({ queryKey: ['playlists'] });
-      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'easy'] });
-      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'medium'] });
-      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'hard'] });
-      queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'skipped'] });
-      if (context?.activePlaylistId) {
-        queryClient.invalidateQueries({ queryKey: ['playlistDetail', context.activePlaylistId, 'cards'] });
-      }
-    },
+        // Preserve optimistic UI for difficulty state by invalidating dependent queries reactively
+        queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+        queryClient.invalidateQueries({ queryKey: ['personalLibrary'] });
+        queryClient.invalidateQueries({ queryKey: ['playlists'] });
+        queryClient.invalidateQueries({ queryKey: ['playlistDetail'] });
+        queryClient.invalidateQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
+      },
   });
 };

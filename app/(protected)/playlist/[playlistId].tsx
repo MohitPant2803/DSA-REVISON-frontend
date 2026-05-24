@@ -23,6 +23,9 @@ import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { usePlaylistCards as useStorePlaylistCards } from '@/hooks/usePlaylistStoreSelectors';
+import { resolveCardState } from '@/utils/resolveCardState';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
 
@@ -63,36 +66,30 @@ export default function PlaylistCardsScreen() {
   const reorderPlaylist = useReorderPlaylist();
   const reorderLikes = useReorderLikes();
 
-  const [localCards, setLocalCards] = useState<IPopulatedRevisionCard[]>([]);
-  const hasRedirected = React.useRef(false);
+  const hydratePlaylistCards = usePlaylistStateStore((state) => state.hydratePlaylistCards);
+  const setPlaylistCardOrder = usePlaylistStateStore((state) => state.setPlaylistCardOrder);
+  const storeCards = useStorePlaylistCards(playlistId);
 
   useEffect(() => {
     if (isLikes && libraryData?.favorites) {
-      // Map favorites to cards defensively
       const favCards = libraryData.favorites
         .filter(f => f != null && f.card != null && typeof f.card === 'object' && '_id' in f.card)
         .map(f => f.card) as IPopulatedRevisionCard[];
-      setLocalCards(favCards.filter(Boolean).filter(c => c && c._id));
+      hydratePlaylistCards(playlistId, favCards.filter(Boolean).filter(c => c && c._id));
     } else if (!isLikes && cardsData) {
-      setLocalCards(cardsData.filter(Boolean).filter((c: any) => c && c._id));
+      hydratePlaylistCards(playlistId, cardsData.filter(Boolean).filter((c: any) => c && c._id));
     }
-  }, [cardsData, libraryData, isLikes]);
+  }, [cardsData, libraryData, isLikes, playlistId, hydratePlaylistCards]);
 
-  // Auto-redirect removed to allow viewing and reordering cards before running
-  /*
-  useEffect(() => {
-    if (!isLoading && localCards.length > 0 && !hasRedirected.current) {
-      hasRedirected.current = true;
-      startRevising(false, false);
-    }
-  }, [isLoading, localCards]);
-  */
+  const localCards = useMemo(() => {
+    return storeCards || [];
+  }, [storeCards]);
 
   const displayTitle = isLikes ? 'Revised' : (playlist?.name || 'Playlist');
 
   const handleDragEnd = ({ data }: { data: IPopulatedRevisionCard[] }) => {
-    setLocalCards(data);
     const cardIds = data.map(c => c._id);
+    setPlaylistCardOrder(playlistId, cardIds);
     if (isLikes) {
       reorderLikes.mutate(cardIds);
     } else if (playlistId === 'watch-later') {
@@ -231,6 +228,7 @@ export default function PlaylistCardsScreen() {
       ) : (
         <DraggableFlatList
           data={localCards}
+          extraData={localCards}
           onDragEnd={handleDragEnd}
           keyExtractor={(item) => item?._id ?? Math.random().toString()}
           renderItem={renderItem}

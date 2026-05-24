@@ -1,0 +1,100 @@
+import { usePlaylistStateStore, DifficultyState, LocalCardState } from '@/store/usePlaylistStateStore';
+import { useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
+import { resolveCardState } from '@/utils/resolveCardState';
+
+/**
+ * Returns ONLY the specific card's interactive difficulty state from the store.
+ * Isolated re-render hook. Rerenders ONLY if this card's classification changes.
+ */
+export function useCardDifficulty(cardId: string): DifficultyState {
+  return usePlaylistStateStore(
+    useCallback((state) => {
+      const cleanId = cardId.split('-loop-')[0];
+      return state.cardDifficultyMap[cleanId]?.difficulty;
+    }, [cardId])
+  );
+}
+
+/**
+ * Dynamically computes smart/custom playlist lengths in O(1) derived from normalized state.
+ * Rerenders ONLY when count changes.
+ */
+export function usePlaylistCount(playlistId: string): number {
+  return usePlaylistStateStore(
+    useCallback((state) => {
+      const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+      if (!isSmart) {
+        const order = state.playlistCardOrderMap[playlistId];
+        if (order === undefined) {
+          return state.initialSmartCounts[playlistId] || 0;
+        }
+        return order.length;
+      }
+      
+      const initial = state.initialSmartCounts[playlistId] || 0;
+      const delta = state.smartPlaylistDeltaCounts[playlistId] || 0;
+      return Math.max(0, initial + delta);
+    }, [playlistId])
+  );
+}
+
+/**
+ * Hook to retrieve the interactive, resolved cards list for a specific playlist ID.
+ * Returns a shallow-compared array of resolved card structures.
+ */
+export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
+  return usePlaylistStateStore(
+    useShallow(
+      useCallback((state) => {
+        console.log(`[DIAGNOSTIC - SELECTOR] usePlaylistCards computed for Playlist ID: "${playlistId}"`);
+        const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+        const cardDifficultyMap = state.cardDifficultyMap;
+
+        if (!isSmart) {
+          // Resolve custom playlist card order strictly in stored order from cardsById cache
+          const ids = state.playlistCardOrderMap[playlistId] || [];
+          const resolved = ids
+            .map((id) => state.cardsById[id])
+            .filter(Boolean)
+            .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById));
+          
+          console.log(`  -> Custom playlist resolved count: ${resolved.length} | IDs:`, resolved.map(c => c._id));
+          return resolved;
+        }
+
+        // Derives smart playlist items on the fly
+        const resolved = Object.keys(state.cardsById)
+          .map((cardId) => state.cardsById[cardId])
+          .filter(Boolean)
+          .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById))
+          .filter((resolvedCard) => resolvedCard.difficultyState === playlistId);
+
+        console.log(`  -> Smart playlist resolved count: ${resolved.length} | IDs:`, resolved.map(c => c._id));
+        return resolved;
+      }, [playlistId])
+    )
+  );
+}
+
+/**
+ * Subscribes to the authoritative difficulty map.
+ */
+export function useCardDifficultyMap(): Record<string, LocalCardState> {
+  return usePlaylistStateStore(useShallow((state) => state.cardDifficultyMap));
+}
+
+/**
+ * Subscribes to hydration guards.
+ */
+export function useHydratedPlaylists(): Record<string, boolean> {
+  return usePlaylistStateStore(useShallow((state) => state.hydratedPlaylists));
+}
+
+/**
+ * Subscribes to the authoritative normalized cardsById lookup cache.
+ */
+export function useCardsById(): Record<string, IPopulatedRevisionCard> {
+  return usePlaylistStateStore(useShallow((state) => state.cardsById));
+}
