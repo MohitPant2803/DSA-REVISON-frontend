@@ -139,7 +139,7 @@ export default function FolderCardsScreen() {
   const startRevising = (startCardId?: string) => {
     if (!folderId) return;
     router.push({
-      pathname: '/(protected)/(tabs)/reels',
+      pathname: '/(protected)/(tabs)/reels-player',
       params: {
         folderId,
         ...(startCardId ? { startCardId } : {}),

@@ -30,6 +30,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import api from '@/services/api';
+import Toast from 'react-native-toast-message';
 
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
@@ -394,6 +395,13 @@ export const ReelsSettingsOverlay = React.memo(({
     try {
       await reelsFeedService.updateReelPreferences(nextSelected);
       queryClient.invalidateQueries({ queryKey: ['reelFeed'] });
+      Toast.show({
+        type: 'info',
+        text1: 'Preferences Updated',
+        text2: 'This reels content preference will be applied after 5-10 reels',
+        position: 'top',
+        visibilityTime: 4000,
+      });
     } catch (err) {
       console.error('[Prefs Save Error]', err);
       // Rollback

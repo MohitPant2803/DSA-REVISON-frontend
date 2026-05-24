@@ -171,7 +171,7 @@ function TabLayoutInner() {
                 <Home
                   color={props.accessibilityState?.selected ? '#8B5CF6' : '#94A3B8'}
                   size={20}
-                  strokeWidth={1.8}
+                  strokeWidth={props.accessibilityState?.selected ? 2.5 : 1.8}
                 />
               }
             />
@@ -190,7 +190,7 @@ function TabLayoutInner() {
                 <Layers
                   color={props.accessibilityState?.selected ? '#8B5CF6' : '#94A3B8'}
                   size={20}
-                  strokeWidth={1.8}
+                  strokeWidth={props.accessibilityState?.selected ? 2.5 : 1.8}
                 />
               }
             />
@@ -209,13 +209,14 @@ function TabLayoutInner() {
                 <Bookmark
                   color={props.accessibilityState?.selected ? '#8B5CF6' : '#94A3B8'}
                   size={20}
-                  strokeWidth={1.8}
+                  strokeWidth={props.accessibilityState?.selected ? 2.5 : 1.8}
                 />
               }
             />
           ),
         }}
       />
+      <Tabs.Screen name="reels-player" options={{ href: null }} />
       <Tabs.Screen name="dashboard" options={{ href: null }} />
       <Tabs.Screen name="CreateRevisionScreen" options={{ href: null }} />
       <Tabs.Screen name="RevisionForm" options={{ href: null }} />

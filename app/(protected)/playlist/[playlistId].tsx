@@ -103,8 +103,8 @@ export default function PlaylistCardsScreen() {
   const startRevising = (shuffle = false, resume = false, startCardId?: string) => {
     if (!playlistId) return;
     setActivePlaylistId(playlistId);
-    router.replace({
-      pathname: '/(protected)/(tabs)/reels',
+    router.push({
+      pathname: '/(protected)/(tabs)/reels-player',
       params: {
         shuffle: shuffle ? 'true' : 'false',
         startCardId: startCardId || '',

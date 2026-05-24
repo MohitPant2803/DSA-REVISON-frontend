@@ -1226,7 +1226,7 @@ const ReelItem = React.memo((props: ReelItemProps) => {
   );
 });
 
-export default function ReelsScreen() {
+export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer?: boolean }) {
   const router = useRouter();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -1357,7 +1357,7 @@ export default function ReelsScreen() {
   const { mutate: deleteCard } = useDeleteRevisionCard();
   const viewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const bottomTabBarHeight = insets.bottom + 72;
+  const bottomTabBarHeight = isCustomPlayer ? (insets.bottom + 16) : (insets.bottom + 72);
   const cardHeight = (height - insets.top - bottomTabBarHeight) * 0.98; 
 
   // Memoize query object to ensure stable queryKey references in React Query
@@ -2329,6 +2329,19 @@ export default function ReelsScreen() {
     }
   }, [cardsList.length, activeIndex]);
 
+  // Auto-pop reels-player when switching away to another tab
+  useEffect(() => {
+    if (!isCustomPlayer) return;
+
+    const unsubscribe = navigation.addListener('blur', () => {
+      // If we are a custom reels player inside the tabs navigator, and the tab loses focus (blur event),
+      // immediately pop back so that the user's Home/My Space page resets back to the original folder/playlist!
+      router.back();
+    });
+
+    return unsubscribe;
+  }, [navigation, isCustomPlayer]);
+
   // Listen to activeIndex changes to sync session, prefetch images, and handle infinite pagination load
   useEffect(() => {
     if (cardsList.length > 0 && activeIndex >= 0 && activeIndex < cardsList.length) {
@@ -2429,7 +2442,31 @@ export default function ReelsScreen() {
           playlistName={activePlaybackName}
           sessionTimer={formatTime(sessionTotalTime)}
           questionsRevised={completedCardsCount}
+          showReelContentSelect={!isCustomPlayer}
         />
+      )}
+
+      {/* Premium Back button for custom stack reels sessions */}
+      {isCustomPlayer && (
+        <TouchableOpacity
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+          style={{
+            position: 'absolute',
+            top: insets.top + 12,
+            left: 16,
+            zIndex: 95,
+            padding: 8,
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+            borderRadius: 20,
+            borderWidth: 1,
+            borderColor: 'rgba(226, 232, 240, 0.8)',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <ChevronLeft color="#8B5CF6" size={20} strokeWidth={2.5} />
+        </TouchableOpacity>
       )}
 
       {/* Premium Apple-Style Header Capsule Bar */}
@@ -2443,21 +2480,24 @@ export default function ReelsScreen() {
           alignItems: 'center',
           pointerEvents: 'box-none',
           gap: 12,
+          flexDirection: 'row',
         }}
       >
-        {/* RIGHT SIDE: Transparent Settings Cog Icon */}
-        <TouchableOpacity
-          onPress={toggleMenu}
-          activeOpacity={0.7}
-          style={{
-            padding: 8,
-            backgroundColor: 'transparent',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
-        </TouchableOpacity>
+        {/* RIGHT SIDE: Transparent Settings Cog Icon - Hidden in custom sessions */}
+        {!isCustomPlayer && (
+          <TouchableOpacity
+            onPress={toggleMenu}
+            activeOpacity={0.7}
+            style={{
+              padding: 8,
+              backgroundColor: 'transparent',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
+          </TouchableOpacity>
+        )}
 
         {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
         <TouchableOpacity
