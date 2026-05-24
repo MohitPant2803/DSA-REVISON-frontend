@@ -1,7 +1,16 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import { useTrackingStore } from './useTrackingStore';
 import { mergeCardState } from '@/utils/resolveCardState';
+
+export interface OfflineAction {
+  id: string;
+  action: 'CLASSIFY_CARD' | 'TOGGLE_FAVORITE' | 'TOGGLE_PLAYLIST_ITEM' | 'REORDER_PLAYLIST' | 'REORDER_LIKES';
+  payload: any;
+  timestamp: number;
+}
 
 
 export type DifficultyState = 'easy' | 'medium' | 'hard' | 'skipped' | null;
@@ -63,15 +72,27 @@ interface PlaylistState {
 
   // Evicts resolved optimistic state mappings to clean memory
   cleanupResolvedState: () => void;
+
+  // Offline Actions
+  offlineActionQueue: OfflineAction[];
+  enqueueOfflineAction: (action: Omit<OfflineAction, 'id'>) => void;
+  clearOfflineActions: () => void;
+  lastSyncedAt: string | null;
+  setLastSyncedAt: (timestamp: string) => void;
 }
 
-export const usePlaylistStateStore = create<PlaylistState>((set) => ({
-  cardsById: {},
-  cardDifficultyMap: {},
-  playlistCardOrderMap: {},
-  hydratedPlaylists: {},
-  initialSmartCounts: {},
-  smartPlaylistDeltaCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
+export const usePlaylistStateStore = create<PlaylistState>()(
+  persist(
+    (set, get) => ({
+      cardsById: {},
+      cardDifficultyMap: {},
+      playlistCardOrderMap: {},
+      hydratedPlaylists: {},
+      initialSmartCounts: {},
+      smartPlaylistDeltaCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
+      offlineActionQueue: [],
+      lastSyncedAt: null,
+      setLastSyncedAt: (timestamp) => set({ lastSyncedAt: timestamp }),
 
   hydrateSmartCounts: (counts) => {
     set((state) => {
@@ -469,4 +490,27 @@ export const usePlaylistStateStore = create<PlaylistState>((set) => ({
       return changed ? { cardDifficultyMap: nextDifficultyMap } : {};
     });
   },
-}));
+
+  enqueueOfflineAction: (action) => {
+    set((state) => {
+      const newAction: OfflineAction = {
+        ...action,
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      };
+      console.log(`[Offline Queue] Enqueued offline action:`, newAction);
+      return {
+        offlineActionQueue: [...state.offlineActionQueue, newAction],
+      };
+    });
+  },
+
+  clearOfflineActions: () => {
+    set({ offlineActionQueue: [] });
+  },
+}),
+{
+  name: 'dsa-playlist-state',
+  storage: createJSONStorage(() => AsyncStorage),
+}
+)
+);

@@ -151,8 +151,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       await SecureStorage.setUser(freshUser);
       set({ token, user: freshUser, isAuthenticated: true, isLoading: false });
-    } catch (error) {
-      console.error('Failed to restore session', error);
+    } catch (error: any) {
+      console.warn('[Session Recovery] Failed to get fresh user from server:', error);
+      
+      const isNetworkError = error.message?.toLowerCase().includes('network') || 
+                            error.message?.toLowerCase().includes('timeout') ||
+                            error.code === 'ERR_NETWORK';
+
+      if (isNetworkError) {
+        // Recover session locally using cached token and user data without kicking out!
+        const cachedUser = await SecureStorage.getUser();
+        const cachedToken = await SecureStorage.getToken();
+        
+        if (cachedUser && cachedToken) {
+          console.log('[Session Recovery] Successfully recovered session locally in Offline Mode!');
+          set({ token: cachedToken, user: cachedUser, isAuthenticated: true, isLoading: false });
+          return;
+        }
+      }
+
+      // Genuine server/session deletion error: clear and log out
       await SecureStorage.removeToken();
       await SecureStorage.removeUser();
       set({ token: null, user: null, isAuthenticated: false, isLoading: false });

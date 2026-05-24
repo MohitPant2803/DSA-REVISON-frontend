@@ -6,6 +6,7 @@ import Toast from 'react-native-toast-message';
 import * as progressService from '../services/progressService';
 import { PaginatedRevisionCards, IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { PersonalLibrary, LibraryEntry } from '@/types/progress';
 
 const REVISION_CARDS_QUERY_KEY = 'revisionCards';
@@ -132,7 +133,29 @@ export const useUpdateCardProgress = () => {
       return { previousRevisionCards, previousPlaylistCards, previousLibrary, activePlaylistId };
     },
 
-    onError: (err, variables, context) => {
+    onError: (err: any, variables, context) => {
+      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
+
+      if (isOffline) {
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'TOGGLE_FAVORITE',
+          payload: { cardId: variables.cardId, value: variables.value },
+          timestamp: Date.now()
+        });
+
+        // Optimistically set the local Zustand state for likes
+        usePlaylistStateStore.getState().toggleFavoriteInStore(variables.cardId, variables.value);
+
+        Toast.show({
+          type: 'success',
+          text1: 'Progress Saved Offline',
+          text2: 'Will sync to server when connection stabilizes.',
+          position: 'top',
+          visibilityTime: 2000,
+        });
+        return;
+      }
+
       if (context?.previousRevisionCards) {
         context.previousRevisionCards.forEach(([key, data]) => queryClient.setQueryData(key, data));
       }
@@ -200,7 +223,36 @@ export const useUpdatePlaylistMembership = () => {
 
       return { previousQueries, prevMembership, membershipKey };
     },
-    onError: (err, variables, context) => {
+    onError: (err: any, variables, context) => {
+      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
+
+      if (isOffline) {
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'TOGGLE_PLAYLIST_ITEM',
+          payload: {
+            playlistId: variables.addToPlaylist || variables.removeFromPlaylist,
+            cardId: variables.cardId,
+            value: !!variables.addToPlaylist
+          },
+          timestamp: Date.now()
+        });
+
+        // Optimistically set the local Zustand state for playlist membership
+        const playlistId = variables.addToPlaylist || variables.removeFromPlaylist;
+        if (playlistId) {
+          usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, variables.cardId, !!variables.addToPlaylist);
+        }
+
+        Toast.show({
+          type: 'success',
+          text1: 'Playlist Saved Offline',
+          text2: 'Will sync to server when connection stabilizes.',
+          position: 'top',
+          visibilityTime: 2000,
+        });
+        return;
+      }
+
       if (context?.previousQueries) {
         context.previousQueries.forEach(([key, data]) => queryClient.setQueryData(key, data));
       }
@@ -278,7 +330,30 @@ export const useUpdateDifficultyState = () => {
       return { previousRevisionCards, previousPlaylistCards, previousLibrary, activePlaylistId };
     },
 
-    onError: (err, variables, context) => {
+    onError: (err: any, variables, context) => {
+      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
+
+      if (isOffline) {
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'CLASSIFY_CARD',
+          payload: { cardId: variables.cardId, state: variables.difficultyState },
+          timestamp: Date.now()
+        });
+
+        // Also update local Zustand persistent ratings in store!
+        const cardObj = queryClient.getQueryData<IPopulatedRevisionCard[]>(['playlistDetail', context?.activePlaylistId, 'cards'])?.find(c => c._id === variables.cardId) || {} as any;
+        usePlaylistStateStore.getState().transferCard(variables.cardId, cardObj, variables.difficultyState);
+
+        Toast.show({
+          type: 'success',
+          text1: 'Rating Saved Offline',
+          text2: 'Will sync to server when connection stabilizes.',
+          position: 'top',
+          visibilityTime: 2000,
+        });
+        return;
+      }
+
       if (context?.previousRevisionCards) {
         context.previousRevisionCards.forEach(([key, data]) => queryClient.setQueryData(key, data));
       }
