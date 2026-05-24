@@ -311,6 +311,7 @@ interface ReelsSettingsOverlayProps {
   playlistName: string;
   sessionTimer: string;
   questionsRevised: number;
+  showReelContentSelect?: boolean;
 }
 
 export const ReelsSettingsOverlay = React.memo(({
@@ -319,6 +320,7 @@ export const ReelsSettingsOverlay = React.memo(({
   playlistName,
   sessionTimer,
   questionsRevised,
+  showReelContentSelect = true,
 }: ReelsSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
   const { currentMode, setMode } = useTrackingStore();
@@ -517,7 +519,7 @@ export const ReelsSettingsOverlay = React.memo(({
             </View>
 
             {/* Select Reel Content Folder Checklist */}
-            {!isGuest && rootFolders.length > 0 && (
+            {showReelContentSelect && !isGuest && rootFolders.length > 0 && (
               <View style={[styles.settingGroup, { marginTop: 18 }]}>
                 <Text style={styles.groupLabel}>Select Reel Content</Text>
                 <View style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(226, 232, 240, 0.6)', padding: 12, gap: 10 }}>

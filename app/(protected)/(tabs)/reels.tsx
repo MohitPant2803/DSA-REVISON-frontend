@@ -2424,6 +2424,7 @@ export default function ReelsScreen() {
           playlistName={activePlaybackName}
           sessionTimer={formatTime(sessionTotalTime)}
           questionsRevised={completedCardsCount}
+          showReelContentSelect={isReelsFeedActive}
         />
       )}
 
