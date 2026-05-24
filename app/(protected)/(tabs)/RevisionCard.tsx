@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, ActivityIndicator, InteractionManager } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -148,10 +148,10 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
   const [isCodeLoaded, setIsCodeLoaded] = useState(false);
   React.useEffect(() => {
     if (slide.type === 'code') {
-      const task = InteractionManager.runAfterInteractions(() => {
+      const handle = requestIdleCallback(() => {
         setIsCodeLoaded(true);
       });
-      return () => task.cancel();
+      return () => cancelIdleCallback(handle);
     }
   }, [slide.type]);
 

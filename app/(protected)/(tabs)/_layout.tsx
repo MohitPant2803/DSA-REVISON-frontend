@@ -221,7 +221,6 @@ function TabLayoutInner() {
       <Tabs.Screen name="CreateRevisionScreen" options={{ href: null }} />
       <Tabs.Screen name="RevisionForm" options={{ href: null }} />
       <Tabs.Screen name="RevisionCard" options={{ href: null }} />
-      <Tabs.Screen name="SlideStudio" options={{ href: null }} />
     </Tabs>
   );
 }
