@@ -193,7 +193,8 @@ export default function LearnScreen() {
   useEffect(() => {
     const fetchQuotes = async () => {
       try {
-        const response = await api.get('/api/senior-quotes');
+        // Prepend is omitted because api baseURL already concludes with /api
+        const response = await api.get('/senior-quotes');
         if (response.data?.success && response.data?.data && response.data.data.length > 0) {
           setQuotesList(response.data.data);
         }
