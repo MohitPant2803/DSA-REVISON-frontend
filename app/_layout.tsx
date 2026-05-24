@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, initialWindowMetrics } from "react-native-safe-area-context";
 import { QueryProvider } from "@/providers/QueryProvider";
 import { useAuthStore } from "@/store/useAuthStore";
 import '../global.css';  // ← only here
@@ -10,6 +10,10 @@ import '../global.css';  // ← only here
 // ... rest of imports
 
 import { useOnboardingStore } from "@/store/useOnboardingStore";
+import * as SplashScreen from 'expo-splash-screen';
+
+// Keep splash visible until auth state is resolved
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const { isAuthenticated, isLoading, restoreSession, user } = useAuthStore();
@@ -21,6 +25,13 @@ export default function RootLayout() {
   useEffect(() => {
     restoreSession();
   }, []);
+
+  // Hide splash only once auth is done loading
+  useEffect(() => {
+    if (!isLoading) {
+      SplashScreen.hideAsync();
+    }
+  }, [isLoading]);
 
   const isGuest = user?.id === 'guest-user';
 
@@ -52,12 +63,12 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <QueryProvider>
           <StatusBar style="light" />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(protected)" />
+            <Stack.Screen name="(protected)" options={{ animation: 'none' }} />
           </Stack>
         </QueryProvider>
       </SafeAreaProvider>

@@ -17,9 +17,7 @@ import {
   Animated as RNAnimated,
   FlatList,
   Pressable,
-  Linking,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import {
   Plus,
@@ -84,14 +82,10 @@ import { normalizeParam } from '@/utils/routeParams';
 import { usePlaylists, usePlaylistCards, useTogglePlaylistItem, useCreatePlaylist } from '@/hooks/usePlaylists';
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import * as sessionQueueService from '@/services/sessionQueueService';
-import * as reelsFeedService from '@/services/reelsFeedService';
 import * as userCardStateService from '@/services/userCardStateService';
 import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
 import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
-import { resolveCardState } from '@/utils/resolveCardState';
-
 
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.97;
@@ -299,11 +293,9 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
 interface ReelsActionRailProps {
   cleanId: string;
   item: IPopulatedRevisionCard;
-  membership?: Record<string, boolean>;
   onDifficultyStateUpdate: (state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
   isGuest: boolean;
-  localDifficulty?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
 }
 
 interface ClassificationButtonProps {
@@ -312,6 +304,8 @@ interface ClassificationButtonProps {
   activeColor: string;
   isActive: boolean;
   onPress: () => void;
+  shouldPulse?: boolean;
+  pulseDelay?: number;
 }
 
 const ClassificationButton = React.memo(({
@@ -320,6 +314,8 @@ const ClassificationButton = React.memo(({
   activeColor,
   isActive,
   onPress,
+  shouldPulse = false,
+  pulseDelay = 0,
 }: ClassificationButtonProps) => {
   const handlePress = () => {
     lightHaptic();
@@ -331,32 +327,28 @@ const ClassificationButton = React.memo(({
   return (
     <Pressable
       onPress={handlePress}
-      style={{ alignItems: 'center', marginBottom: 8, paddingHorizontal: 8, paddingVertical: 4 }}
-      hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+      style={{ alignItems: 'center', marginBottom: 12 }}
     >
-      {/* Main Action Capsule Button */}
-      <View
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: isActive ? `${activeColor}15` : 'rgba(255, 255, 255, 0.9)',
-          justifyContent: 'center',
-          alignItems: 'center',
-          borderWidth: 1.5,
-          borderColor: displayColor,
-          shadowColor: isActive ? activeColor : 'transparent',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: isActive ? 0.35 : 0,
-          shadowRadius: 6,
-          elevation: isActive ? 4 : 0,
-        }}
-      >
-        <Icon
-          color={displayColor}
-          size={14}
-          strokeWidth={isActive ? 3.0 : 2.2}
-        />
+      <View style={{ position: 'relative' }}>
+        {/* Main Action Capsule Button */}
+        <View
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: 'transparent',
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: displayColor,
+          }}
+        >
+          <Icon
+            color={displayColor}
+            size={15}
+            strokeWidth={isActive ? 3.0 : 2.2}
+          />
+        </View>
       </View>
 
       <Text
@@ -378,14 +370,20 @@ const ClassificationButton = React.memo(({
 const ReelsActionRail = React.memo(({
   cleanId,
   item,
-  membership,
   onDifficultyStateUpdate,
   onPlaylistPickerTrigger,
   isGuest,
-  localDifficulty,
 }: ReelsActionRailProps) => {
-  const currentDifficulty = localDifficulty !== undefined ? localDifficulty : item.difficultyState;
-  const isSaved = Object.values(membership ?? {}).some(Boolean);
+  const currentDifficulty = item.difficultyState;
+  const shouldPulse = !currentDifficulty;
+
+  const { data: membership } = useCardPlaylistMembership(cleanId, !isGuest);
+  const isSaved = useMemo(() => {
+    if (!membership) return false;
+    return Object.keys(membership).some(id => 
+      !['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].includes(id) && membership[id]
+    );
+  }, [membership]);
 
   return (
     <View 
@@ -406,6 +404,8 @@ const ReelsActionRail = React.memo(({
         activeColor="#10B981"
         isActive={currentDifficulty === 'easy'}
         onPress={() => onDifficultyStateUpdate('easy')}
+        shouldPulse={shouldPulse}
+        pulseDelay={0}
       />
 
       <ClassificationButton
@@ -414,6 +414,8 @@ const ReelsActionRail = React.memo(({
         activeColor="#F59E0B"
         isActive={currentDifficulty === 'medium'}
         onPress={() => onDifficultyStateUpdate('medium')}
+        shouldPulse={shouldPulse}
+        pulseDelay={250}
       />
 
       <ClassificationButton
@@ -422,6 +424,8 @@ const ReelsActionRail = React.memo(({
         activeColor="#EF4444"
         isActive={currentDifficulty === 'hard'}
         onPress={() => onDifficultyStateUpdate('hard')}
+        shouldPulse={shouldPulse}
+        pulseDelay={500}
       />
 
       <ClassificationButton
@@ -430,6 +434,8 @@ const ReelsActionRail = React.memo(({
         activeColor="#64748B"
         isActive={currentDifficulty === 'skipped'}
         onPress={() => onDifficultyStateUpdate('skipped')}
+        shouldPulse={shouldPulse}
+        pulseDelay={750}
       />
 
       {/* Futuristic Sleek Separator Line */}
@@ -443,6 +449,13 @@ const ReelsActionRail = React.memo(({
         onPress={() => onPlaylistPickerTrigger(item)}
       />
     </View>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.cleanId === nextProps.cleanId &&
+    prevProps.item.difficultyState === nextProps.item.difficultyState &&
+    prevProps.item._id === nextProps.item._id &&
+    prevProps.isGuest === nextProps.isGuest
   );
 });
 
@@ -464,8 +477,6 @@ interface ReelItemProps {
   onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
   onDifficultyStateUpdate: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   isActiveCardClassified?: boolean;
-  membership?: Record<string, boolean>;
-  localDifficulty?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
 }
 
 interface SlideCardWrapperProps {
@@ -507,13 +518,13 @@ const SlideCardWrapper = React.memo(({
     if (delta === 0) {
       // Only allow negative (left) translation for the active card during drag
       const tx = Math.min(0, slideDragX.value);
-      const rotate = `${tx / 25}deg`;
+      const rotateVal = interpolate(tx, [-width, 0, width], [-5, 0, 5], 'clamp');
       return {
         transform: [
           { translateX: tx },
           { translateY: 0 },
           { scale: 1 },
-          { rotate: rotate },
+          { rotate: `${rotateVal}deg` },
         ],
         opacity: 1,
         zIndex: 10,
@@ -524,7 +535,7 @@ const SlideCardWrapper = React.memo(({
     if (delta === 1) {
       const activeTx = slideDragX.value;
       const progress = Math.min(Math.abs(Math.min(0, activeTx)) / (width * 0.6), 1.0);
-      const scale = 0.93 + (0.07 * progress);
+      const scale = 0.965 + (0.035 * progress);
       const cardOpacity = 0.5 + (0.5 * progress);
       return {
         transform: [
@@ -542,12 +553,13 @@ const SlideCardWrapper = React.memo(({
     if (delta === -1) {
       // prevSlideDragX carries the previous card's translation during back navigation
       const tx = prevSlideDragX.value;
+      const rotateVal = interpolate(tx, [-width, 0, width], [-5, 0, 5], 'clamp');
       return {
         transform: [
           { translateX: tx },
           { translateY: 0 },
           { scale: 1 },
-          { rotate: `${tx / 25}deg` },
+          { rotate: `${rotateVal}deg` },
         ],
         opacity: 1,
         zIndex: 20, // Above active card so it slides OVER
@@ -573,7 +585,7 @@ const SlideCardWrapper = React.memo(({
       transform: [
         { translateX: 0 },
         { translateY: 0 },
-        { scale: 0.93 },
+        { scale: 0.965 },
         { rotate: '0deg' },
       ],
       opacity: 0,
@@ -619,9 +631,6 @@ const ActiveReelItem = React.memo(({
   onPlaylistPickerTrigger,
   onMoreOptionsTrigger,
   onDifficultyStateUpdate,
-  isActiveCardClassified,
-  membership,
-  localDifficulty,
 }: ReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const { preferences } = useUserPreferencesStore();
@@ -656,9 +665,6 @@ const ActiveReelItem = React.memo(({
       isMounted.current = false;
       cancelAnimation(slideDragX);
       cancelAnimation(prevSlideDragX);
-      cancelAnimation(cardTranslateY);
-      cancelAnimation(lockPillColor);
-      cancelAnimation(activeSlideIndexSV);
     };
   }, [item._id, currentPrefsKey]);
 
@@ -794,9 +800,9 @@ const ActiveReelItem = React.memo(({
   });
 
   const verticalGesture = Gesture.Pan()
-    .enabled(index === activeIndex && !isClassified)
     .activeOffsetY([-10, 100000]) // Only capture upward swipes (translationY < -10) to block scrolling down
     .failOffsetX([-10, 10])
+    .enabled(!isClassified)
     .onUpdate((event) => {
       // Elastic resistance cap at -40px on swipe up, 40px on swipe down
       if (event.translationY < 0) {
@@ -813,16 +819,9 @@ const ActiveReelItem = React.memo(({
       runOnJS(lightHaptic)();
     });
 
-  const isNextCard = index === activeIndex + 1;
-  const isLockedNextCard = isNextCard && !isActiveCardClassified;
-
-  const animatedActiveCardStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateY: cardTranslateY.value },
-      ],
-    };
-  });
+  const animatedActiveCardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: cardTranslateY.value }],
+  }));
 
   // =========================================================================
   // Onboarding-style horizontal gesture handler:
@@ -831,40 +830,58 @@ const ActiveReelItem = React.memo(({
   //   starts at -width and slides RIGHT over the active card to position 0.
   // - First slide blocks right swipe. Last slide blocks left swipe.
   // =========================================================================
+  const SWIPE_THRESHOLD_X = CARD_WIDTH * 0.08;
+  const VELOCITY_THRESHOLD = 200;
+
   const horizontalGesture = Gesture.Pan()
-    .enabled(index === activeIndex)
-    .activeOffsetX([-10, 10])
-    .failOffsetY([-10, 10])
+    .activeOffsetX([-5, 5])
+    .failOffsetY([-18, 18])
     .onStart(() => {
       if (isTransitioning.value) return;
     })
     .onUpdate((event) => {
       if (isTransitioning.value) return;
       const dx = event.translationX;
+      const vx = event.velocityX;
+
+      // Non-linear drag response: slower drag feels slightly resistant (0.92x),
+      // faster drag feels slightly empowered (+ velocity factor)
+      const weightedDx = (dx * 0.92) + (vx * 0.015);
 
       if (dx < 0) {
         // Dragging Left -> Move Forward: drag the active card left
         if (activeSlideIndex < slides.length - 1) {
-          slideDragX.value = dx;
+          slideDragX.value = weightedDx;
+        }
+      } else if (dx > 0) {
+        // Dragging Right -> Move Backward: pull previous card over
+        if (activeSlideIndex > 0) {
+          prevSlideDragX.value = -width + weightedDx;
         }
       }
-      // Right drag: no finger tracking — back swipe is committed on release only
     })
     .onEnd((event) => {
       if (isTransitioning.value) return;
       
-      const SWIPE_THRESHOLD_X = CARD_WIDTH * 0.16;
-      const VELOCITY_THRESHOLD = 350;
       const transX = event.translationX;
       const velX = event.velocityX;
+      
+      // Velocity projection: evaluate where the card will end up based on physical momentum
+      const projectedX = transX + velX * 0.18;
+
+      // Velocity-aware animation durations for physically accurate settling
+      const commitDuration = Math.max(140, Math.min(240, 240 - Math.abs(velX) * 0.08));
 
       if (transX < 0) {
         // ---- LEFT SWIPE: Push active card off-screen to the left ----
-        if (activeSlideIndex < slides.length - 1 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
+        // Check projectedX against threshold to accurately interpret fast tiny flicks
+        if (activeSlideIndex < slides.length - 1 && (Math.abs(projectedX) > SWIPE_THRESHOLD_X || velX < -VELOCITY_THRESHOLD)) {
           isTransitioning.value = true;
+          // Velocity-based exit distance: fast flicks travel further offscreen
+          const exitDistance = Math.max(-width - 350, -width - Math.abs(velX) * 0.15);
           slideDragX.value = withTiming(
-            -width - 100,
-            { duration: 300 },
+            exitDistance,
+            { duration: commitDuration },
             (finished) => {
               if (finished) {
                 runOnJS(handleSwipeComplete)();
@@ -875,33 +892,35 @@ const ActiveReelItem = React.memo(({
           // Cancel: snap active card back
           slideDragX.value = withSpring(
             0,
-            { damping: 20, stiffness: 360, mass: 0.35 },
+            { damping: 15, stiffness: 500, mass: 0.2 },
           );
         }
       } else if (transX > 0) {
         // ---- RIGHT SWIPE: Pull previous card OVER current card from the left ----
         if (activeSlideIndex > 0 && (Math.abs(transX) > SWIPE_THRESHOLD_X || Math.abs(velX) > VELOCITY_THRESHOLD)) {
           isTransitioning.value = true;
-          // Position the previous card offscreen to the left
-          prevSlideDragX.value = -width - 100;
           // Animate it sliding right over the current card to position 0
-          prevSlideDragX.value = withTiming(0, { duration: 300 }, (finished) => {
+          prevSlideDragX.value = withTiming(0, { duration: 180 }, (finished) => {
             if (finished) {
               runOnJS(handleSwipePrevComplete)();
             }
           });
         } else {
-          // No valid back swipe, just reset
-          slideDragX.value = withSpring(
-            0,
-            { damping: 20, stiffness: 360, mass: 0.35 },
+          // Cancel: snap previous card back offscreen
+          prevSlideDragX.value = withSpring(
+            -width - 100,
+            { damping: 15, stiffness: 500, mass: 0.2 },
           );
         }
       } else {
         // No movement — reset
         slideDragX.value = withSpring(
           0,
-          { damping: 20, stiffness: 360, mass: 0.35 },
+          { damping: 15, stiffness: 500, mass: 0.2 },
+        );
+        prevSlideDragX.value = withSpring(
+          -width - 100,
+          { damping: 15, stiffness: 500, mass: 0.2 },
         );
       }
     });
@@ -1000,69 +1019,221 @@ const ActiveReelItem = React.memo(({
       </GestureDetector>
 
       {/* Premium Glassmorphic Vertical Action Rail - completely outside gesture ownership */}
-      {index === activeIndex && (
-        <ReelsActionRail
-          cleanId={cleanId}
-          item={item}
-          membership={membership}
-          onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
-          onPlaylistPickerTrigger={onPlaylistPickerTrigger}
-          isGuest={isGuest}
-          localDifficulty={localDifficulty}
-        />
-      )}
+      <ReelsActionRail
+        cleanId={cleanId}
+        item={item}
+        onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
+        onPlaylistPickerTrigger={onPlaylistPickerTrigger}
+        isGuest={isGuest}
+      />
+    </View>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.item._id === nextProps.item._id &&
+    prevProps.item.difficultyState === nextProps.item.difficultyState &&
+    prevProps.activeIndex === nextProps.activeIndex &&
+    prevProps.index === nextProps.index &&
+    prevProps.isFavorite === nextProps.isFavorite &&
+    prevProps.cardHeight === nextProps.cardHeight &&
+    prevProps.width === nextProps.width &&
+    prevProps.isGuest === nextProps.isGuest &&
+    prevProps.canEdit === nextProps.canEdit &&
+    prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
+  );
+});
 
-      {/* Lock Blur Overlay inside unified card frame */}
-      {isLockedNextCard && (
-        <View 
-          style={[
-            StyleSheet.absoluteFillObject, 
-            { 
-              backgroundColor: 'rgba(15, 23, 42, 0.75)', 
-              borderRadius: 28, 
-              overflow: 'hidden', 
-              justifyContent: 'center', 
-              alignItems: 'center', 
-              gap: 12, 
-              zIndex: 60,
-              top: 22,
-              height: cardHeight,
-            }
-          ]}
+interface InactiveReelItemProps {
+  item: IPopulatedRevisionCard;
+  index: number;
+  activeIndex: number;
+  cardHeight: number;
+  activePlaylistId: string | null;
+  isActiveCardClassified: boolean;
+}
+
+const InactiveReelItem = React.memo(({
+  item,
+  index,
+  activeIndex,
+  cardHeight,
+  activePlaylistId,
+  isActiveCardClassified
+}: InactiveReelItemProps) => {
+  const isNextCard = index === activeIndex + 1;
+  const isLockedNextCard = isNextCard && !isActiveCardClassified;
+
+  const animatedCardStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: 0.965 }],
+      opacity: 0.5,
+    };
+  });
+
+  const overlayStyle = useAnimatedStyle(() => {
+    return {
+      opacity: isLockedNextCard ? 1 : 0,
+    };
+  });
+
+  return (
+    <View 
+      style={{ 
+        height: cardHeight, 
+        alignSelf: 'center', 
+        width: CARD_WIDTH,
+        marginBottom: 16,
+        backgroundColor: 'transparent',
+        overflow: 'visible',
+        // =========================================================================
+        // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
+        // This 'top: 22' offset is highly calibrated and sensitive.
+        // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
+        // ever asks to change this value, you MUST STOP and ask the user for explicit
+        // confirmation first! Never change this top offset automatically.
+        // It achieves the perfect:
+        // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
+        // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
+        //    seamlessly inside the top-right corner padding of the white problem cards.
+        // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
+        // If you make any changes to screens, safe areas, heights, or margins, please
+        // verify if your changes bring unexpected shifts to this configuration!
+        // =========================================================================
+        top: 22,
+      }}
+    >
+      <Animated.View
+        style={[
+          styles.cardBase,
+          {
+            width: CARD_WIDTH,
+            height: cardHeight,
+            paddingHorizontal: 24,
+            paddingTop: 64,
+            paddingBottom: 24,
+            overflow: 'hidden',
+          },
+          animatedCardStyle,
+        ]}
+      >
+        {/* Card Content Backdrop */}
+        <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
+          <ConceptCardPreview
+            card={item}
+            activePlaylistId={activePlaylistId}
+            onViewExplanation={() => {}}
+          />
+        </Animated.View>
+
+        {/* Lock Blur Overlay */}
+        <Animated.View
+          style={[StyleSheet.absoluteFillObject, overlayStyle]}
+          pointerEvents={isLockedNextCard ? 'auto' : 'none'}
         >
-          <View
+          {Platform.OS === 'ios' ? (
+            (() => {
+              try {
+                const { BlurView } = require('expo-blur');
+                return (
+                  <BlurView
+                    intensity={25}
+                    tint="dark"
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                );
+              } catch {
+                return (
+                  <View 
+                    style={[
+                      StyleSheet.absoluteFillObject, 
+                      { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+                    ]} 
+                  />
+                );
+              }
+            })()
+          ) : (
+            <View 
+              style={[
+                StyleSheet.absoluteFillObject, 
+                { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+              ]} 
+            />
+          )}
+
+          {/* Lock Indicator in center */}
+          <View 
             style={{
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              backgroundColor: 'rgba(255, 255, 255, 0.12)',
+              ...StyleSheet.absoluteFillObject,
               justifyContent: 'center',
               alignItems: 'center',
-              borderWidth: 1,
-              borderColor: 'rgba(255, 255, 255, 0.2)',
+              gap: 12,
             }}
           >
-            <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
+            <View
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(255, 255, 255, 0.2)',
+              }}
+            >
+              <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
+            </View>
+            <Text
+              style={{
+                color: '#94A3B8',
+                fontSize: 12,
+                fontWeight: '800',
+                textTransform: 'uppercase',
+                letterSpacing: 1.5,
+              }}
+            >
+              Locked Next Problem
+            </Text>
           </View>
-          <Text
-            style={{
-              color: '#94A3B8',
-              fontSize: 12,
-              fontWeight: '800',
-              textTransform: 'uppercase',
-              letterSpacing: 1.5,
-            }}
-          >
-            Locked Next Problem
-          </Text>
-        </View>
-      )}
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 });
 
 const ReelItem = React.memo((props: ReelItemProps) => {
+  const isActiveReel = props.index === props.activeIndex;
+
+  if (!isActiveReel) {
+    return (
+      <InactiveReelItem
+        item={props.item}
+        index={props.index}
+        activeIndex={props.activeIndex}
+        cardHeight={props.cardHeight}
+        activePlaylistId={props.activePlaylistId}
+        isActiveCardClassified={props.isActiveCardClassified ?? true}
+      />
+    );
+  }
+
   return <ActiveReelItem {...props} />;
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.item._id === nextProps.item._id &&
+    prevProps.item.difficultyState === nextProps.item.difficultyState &&
+    prevProps.activeIndex === nextProps.activeIndex &&
+    prevProps.index === nextProps.index &&
+    prevProps.isFavorite === nextProps.isFavorite &&
+    prevProps.cardHeight === nextProps.cardHeight &&
+    prevProps.width === nextProps.width &&
+    prevProps.isGuest === nextProps.isGuest &&
+    prevProps.canEdit === nextProps.canEdit &&
+    prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
+  );
 });
 
 export default function ReelsScreen() {
@@ -1111,20 +1282,6 @@ export default function ReelsScreen() {
 
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
-  
-  const cardDifficultyMap = usePlaylistStateStore((state) => state.cardDifficultyMap);
-  const cardsById = usePlaylistStateStore((state) => state.cardsById);
-  const transferCard = usePlaylistStateStore((state) => state.transferCard);
-  const revertTransfer = usePlaylistStateStore((state) => state.revertTransfer);
-  const reconcileServerState = usePlaylistStateStore((state) => state.reconcileServerState);
-  const cleanupResolvedState = usePlaylistStateStore((state) => state.cleanupResolvedState);
-  const hydratePlaylistCards = usePlaylistStateStore((state) => state.hydratePlaylistCards);
-
-  // Evict completed optimistic entries from memory on mount
-  useEffect(() => {
-    cleanupResolvedState();
-  }, [cleanupResolvedState]);
-
   const [navState, setNavState] = useState({ activeIndex: 0, prevIdx: -1 });
   const activeIndex = navState.activeIndex;
   const prevIdx = navState.prevIdx;
@@ -1148,6 +1305,7 @@ export default function ReelsScreen() {
 
   const setMode = useTrackingStore((state) => state.setMode);
   const setInfiniteLoop = useTrackingStore((state) => state.setInfiniteLoop);
+  const toggleWatchLater = useTrackingStore((state) => state.toggleWatchLater);
   const setWatchLater = useTrackingStore((state) => state.setWatchLater);
   const startSession = useTrackingStore((state) => state.startSession);
   const updateSessionTime = useTrackingStore((state) => state.updateSessionTime);
@@ -1178,8 +1336,7 @@ export default function ReelsScreen() {
 
   // Decide if playback session is active
   const isGuest = user?.id === 'guest-user';
-  const isSessionActive = !isGuest;
-  const isReelsFeedActive = isSessionActive && !folderIdParam && !activePlaylistId;
+  const isSessionActive = !isGuest && (!!folderIdParam || !!activePlaylistId);
 
   const [showRunConfig, setShowRunConfig] = useState(false);
 
@@ -1237,7 +1394,7 @@ export default function ReelsScreen() {
     : (activePlaylistId ? currentPlaylistLoops : currentFolderLoops);
 
   // Sync session timer
-  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -1405,9 +1562,6 @@ export default function ReelsScreen() {
     return displayedCards;
   }, [isSessionActive, sessionCards, displayedCards, currentMode, watchLaterCardIds, difficultyStatesParam]);
 
-  const activeCardItem = cardsList[activeIndex];
-  const activeCardId = activeCardItem ? activeCardItem._id : null;
-  const { data: membership = {} } = useCardPlaylistMembership(activeCardId, !isGuest);
 
   // Reset index 0 on mode changes
   useEffect(() => {
@@ -1443,13 +1597,6 @@ export default function ReelsScreen() {
     }
   }, [folderIdParam, topicParam, tagsParam, difficultyParam, searchParam, activePlaylistId, startCardIdParam]);
 
-  // Populate the normalized store cache dynamically when playlistCards load
-  useEffect(() => {
-    if (playlistCards && playlistCards.length > 0) {
-      hydratePlaylistCards(activePlaylistId || 'playlist', playlistCards);
-    }
-  }, [playlistCards, activePlaylistId, hydratePlaylistCards]);
-
   // Load playlist cards according to custom drag order
   useEffect(() => {
     if (!activePlaylistId) return;
@@ -1457,22 +1604,8 @@ export default function ReelsScreen() {
     let cardsToSet = [...playlistCards]
       .filter(Boolean)
       .filter((card: any) => card && card._id);
-      
-    setAllCards((prevCards) => {
-      if (prevCards.length === 0) {
-        return cardsToSet.map((c) => resolveCardState(c, cardDifficultyMap, cardsById));
-      }
-      
-      const updatedCardsMap = new Map(cardsToSet.map((c: any) => [c._id, c]));
-      return prevCards.map((card) => {
-        const fresh = updatedCardsMap.get(card._id);
-        if (fresh) {
-          return resolveCardState(fresh, cardDifficultyMap, cardsById);
-        }
-        return card;
-      });
-    });
-  }, [playlistCards, cardDifficultyMap, cardsById, activePlaylistId]);
+    setAllCards(cardsToSet);
+  }, [playlistCards]);
 
   // Reset activeIndex and clear cards only when the active playlist actually changes
   const prevPlaylistId = useRef<string | null>(null);
@@ -1506,27 +1639,6 @@ export default function ReelsScreen() {
       setSessionLoading(true);
       setSessionError(null);
       try {
-        if (isReelsFeedActive) {
-          const slice = await reelsFeedService.getReelFeedSlice();
-          
-          if (!isMounted) return;
-          setSessionId('reels-feed-active');
-          
-          hydratePlaylistCards('reels-feed-active', slice.cardsSlice.filter(Boolean) as any);
-
-          const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.queueLength).fill(null);
-          slice.cardsSlice.forEach((c, idx) => {
-            if (c) {
-              c = resolveCardState(c, cardDifficultyMap, cardsById);
-            }
-            initialCards[slice.startIdx + idx] = c;
-          });
-          setSessionCards(initialCards);
-          setNavState({ activeIndex: slice.currentIndex, prevIdx: -1 });
-          setSessionLoading(false);
-          return;
-        }
-
         let sourceType: 'folder' | 'playlist' | 'liked' | 'watchLater';
         let sourceId: string;
 
@@ -1546,11 +1658,18 @@ export default function ReelsScreen() {
             sourceId = activePlaylistId;
           }
         } else {
+          // Fallback — should not reach here due to isSessionActive guard
           setSessionLoading(false);
           return;
         }
 
-
+        console.log('[Session Init Debug]', {
+          folderIdParam,
+          activePlaylistId,
+          startCardIdParam,
+          isSessionActive,
+          sessionRetryCount
+        });
 
         const isShuffle = currentMode === 'shuffle';
         const session = await sessionQueueService.startSession(sourceType, sourceId, isShuffle);
@@ -1561,17 +1680,12 @@ export default function ReelsScreen() {
         const slice = await sessionQueueService.getSessionCardsSlice(session._id);
         if (!isMounted) return;
 
-        hydratePlaylistCards(session._id, slice.cardsSlice.filter(Boolean) as any);
-
         // Populate sessionCards
         const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.orderedCardIds.length).fill(null);
         slice.cardsSlice.forEach(c => {
-          if (c) {
-            const resolved = resolveCardState(c, cardDifficultyMap, cardsById);
-            const idx = slice.orderedCardIds.indexOf(resolved._id);
-            if (idx !== -1) {
-              initialCards[idx] = resolved;
-            }
+          const idx = slice.orderedCardIds.indexOf(c._id);
+          if (idx !== -1) {
+            initialCards[idx] = c;
           }
         });
         setSessionCards(initialCards);
@@ -1669,33 +1783,9 @@ export default function ReelsScreen() {
   const handleSessionSwipe = useCallback(async (newIndex: number) => {
     if (!sessionId) return;
     try {
-      if (isReelsFeedActive) {
-        await reelsFeedService.updateReelIndex(newIndex, Date.now());
-        const slice = await reelsFeedService.getReelFeedSlice();
-        
-        hydratePlaylistCards('reels-feed-active', slice.cardsSlice.filter(Boolean) as any);
-
-        setSessionCards(prev => {
-          const next = [...prev];
-          if (next.length !== slice.queueLength) {
-            next.length = slice.queueLength;
-          }
-          slice.cardsSlice.forEach((c, idx) => {
-            if (c) {
-              c = resolveCardState(c, cardDifficultyMap, cardsById);
-            }
-            next[slice.startIdx + idx] = c;
-          });
-          return next;
-        });
-        return;
-      }
-
       await sessionQueueService.updateSessionIndex(sessionId, newIndex);
       const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
       
-      hydratePlaylistCards(sessionId, slice.cardsSlice.filter(Boolean) as any);
-
       setSessionCards(prev => {
         const next = [...prev];
         if (next.length !== slice.orderedCardIds.length) {
@@ -1707,10 +1797,7 @@ export default function ReelsScreen() {
           if (c) cardMap.set(c._id, c);
         });
         slice.cardsSlice.forEach(c => {
-          if (c) {
-            const resolved = resolveCardState(c, cardDifficultyMap, cardsById);
-            cardMap.set(resolved._id, resolved);
-          }
+          if (c) cardMap.set(c._id, c);
         });
         
         for (let i = 0; i < slice.orderedCardIds.length; i++) {
@@ -1722,7 +1809,7 @@ export default function ReelsScreen() {
     } catch (err) {
       console.error('[Session Swipe Update Error]', err);
     }
-  }, [sessionId, isReelsFeedActive, cardDifficultyMap, hydratePlaylistCards]);
+  }, [sessionId]);
 
   // Session-specific shuffle handler
   const handleToggleShuffleInSession = async (shuffleValue: boolean) => {
@@ -1860,20 +1947,12 @@ export default function ReelsScreen() {
     });
   }, []);
 
-  // Populate the normalized store cache dynamically when data?.results loads
-  useEffect(() => {
-    if (data?.results) {
-      hydratePlaylistCards(activePlaylistId || 'all', data.results);
-    }
-  }, [data?.results, activePlaylistId, hydratePlaylistCards]);
-
   // Synchronize and merge new/updated API pages to the continuous deck
   useEffect(() => {
     if (activePlaylistId || !data?.results) return;
     
     if (allCards.length === 0) {
-      const resolved = data.results.map((c) => resolveCardState(c, cardDifficultyMap, cardsById));
-      setAllCards(resolved);
+      setAllCards(data.results);
       setNavState({ activeIndex: 0, prevIdx: -1 });
     } else {
       setAllCards((prevCards) => {
@@ -1885,16 +1964,30 @@ export default function ReelsScreen() {
           const baseId = card._id.split('-loop-')[0];
           const fresh = updatedCardsMap.get(baseId) || updatedCardsMap.get(card._id);
           if (fresh) {
-            return resolveCardState(fresh, cardDifficultyMap, cardsById);
+            return {
+              ...card,
+              isFavorite: fresh.isFavorite,
+              isDifficult: fresh.isDifficult,
+              isArchived: fresh.isArchived,
+              difficultyState: fresh.difficultyState,
+              currentUserQuestionProgress: fresh.currentUserQuestionProgress,
+              // Sync other base data too if changed
+              title: fresh.title,
+              explanation: fresh.explanation,
+              topic: fresh.topic,
+              difficulty: fresh.difficulty,
+              complexity: fresh.complexity,
+              code: fresh.code,
+              examples: fresh.examples,
+              slides: fresh.slides,
+            };
           }
           return card;
         });
 
         // Find cards in the fresh results that are not in mergedCards yet (by base ID)
         const existingIds = new Set(mergedCards.map((c) => c._id.split('-loop-')[0]));
-        const newCards = data.results
-          .filter((c: any) => !existingIds.has(c._id))
-          .map((c: any) => resolveCardState(c, cardDifficultyMap, cardsById));
+        const newCards = data.results.filter((c: any) => !existingIds.has(c._id));
 
         if (newCards.length === 0) {
           return mergedCards;
@@ -1902,7 +1995,7 @@ export default function ReelsScreen() {
         return [...mergedCards, ...newCards];
       });
     }
-  }, [activePlaylistId, data?.results, cardDifficultyMap, cardsById]);
+  }, [activePlaylistId, data?.results]);
 
   // Prefetch adjacent pagination pages in background
   useEffect(() => {
@@ -1954,6 +2047,7 @@ export default function ReelsScreen() {
   }, [folderIdParam, activePlaylistId]);
 
   const handleProgressUpdateInReels = useCallback((cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => {
+    const cleanId = cardId.split('-loop-')[0];
     if (isGuest) {
       Alert.alert(
         "Sign In Required",
@@ -1971,8 +2065,6 @@ export default function ReelsScreen() {
       return;
     }
 
-    const cleanId = cardId.split('-loop-')[0];
-
     // 1. Optimistic state update
     handleCardStateUpdate(cleanId, action, value);
 
@@ -1988,16 +2080,13 @@ export default function ReelsScreen() {
     );
 
     if (action === 'favorite') {
-      // Synchronously update the Zustand store for real-time consistency
-      usePlaylistStateStore.getState().toggleFavoriteInStore(cleanId, value);
-
       userCardStateService.toggleLike(cleanId).catch(console.error);
       const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
       if (currentActivePlaylistId && currentActivePlaylistId !== 'likes' && currentActivePlaylistId !== 'watch-later') {
         togglePlaylistItem.mutate({
           playlistId: currentActivePlaylistId,
           revisionCardId: cleanId,
-          isInPlaylist: !value, // if it was marked true, remove
+          isInPlaylist: !value, // if it was marked true, remove (isInPlaylist = false now true)
         });
       }
     }
@@ -2011,46 +2100,28 @@ export default function ReelsScreen() {
   }, [isGuest, handleCardStateUpdate]);
 
   const handleWatchLaterToggleInReels = useCallback((cardId: string) => {
-    lightHaptic();
     const cleanId = cardId.split('-loop-')[0];
-    const isWatchLater = useTrackingStore.getState().watchLaterCardIds.includes(cleanId);
-    const nextValue = !isWatchLater;
-    
-    // Synchronously update the Zustand store for real-time consistency
-    usePlaylistStateStore.getState().toggleWatchLaterInStore(cleanId, nextValue);
-
+    lightHaptic();
+    toggleWatchLater(cleanId);
     if (!isGuest) {
       userCardStateService.toggleWatchLater(cleanId).catch(console.error);
     }
-  }, [isGuest]);
+    queryClient.invalidateQueries({ queryKey: ['playlists'] });
+    queryClient.invalidateQueries({ queryKey: ['playlistDetail', 'watch-later'] });
+  }, [isGuest, toggleWatchLater, queryClient]);
 
   const handleDifficultyStateUpdateInReels = useCallback((cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => {
     lightHaptic();
-    const cleanId = cardId.split('-loop-')[0];
     
-    const targetCard = cardsList.find((c) => c && c._id.split('-loop-')[0] === cleanId);
-    if (!targetCard) return;
-    
-    // ATOMIC STATE RESOLUTION:
-    // Determine the old state using cardDifficultyMap first, then fallback to item
-    const oldDifficultyObj = cardDifficultyMap[cleanId];
-    const oldDifficulty = oldDifficultyObj !== undefined 
-      ? oldDifficultyObj.difficulty 
-      : (targetCard.difficultyState || null);
-      
-    const activeCurrently = oldDifficulty === state;
+    const targetCard = cardsList.find((c) => c && c._id.split('-loop-')[0] === cardId);
+    const activeCurrently = targetCard?.difficultyState === state;
     const resolvedNewState = activeCurrently ? null : state;
 
-    const timestamp = Date.now();
-
-    // 1. Update the centralized store atomically
-    transferCard(cleanId, targetCard, resolvedNewState);
-
-    // 2. Optimistic update of local React state instantly to unlock vertical swipe locks
+    // 1. Optimistic update of local React state instantly to unlock vertical swipe locks
     setAllCards((prevCards) =>
       prevCards.map((card) => {
         const baseId = card._id.split('-loop-')[0];
-        if (baseId === cleanId) {
+        if (baseId === cardId) {
           const qp = resolvedNewState
             ? {
                 attemptStatus: resolvedNewState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
@@ -2067,7 +2138,7 @@ export default function ReelsScreen() {
       prevCards.map((card) => {
         if (!card) return card;
         const baseId = card._id.split('-loop-')[0];
-        if (baseId === cleanId) {
+        if (baseId === cardId) {
           const qp = resolvedNewState
             ? {
                 attemptStatus: resolvedNewState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
@@ -2080,54 +2151,9 @@ export default function ReelsScreen() {
       })
     );
 
-    // 3. Persist to database instantly in background
+    // 2. Persist to database instantly
     if (!isGuest) {
-      updateDifficultyStateMutation.mutate(
-        { cardId: cleanId, difficultyState: resolvedNewState },
-        {
-          onSuccess: () => {
-            reconcileServerState(cleanId, resolvedNewState);
-          },
-          onError: (err) => {
-            console.error('[MUTATION ERROR]', err);
-            // Revert state atomically on failure with initiation timestamp
-            revertTransfer(cleanId, oldDifficulty, resolvedNewState, timestamp);
-            
-            setAllCards((prevCards) =>
-              prevCards.map((card) => {
-                const baseId = card._id.split('-loop-')[0];
-                if (baseId === cleanId) {
-                  const qp = oldDifficulty
-                    ? {
-                        attemptStatus: oldDifficulty === 'skipped' ? ('skipped' as const) : ('attempted' as const),
-                        perceivedDifficultyByUser: oldDifficulty === 'skipped' ? null : (oldDifficulty as any),
-                      }
-                    : null;
-                  return { ...card, difficultyState: oldDifficulty, currentUserQuestionProgress: qp };
-                }
-                return card;
-              })
-            );
-
-            setSessionCards((prevCards) =>
-              prevCards.map((card) => {
-                if (!card) return card;
-                const baseId = card._id.split('-loop-')[0];
-                if (baseId === cleanId) {
-                  const qp = oldDifficulty
-                    ? {
-                        attemptStatus: oldDifficulty === 'skipped' ? ('skipped' as const) : ('attempted' as const),
-                        perceivedDifficultyByUser: oldDifficulty === 'skipped' ? null : (oldDifficulty as any),
-                      }
-                    : null;
-                  return { ...card, difficultyState: oldDifficulty, currentUserQuestionProgress: qp };
-                }
-                return card;
-              })
-            );
-          }
-        }
-      );
+      updateDifficultyStateMutation.mutate({ cardId, difficultyState: resolvedNewState });
     }
 
     Toast.show({
@@ -2137,7 +2163,7 @@ export default function ReelsScreen() {
       position: 'top',
       visibilityTime: 1200,
     });
-  }, [isGuest, updateDifficultyStateMutation, cardsList, cardDifficultyMap, transferCard, revertTransfer, reconcileServerState]);
+  }, [isGuest, updateDifficultyStateMutation, cardsList, allCards, sessionCards]);
 
   const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
     const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
@@ -2173,7 +2199,7 @@ export default function ReelsScreen() {
           const folderId = typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
           router.push({
             pathname: '/(protected)/(tabs)/CreateRevisionScreen',
-            params: { cardId: card._id, folderId, card: JSON.stringify(card) },
+            params: { cardId: card._id.split('-loop-')[0], folderId, card: JSON.stringify(card) },
           });
         }
       });
@@ -2186,7 +2212,7 @@ export default function ReelsScreen() {
             {
               text: 'Delete',
               style: 'destructive',
-              onPress: () => deleteCard(card._id),
+              onPress: () => deleteCard(card._id.split('-loop-')[0]),
             },
           ]);
         }
@@ -2337,18 +2363,6 @@ export default function ReelsScreen() {
   if (isError || (activePlaylistId && playlistCardsError) || (isSessionActive && sessionError)) {
     return (
       <View className="flex-1 justify-center items-center bg-[#F8FAFC] p-6">
-        {/* Render ReelsSettingsOverlay inside error screen if open */}
-        {isSettingsOpen && (
-          <ReelsSettingsOverlay
-            isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
-            playlistName={activePlaybackName}
-            sessionTimer={formatTime(sessionTotalTime)}
-            questionsRevised={completedCardsCount}
-            showReelContentSelect={isReelsFeedActive}
-          />
-        )}
-
         <Text className="text-[#64748B] text-lg text-center mb-4 font-medium">
           {sessionError 
             ? sessionError 
@@ -2356,38 +2370,25 @@ export default function ReelsScreen() {
               ? 'Could not load playlist' 
               : error?.message || 'An error occurred'}
         </Text>
-        
-        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-          <TouchableOpacity
-            onPress={() => {
-              if (isSessionActive && sessionError) {
-                setSessionRetryCount(prev => prev + 1);
-              } else if (activePlaylistId) {
-                refetchPlaylistCards();
-              } else {
-                refetch();
-              }
-            }}
-            className="px-6 py-3.5 rounded-full bg-[#8B5CF6] shadow-md shadow-violet-500/20 active:scale-[0.98]"
-          >
-            <Text className="text-white font-medium">Try again</Text>
-          </TouchableOpacity>
-
-          {isReelsFeedActive && (
-            <TouchableOpacity
-              onPress={() => setIsSettingsOpen(true)}
-              className="px-6 py-3.5 rounded-full bg-[#E2E8F0] border border-[#CBD5E1] active:scale-[0.98]"
-            >
-              <Text className="text-[#0F172A] font-medium">Choose Folders</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        <TouchableOpacity
+          onPress={() => {
+            if (isSessionActive && sessionError) {
+              setSessionRetryCount(prev => prev + 1);
+            } else if (activePlaylistId) {
+              refetchPlaylistCards();
+            } else {
+              refetch();
+            }
+          }}
+          className="px-8 py-3.5 rounded-full bg-[#8B5CF6] shadow-md shadow-violet-500/20 active:scale-[0.98]"
+        >
+          <Text className="text-white font-medium">Try again</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   const activeCard = cardsList[activeIndex];
-  const isActiveCardClassified = activeCard ? (activeCard.difficultyState !== null && activeCard.difficultyState !== undefined) : true;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} className="bg-[#F5F5F7]">
@@ -2404,7 +2405,6 @@ export default function ReelsScreen() {
           playlistName={activePlaybackName}
           sessionTimer={formatTime(sessionTotalTime)}
           questionsRevised={completedCardsCount}
-          showReelContentSelect={isReelsFeedActive}
         />
       )}
 
@@ -2437,92 +2437,9 @@ export default function ReelsScreen() {
 
         {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
         <TouchableOpacity
-          onPress={async () => {
-            lightHaptic();
-            const activeCard = cardsList[activeIndex];
-            if (!activeCard) {
-              Toast.show({
-                type: 'error',
-                text1: 'Card not loaded',
-                text2: 'Please wait for the card to load before asking ChatGPT.',
-                position: 'top'
-              });
-              return;
-            }
-            
-            const mode = useUserPreferencesStore.getState().preferences.gptPromptMode || 'explanation';
-            
-            let fullContext = activeCard.explanation || '';
-            if (activeCard.code) {
-              fullContext += `\n\nCode:\n${activeCard.code}`;
-            }
-            
-            if (activeCard.slides && activeCard.slides.length > 0) {
-              fullContext += `\n\nAdditional Slides Context:\n`;
-              activeCard.slides.forEach((slide, idx) => {
-                fullContext += `\n[Slide ${idx + 1}: ${slide.headline}]\n`;
-                if (slide.body) fullContext += `${slide.body}\n`;
-                if (slide.code) fullContext += `Code:\n${slide.code}\n`;
-                if (slide.blocks && Array.isArray(slide.blocks)) {
-                  slide.blocks.forEach((block: any) => {
-                    if (block.text) fullContext += `${block.text}\n`;
-                    if (block.code) fullContext += `Code:\n${block.code}\n`;
-                  });
-                }
-              });
-            }
-            
-            let fullPrompt = '';
-            if (mode === 'explanation') {
-              fullPrompt = `Explain this concept in detail: ${activeCard.title}.\nContext: ${fullContext}`;
-            } else {
-              fullPrompt = `Test me on this topic: ${activeCard.title}.\nAsk me a challenging question based on this context: ${fullContext}`;
-            }
-
-            // If prompt is too large, it will crash Android's intent launcher. 
-            // So we copy the full prompt to the clipboard and launch the app normally.
-            const isLarge = fullPrompt.length > 1500;
-            
-            if (isLarge) {
-              await Clipboard.setStringAsync(fullPrompt);
-              Toast.show({
-                type: 'success',
-                text1: 'Prompt Copied!',
-                text2: 'Context is large. Copied to clipboard, just paste it in ChatGPT!',
-                position: 'top',
-                visibilityTime: 4000,
-              });
-            }
-
-            // Launch the native ChatGPT app if installed, otherwise fallback to web URL
-            const nativeUrl = isLarge 
-              ? 'chatgpt://' 
-              : `chatgpt://chat?q=${encodeURIComponent(fullPrompt)}`;
-            const webUrl = isLarge 
-              ? 'https://chatgpt.com/' 
-              : `https://chatgpt.com/?q=${encodeURIComponent(fullPrompt)}`;
-
-            Linking.canOpenURL(nativeUrl)
-              .then((supported) => {
-                if (supported) {
-                  Linking.openURL(nativeUrl).catch(() => {
-                    Linking.openURL(webUrl).catch(err => console.error('Failed to open ChatGPT URL:', err));
-                  });
-                } else {
-                  Linking.openURL(webUrl).catch(err => {
-                    console.error('Failed to open ChatGPT URL:', err);
-                    Toast.show({
-                      type: 'error',
-                      text1: 'Cannot open ChatGPT',
-                      text2: 'Please check your browser or app settings.',
-                      position: 'top'
-                    });
-                  });
-                }
-              })
-              .catch(() => {
-                Linking.openURL(webUrl).catch(err => console.error('Failed to open ChatGPT URL:', err));
-              });
+          onPress={() => {
+            // TODO: Add your chat toggle logic here
+            console.log('ChatGPT Clicked');
           }}
           activeOpacity={0.7}
           style={{
@@ -2553,14 +2470,9 @@ export default function ReelsScreen() {
           <FlatList
             ref={flatListRef}
             data={cardsList}
-            scrollEnabled={isActiveCardClassified}
+            scrollEnabled={true}
             initialScrollIndex={activeIndex > 0 ? activeIndex : undefined}
             renderItem={({ item, index }) => {
-              const isWithinRenderWindow = Math.abs(index - activeIndex) <= 4;
-              if (!isWithinRenderWindow) {
-                return <View style={{ height: cardHeight + 16, width: width * 0.97 }} />;
-              }
-
               if (!item) {
                 return (
                   <View 
@@ -2595,10 +2507,8 @@ export default function ReelsScreen() {
               const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
               const isFavorite = !!item.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes');
               
-
-
-              const cleanId = item._id.split('-loop-')[0];
-              const localDifficulty = cardDifficultyMap[cleanId] !== undefined ? cardDifficultyMap[cleanId].difficulty : item.difficultyState;
+              const activeCardItem = cardsList[activeIndex];
+              const isActiveCardClassified = activeCardItem ? (activeCardItem.difficultyState !== null && activeCardItem.difficultyState !== undefined) : true;
 
               return (
                 <ReelItem
@@ -2619,8 +2529,6 @@ export default function ReelsScreen() {
                   onPlaylistPickerTrigger={setPlaylistModalCard}
                   onMoreOptionsTrigger={handleMoreOptionsTrigger}
                   onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
-                  membership={index === activeIndex ? membership : undefined}
-                  localDifficulty={localDifficulty}
                 />
               );
             }}
@@ -2630,9 +2538,9 @@ export default function ReelsScreen() {
             decelerationRate="fast"
             disableIntervalMomentum={true}
             showsVerticalScrollIndicator={false}
-            windowSize={11}
-            maxToRenderPerBatch={8}
-            removeClippedSubviews={false}
+            windowSize={3}
+            maxToRenderPerBatch={2}
+            removeClippedSubviews={Platform.OS === 'android'}
             getItemLayout={(data, index) => ({
               length: cardHeight + 16,
               offset: (cardHeight + 16) * index,

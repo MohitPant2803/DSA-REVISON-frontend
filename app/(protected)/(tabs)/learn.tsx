@@ -9,7 +9,7 @@ import {
   Dimensions,
   TouchableOpacity,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Plus,
   ArrowRight,
@@ -81,30 +81,27 @@ const StaggeredCard = ({
 }) => {
   const animatedStyle = useAnimatedStyle(() => {
     // Staggered start trigger to slow down and smoothen the ascent
-    // Card 0 starts at 38, Card 1 at 43, Card 2 at 48... Capped at 65% to prevent cards being lost at bottom!
-    const startT = Math.min(65, 38 + index * 5);
+    // Card 0 starts at 38, Card 1 at 48, Card 2 at 58... Capped at 75% to prevent cards being lost at bottom!
+    const startT = Math.min(75, 38 + index * 10);
 
-    // Reduced starting distance to slow down visual velocity (380 + index * 60)
-    const startY = 380 + index * 60;
+    // Start completely off-screen from the bottom
+    const startY = height + index * 60;
     const settleY = 0;
 
-    // Direct linear eased interpolation to prevent any blinking, adjustments, or shifts
-    const translateY = interpolate(
-      timelineProgress.value,
-      [startT, 100],
-      [startY, settleY],
-      'clamp'
-    );
+    // Normalize timeline progress for this specific card (0.0 to 1.0)
+    const rawProgress = (timelineProgress.value - startT) / (100 - startT);
+    const clampedProgress = Math.max(0, Math.min(1, rawProgress));
 
-    const opacity = interpolate(
-      timelineProgress.value,
-      [startT, startT + 10],
-      [0, 1],
-      'clamp'
-    );
+    // Reduced acceleration (Ease-In-Out Quadratic) for a calming, peaceful motion
+    const easeProgress = clampedProgress < 0.5 
+      ? 2 * clampedProgress * clampedProgress 
+      : 1 - Math.pow(-2 * clampedProgress + 2, 2) / 2;
+
+    const translateY = startY - (startY - settleY) * easeProgress;
+
+ 
 
     return {
-      opacity,
       transform: [{ translateY }],
     };
   });
@@ -118,6 +115,7 @@ const StaggeredCard = ({
 
 export default function LearnScreen() {
   useAppBackHandler();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuthStore();
   const { preferences } = useOnboardingStore();
@@ -198,8 +196,8 @@ export default function LearnScreen() {
     if (phase === 'settled') {
       const t = setTimeout(() => {
         setShowAuthor(true);
-        authorOpacity.value = withTiming(1, { duration: 2500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
-      }, 500);
+        authorOpacity.value = withTiming(1, { duration: 500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+      },100);
       return () => clearTimeout(t);
     } else {
       setShowAuthor(false);
@@ -243,7 +241,7 @@ export default function LearnScreen() {
       if (!isActive) return;
 
       if (index < selectedQuote.text.length) {
-        setDisplayedMessage((prev) => prev + selectedQuote.text.charAt(index));
+        setDisplayedMessage(selectedQuote.text.substring(0, index + 1));
         index++;
         
         // Calculate typing progress and assign to master timeline (0% to 30%)
@@ -290,7 +288,7 @@ export default function LearnScreen() {
           if (!isActive) return;
           
           if (index < warningText.length) {
-            setDisplayedMessage((prev) => prev + warningText.charAt(index));
+            setDisplayedMessage(selectedQuote.text + warningText.substring(0, index + 1));
             index++;
             // Dynamic variable pacing for error flow
             const randomDelay = 30 + Math.random() * 35;
@@ -346,13 +344,13 @@ export default function LearnScreen() {
     if (phase === 'contentReady') {
       // Luxurious cinematic workspace assembly timeline animation (T = 30 to 100)
       timelineProgress.value = withTiming(100, {
-        duration: 1800, // 1800ms of smooth meditative motion
+        duration: 2500, // Reduced pace for a smoother, calmer meditative motion
         easing: Easing.bezier(0.25, 1, 0.5, 1), // Soothing easeOutCubic curve
       });
 
       const timer = setTimeout(() => {
         setPhase('settled');
-      }, 1800);
+      }, 2500);
 
       return () => clearTimeout(timer);
     }
@@ -360,18 +358,21 @@ export default function LearnScreen() {
 
   // Master Orchestrated Reanimated Style Mappings
   const welcomeAnimatedStyle = useAnimatedStyle(() => {
+    const startT = 38;
+    const rawProgress = (timelineProgress.value - startT) / (100 - startT);
+    const clampedProgress = Math.max(0, Math.min(1, rawProgress));
+    // Reduced acceleration (Ease-In-Out Quadratic) for a calming, peaceful motion
+    const easeProgress = clampedProgress < 0.5 
+      ? 2 * clampedProgress * clampedProgress 
+      : 1 - Math.pow(-2 * clampedProgress + 2, 2) / 2;
+
     const opacity = interpolate(
       timelineProgress.value,
-      [0, 60, 100],
+      [0, startT, 100],
       [0.15, 0.15, 1.0],
       'clamp'
     );
-    const translateY = interpolate(
-      timelineProgress.value,
-      [0, 60, 100],
-      [15, 15, 0],
-      'clamp'
-    );
+    const translateY = 15 - 15 * easeProgress;
     return {
       opacity,
       transform: [{ translateY }],
@@ -379,30 +380,36 @@ export default function LearnScreen() {
   });
 
   const quoteAnimatedStyle = useAnimatedStyle(() => {
-    const translateY = interpolate(
-      timelineProgress.value,
-      [0, 60, 100],
-      [quoteInitialY, quoteInitialY, 0],
-      'clamp'
-    );
+    const startT = 38;
+    const rawProgress = (timelineProgress.value - startT) / (100 - startT);
+    const clampedProgress = Math.max(0, Math.min(1, rawProgress));
+    // Reduced acceleration (Ease-In-Out Quadratic) for a calming, peaceful motion
+    const easeProgress = clampedProgress < 0.5 
+      ? 2 * clampedProgress * clampedProgress 
+      : 1 - Math.pow(-2 * clampedProgress + 2, 2) / 2;
+
+    const translateY = quoteInitialY - quoteInitialY * easeProgress;
     return {
       transform: [{ translateY }],
     };
   });
 
   const contentAnimatedStyle = useAnimatedStyle(() => {
+    const startT = 38;
+    const rawProgress = (timelineProgress.value - startT) / (100 - startT);
+    const clampedProgress = Math.max(0, Math.min(1, rawProgress));
+    // Reduced acceleration (Ease-In-Out Quadratic) for a calming, peaceful motion
+    const easeProgress = clampedProgress < 0.5 
+      ? 2 * clampedProgress * clampedProgress 
+      : 1 - Math.pow(-2 * clampedProgress + 2, 2) / 2;
+
     const opacity = interpolate(
       timelineProgress.value,
-      [60, 100],
-      [0, 1],
+      [0, startT, 100],
+      [0, 0, 1],
       'clamp'
     );
-    const translateY = interpolate(
-      timelineProgress.value,
-      [60, 100],
-      [30, 0],
-      'clamp'
-    );
+    const translateY = 30 - 30 * easeProgress;
     return {
       opacity,
       transform: [{ translateY }],
@@ -490,15 +497,15 @@ export default function LearnScreen() {
   }, [preferences.weakTopics]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
       {/* Main Scrollable Content */}
       <ScrollView
-        className="flex-1 px-6 pt-6"
+        style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 140 }}
+        contentContainerStyle={{ paddingBottom: 140, paddingHorizontal: 24, paddingTop: 24 }}
         refreshControl={
           <RefreshControl 
-            refreshing={isRefetching || isStatsRefetching} 
+            refreshing={phase === 'settled' && (isRefetching || isStatsRefetching)} 
             onRefresh={handleRefetchAll} 
             tintColor="#8B5CF6" 
             enabled={phase === 'settled'} // Always mounted, only enabled when settled to completely remove ScrollView recreations/flickers
@@ -613,15 +620,9 @@ export default function LearnScreen() {
               
               <Text style={styles.seniorName}>{selectedQuote.author}</Text>
               
-              <View style={styles.detailRow}>
+              <View style={styles.detailsBlock}>
                 <Text style={styles.detailValue}>{selectedQuote.collegeName}</Text>
-              </View>
-              
-              <View style={styles.detailRow}>
                 <Text style={styles.detailValue}>{selectedQuote.branch}</Text>
-              </View>
-              
-              <View style={styles.detailRow}>
                 <Text style={styles.detailValue}>{selectedQuote.yearOfGraduation}</Text>
               </View>
             </View>
@@ -635,7 +636,7 @@ export default function LearnScreen() {
           </Animated.View>
         </Animated.View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -944,18 +945,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 12,
   },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(148, 163, 184, 0.06)',
-  },
-  detailLabel: {
-    color: '#64748B',
-    fontSize: 12,
-    fontWeight: '500',
+  detailsBlock: {
+    gap: 4,
   },
   detailValue: {
     color: '#1E293B',

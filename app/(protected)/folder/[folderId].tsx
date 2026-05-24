@@ -195,16 +195,8 @@ export default function FolderCardsScreen() {
           <ChevronLeft color="#334155" size={24} />
         </TouchableOpacity>
         <View className="flex-1">
-          <Text className="text-slate-900 text-xl font-bold tracking-tight" numberOfLines={1}>
+          <Text className="text-slate-900 font-bold tracking-tight text-3xl" numberOfLines={1}>
             {displayTitle}
-          </Text>
-          <Text className="text-slate-500 text-sm font-semibold">
-            {isLoading || isSubfoldersLoading
-              ? 'Opening...'
-              : subfolders.length > 0
-                ? `${subfolders.length} collections`
-                : `${displayCardCount} cards`
-            }
           </Text>
         </View>
         {hasCardsToRevise && (
@@ -350,9 +342,6 @@ export default function FolderCardsScreen() {
           </View>
         ) : subfolders.length > 0 ? (
           <View className="mt-2">
-            <Text className="text-[#0F172A] text-xs font-bold tracking-wider uppercase mb-4 opacity-50">
-              Sub-Collections
-            </Text>
             {subfolders.map((sub) => (
               <FolderCard
                 key={sub._id}
