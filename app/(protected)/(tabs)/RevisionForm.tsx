@@ -188,6 +188,25 @@ export default function RevisionForm({ control, errors, folders }: RevisionFormP
         />
       </View>
       <FormInput
+        name="explanation"
+        label="Explanation"
+        control={control}
+        error={errors.explanation}
+        placeholder="Type complete concept explanation..."
+        multiline
+        numberOfLines={4}
+      />
+      <FormInput
+        name="code"
+        label="Code Block (optional)"
+        control={control}
+        error={errors.code}
+        placeholder="// Write clean solution code..."
+        multiline
+        numberOfLines={6}
+        autoCapitalize="none"
+      />
+      <FormInput
         name="image"
         label="Image URL (optional)"
         control={control}

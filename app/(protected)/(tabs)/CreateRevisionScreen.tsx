@@ -21,14 +21,13 @@ import {
 import { useGetFolders } from '@/hooks/useFolders';
 import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
 import RevisionForm from './RevisionForm';
-import SlideStudio, { SlideData } from './SlideStudio';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
 
 const cardFormSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters.'),
   topic: z.string().min(2, 'Topic is required.'),
-  explanation: z.string().optional(), // managed inside SlideStudio
+  explanation: z.string().min(10, 'Explanation must be at least 10 characters.'),
   code: z.string().optional(),
   image: z.string().url('Please enter a valid URL.').optional().or(z.literal('')),
   tags: z.string().optional(),
@@ -54,8 +53,6 @@ export default function CreateRevisionScreen() {
   const { data: foldersData } = useGetFolders({ limit: 100 });
   const folders = foldersData?.results ?? [];
   const isEditMode = !!cardId && !!cardToEdit;
-
-  const [slides, setSlides] = useState<SlideData[]>([]);
 
   const resolvedFolderId =
     (typeof cardToEdit?.folderId === 'object'
@@ -86,11 +83,6 @@ export default function CreateRevisionScreen() {
     },
   });
 
-  // Watch metadata fields to sync with SlideStudio preview
-  const watchedTitle = watch('title');
-  const watchedTopic = watch('topic');
-  const watchedDifficulty = watch('difficulty');
-
   React.useEffect(() => {
     if (cardToEdit) {
       reset({
@@ -108,22 +100,6 @@ export default function CreateRevisionScreen() {
             ? cardToEdit.folderId._id
             : String(cardToEdit.folderId),
       });
-
-      // Hydrate slides if editing
-      if (cardToEdit.slides && cardToEdit.slides.length > 0) {
-        setSlides(cardToEdit.slides as any);
-      } else {
-        // Automatically convert old card details to a virtual single-slide layout
-        setSlides([
-          {
-            type: 'intro',
-            headline: cardToEdit.title,
-            body: cardToEdit.explanation,
-            code: cardToEdit.code || '',
-            blocks: [],
-          }
-        ]);
-      }
     } else if (resolvedFolderId) {
       reset((prev) => ({ ...prev, folderId: resolvedFolderId }));
     }
@@ -141,24 +117,28 @@ export default function CreateRevisionScreen() {
       : [];
 
   const onSubmit = (data: CardFormData) => {
-    if (slides.length === 0) {
-      Toast.show({ type: 'error', text1: 'Please create at least one slide in the studio.' });
-      return;
-    }
-
     // Safely compile backend compatible payload
     const submissionData = {
       title: data.title,
       topic: data.topic,
-      explanation: slides[0]?.body || data.title, // safe fallback for backend validation schema
-      code: slides.find((s) => s.code)?.code || undefined, // safe fallback
+      explanation: data.explanation || data.title, // safe fallback for backend validation schema
+      code: data.code || undefined, // safe fallback
       image: data.image || undefined,
       tags: parseList(data.tags),
       examples: parseList(data.examples),
       difficulty: data.difficulty,
       complexity: data.complexity,
       folderId: data.folderId,
-      slides: slides, // save rich multi-slide presentation structure!
+      // Automatically generate a single-slide structure for backwards compatibility
+      slides: [
+        {
+          type: 'intro',
+          headline: data.title,
+          body: data.explanation || data.title,
+          code: data.code || '',
+          blocks: []
+        }
+      ]
     };
 
     const onDone = () => {
@@ -207,19 +187,6 @@ export default function CreateRevisionScreen() {
         
         {/* Core Metadata */}
         <RevisionForm control={control} errors={errors} folders={folders} />
-
-        {/* Slide Building Studio Panel */}
-        {folders.length > 0 && (
-          <SlideStudio
-            slides={slides}
-            onChange={setSlides}
-            cardMetaData={{
-              title: watchedTitle,
-              topic: watchedTopic,
-              difficulty: watchedDifficulty,
-            }}
-          />
-        )}
 
         {/* Save/Submit Action */}
         <TouchableOpacity
