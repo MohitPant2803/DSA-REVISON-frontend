@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import Toast from 'react-native-toast-message';
 
 export function useSyncEngine() {
   const queryClient = useQueryClient();
@@ -40,6 +41,33 @@ export function useSyncEngine() {
         console.log('[Sync Engine] Received delta sync payload:', payload);
 
         const { cards = [], playlists = [], questionProgress = [], progress = [] } = payload.delta || {};
+
+        const hasUpdates = cards.length > 0 || playlists.length > 0 || questionProgress.length > 0 || progress.length > 0;
+
+        if (hasUpdates) {
+          // STATUS: DOWNLOADED/Downloading new updates
+          const updatesMsg = [
+            cards.length > 0 ? `${cards.length} cards` : '',
+            playlists.length > 0 ? `${playlists.length} playlists` : '',
+            questionProgress.length > 0 ? `${questionProgress.length} ratings` : '',
+            progress.length > 0 ? `${progress.length} likes` : ''
+          ].filter(Boolean).join(', ');
+
+          Toast.show({
+            type: 'info',
+            text1: lastSyncedAt ? 'Syncing Local-First Updates' : 'Downloading Local-First Database',
+            text2: `Downloaded: ${updatesMsg}`,
+            visibilityTime: 4000,
+          });
+        } else {
+          // STATUS: ALREADY DOWNLOADED (already fully synced)
+          Toast.show({
+            type: 'success',
+            text1: 'Local-First Synchronized',
+            text2: 'All study data is up-to-date locally.',
+            visibilityTime: 3000,
+          });
+        }
 
         // Hydrate all new/changed cards in Zustand
         if (cards.length > 0) {
@@ -81,6 +109,14 @@ export function useSyncEngine() {
       }
     } catch (error) {
       console.warn('[Sync Engine Background Skip] Connection offline or server queue full. Retrying later.', error);
+      
+      // STATUS: NOT DOWNLOADING (Offline Mode / Handshake Suspended)
+      Toast.show({
+        type: 'error',
+        text1: 'Not Downloading (Offline)',
+        text2: 'Device disconnected. Working on local cached database.',
+        visibilityTime: 4000,
+      });
     }
   }, [
     isAuthenticated,
