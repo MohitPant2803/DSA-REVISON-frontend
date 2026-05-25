@@ -55,6 +55,7 @@ export function useSyncEngine() {
 
           Toast.show({
             type: 'info',
+            position: 'top',
             text1: lastSyncedAt ? 'Syncing Local-First Updates' : 'Downloading Local-First Database',
             text2: `Downloaded: ${updatesMsg}`,
             visibilityTime: 4000,
@@ -63,6 +64,7 @@ export function useSyncEngine() {
           // STATUS: ALREADY DOWNLOADED (already fully synced)
           Toast.show({
             type: 'success',
+            position: 'top',
             text1: 'Local-First Synchronized',
             text2: 'All study data is up-to-date locally.',
             visibilityTime: 3000,
@@ -113,6 +115,7 @@ export function useSyncEngine() {
       // STATUS: NOT DOWNLOADING (Offline Mode / Handshake Suspended)
       Toast.show({
         type: 'error',
+        position: 'top',
         text1: 'Not Downloading (Offline)',
         text2: 'Device disconnected. Working on local cached database.',
         visibilityTime: 4000,
@@ -130,9 +133,13 @@ export function useSyncEngine() {
   ]);
 
   useEffect(() => {
-    // 1. Initial trigger on app startup / authentication
+    // 1. Initial trigger on app startup / authentication with a 2-second delay
+    // to allow the root layout and <Toast /> component to mount and register.
+    let timer: NodeJS.Timeout;
     if (isAuthenticated) {
-      triggerBackgroundSync();
+      timer = setTimeout(() => {
+        triggerBackgroundSync();
+      }, 2000);
     }
 
     // 2. Periodic sync every 60 seconds
@@ -142,7 +149,10 @@ export function useSyncEngine() {
       }
     }, 60000);
 
-    return () => clearInterval(interval);
+    return () => {
+      if (timer) clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, [isAuthenticated, triggerBackgroundSync]);
 
   return { triggerBackgroundSync };
