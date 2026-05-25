@@ -141,7 +141,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ token, isLoading: true });
 
       const { getMe } = require('@/services/authService');
-      const freshUser = await getMe();
+      
+      // Race the server verification against a strict 3.5-second timeout for rapid startup recovery
+      const getMeWithTimeout = Promise.race([
+        getMe(),
+        new Promise<any>((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 3500)
+        )
+      ]);
+
+      const freshUser = await getMeWithTimeout;
       if (!freshUser) {
         await SecureStorage.removeToken();
         await SecureStorage.removeUser();
@@ -154,11 +163,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error: any) {
       console.warn('[Session Recovery] Failed to get fresh user from server:', error);
       
-      const isNetworkError = error.message?.toLowerCase().includes('network') || 
-                            error.message?.toLowerCase().includes('timeout') ||
-                            error.code === 'ERR_NETWORK';
+      const isAuthError = error?.status === 401 || error?.status === 403;
 
-      if (isNetworkError) {
+      if (!isAuthError) {
         // Recover session locally using cached token and user data without kicking out!
         const cachedUser = await SecureStorage.getUser();
         const cachedToken = await SecureStorage.getToken();

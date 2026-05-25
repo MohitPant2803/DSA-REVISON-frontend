@@ -1,4 +1,5 @@
 import api from '@/services/api';
+import { cacheStorage, cacheKey } from '@/lib/cache';
 
 export interface ApiPlaylist {
   _id: string;
@@ -28,9 +29,18 @@ const unwrap = <T,>(response: { data?: { data?: T } & T }): T => {
 };
 
 export const getPlaylists = async (): Promise<ApiPlaylist[]> => {
-  const response = await api.get('/playlists');
-  const payload = unwrap<{ playlists: ApiPlaylist[] }>(response);
-  return payload?.playlists ?? [];
+  const key = cacheKey(['playlists']);
+  try {
+    const response = await api.get('/playlists');
+    const payload = unwrap<{ playlists: ApiPlaylist[] }>(response);
+    const data = payload?.playlists ?? [];
+    await cacheStorage.set(key, data);
+    return data;
+  } catch (error) {
+    const cached = await cacheStorage.get<ApiPlaylist[]>(key);
+    if (cached) return cached;
+    throw error;
+  }
 };
 
 export const createPlaylist = async (data: {
@@ -53,17 +63,26 @@ export const getPlaylistById = async (
   page = 1,
   limit = 100
 ): Promise<PlaylistDetail> => {
-  const response = await api.get(`/playlists/${playlistId}`, {
-    params: { page, limit },
-  });
-  const payload = unwrap<PlaylistDetail & { items?: any[] }>(response);
-  const cardIds = payload.cardIds ?? payload.items?.map((i: any) => typeof i === 'string' ? i : i._id) ?? [];
-  return {
-    playlist: payload.playlist,
-    cardIds,
-    pagination: payload.pagination ?? { total: cardIds.length, page: 1, pages: 1 },
-    items: payload.items,
-  };
+  const key = cacheKey(['playlist', playlistId, page, limit]);
+  try {
+    const response = await api.get(`/playlists/${playlistId}`, {
+      params: { page, limit },
+    });
+    const payload = unwrap<PlaylistDetail & { items?: any[] }>(response);
+    const cardIds = payload.cardIds ?? payload.items?.map((i: any) => typeof i === 'string' ? i : i._id) ?? [];
+    const data = {
+      playlist: payload.playlist,
+      cardIds,
+      pagination: payload.pagination ?? { total: cardIds.length, page: 1, pages: 1 },
+      items: payload.items,
+    };
+    await cacheStorage.set(key, data);
+    return data;
+  } catch (error) {
+    const cached = await cacheStorage.get<PlaylistDetail>(key);
+    if (cached) return cached;
+    throw error;
+  }
 };
 
 export const addToPlaylist = async (playlistId: string, revisionCardId: string): Promise<void> => {

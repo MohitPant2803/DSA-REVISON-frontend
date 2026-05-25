@@ -49,6 +49,7 @@ import { GlassPanel } from '@/components/motion/GlassPanel';
 import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable';
 import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 import api from '@/services/api';
+import { cacheStorage } from '@/lib/cache';
 
 import Animated, {
   useSharedValue,
@@ -61,13 +62,36 @@ import Animated, {
   FadeIn,
   FadeOut,
   FadeInUp,
+  FadeInDown,
   interpolate,
   SharedValue,
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
 
-
+const LOCAL_FALLBACK_QUOTES = [
+  {
+    text: "Consistency beats intensity. Build your foundation step by step, card by card.",
+    author: "Active Recall",
+    collegeName: "DSA Revision",
+    branch: "Computer Science",
+    yearOfGraduation: 2026
+  },
+  {
+    text: "The only way to do great work is to love what you do. Keep looking, don't settle.",
+    author: "Steve Jobs",
+    collegeName: "Stanford University",
+    branch: "Design",
+    yearOfGraduation: 2026
+  },
+  {
+    text: "Success is not final, failure is not fatal: it is the courage to continue that counts.",
+    author: "Winston Churchill",
+    collegeName: "Harvard University",
+    branch: "History",
+    yearOfGraduation: 2026
+  }
+];
 
 // Staggered Chained Card Drag-Chain Momentum Component with Stretch and Compress Physics
 const StaggeredCard = ({
@@ -148,13 +172,24 @@ export default function LearnScreen() {
 
   useEffect(() => {
     const fetchQuotes = async () => {
+      const key = 'senior_quotes';
       try {
         const response = await api.get('/senior-quotes');
         if (response.data?.success && response.data?.data && response.data.data.length > 0) {
           setQuotesList(response.data.data);
+          await cacheStorage.set(key, response.data.data);
+        } else {
+          const cached = await cacheStorage.get<any[]>(key);
+          if (cached && cached.length > 0) {
+            setQuotesList(cached);
+          }
         }
       } catch (err) {
         console.warn('Failed to fetch senior quotes from DB:', err);
+        const cached = await cacheStorage.get<any[]>(key);
+        if (cached && cached.length > 0) {
+          setQuotesList(cached);
+        }
       }
     };
     fetchQuotes();
@@ -162,17 +197,9 @@ export default function LearnScreen() {
 
   // Selected Quote Selection for Ghost Typing - deterministically shifts to the next quote every 12 hours (at 12:00 AM and 12:00 PM)
   const selectedQuote = useMemo(() => {
-    if (!quotesList || quotesList.length === 0) {
-      return {
-        text: "",
-        author: "",
-        collegeName: "",
-        branch: "",
-        yearOfGraduation: 2026
-      };
-    }
+    const list = quotesList && quotesList.length > 0 ? quotesList : LOCAL_FALLBACK_QUOTES;
     const twelveHourIntervals = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
-    return quotesList[twelveHourIntervals % quotesList.length];
+    return list[twelveHourIntervals % list.length];
   }, [quotesList]);
 
   // Explicit cinematic loading phases
@@ -318,7 +345,7 @@ export default function LearnScreen() {
   }, [phase, isTypingComplete, isWarningStarted]);
 
   // 3. State-Driven Loading Check
-  const isDataReady = !isLoading && data !== undefined;
+  const isDataReady = !isLoading || data !== undefined || isError;
 
   useEffect(() => {
     if (phase === 'settled') return;
@@ -600,6 +627,16 @@ export default function LearnScreen() {
               </StaggeredCard>
             );
           })}
+
+          {phase === 'settled' && folders.length === 0 && (
+            <Animated.View entering={FadeInDown.duration(600)} style={styles.emptyStateContainer}>
+              <Activity color="#94A3B8" size={32} strokeWidth={1.5} style={{ marginBottom: 12 }} />
+              <Text style={styles.emptyStateTitle}>Your study journals are empty</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                {isError ? "Connect to the internet to sync and download your journals." : "Create your first revision journal using the 'New journal' button above!"}
+              </Text>
+            </Animated.View>
+          )}
         </View>
       </ScrollView>
 
@@ -984,5 +1021,34 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.08)',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.02,
+    shadowRadius: 12,
+    elevation: 1,
+    marginTop: 20,
+  },
+  emptyStateTitle: {
+    color: '#0F172A',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  emptyStateSubtitle: {
+    color: '#64748B',
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
   },
 });

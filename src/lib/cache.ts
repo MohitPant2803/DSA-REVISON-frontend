@@ -1,19 +1,19 @@
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PREFIX = 'cache_';
 
 export const cacheStorage = {
   async set<T>(key: string, value: T): Promise<void> {
     try {
-      await SecureStore.setItemAsync(`${PREFIX}${key}`, JSON.stringify(value));
-    } catch {
-      // Non-fatal if secure store fails
+      await AsyncStorage.setItem(`${PREFIX}${key}`, JSON.stringify(value));
+    } catch (e) {
+      console.warn('[Cache Storage] AsyncStorage write failure:', e);
     }
   },
 
   async get<T>(key: string): Promise<T | null> {
     try {
-      const raw = await SecureStore.getItemAsync(`${PREFIX}${key}`);
+      const raw = await AsyncStorage.getItem(`${PREFIX}${key}`);
       return raw ? (JSON.parse(raw) as T) : null;
     } catch {
       return null;
@@ -22,7 +22,7 @@ export const cacheStorage = {
 
   async remove(key: string): Promise<void> {
     try {
-      await SecureStore.deleteItemAsync(`${PREFIX}${key}`);
+      await AsyncStorage.removeItem(`${PREFIX}${key}`);
     } catch {
       // ignore
     }
