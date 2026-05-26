@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 import { isNetworkConnected } from '@/utils/network';
+import NetInfo from '@react-native-community/netinfo';
 import { syncTelemetry } from '@/utils/syncTelemetry';
 import { mergeCardState } from '@/utils/resolveCardState';
 import type { IFolder } from '@/types/folder';
@@ -158,10 +159,15 @@ export function useSyncEngine() {
     // 1. Enforce the isAuthReady gate check
     if (!isAuthenticated || !isAuthReady) return;
 
+    // Enforce strictly one sync per session (unless forced)
+    const state = usePlaylistStateStore.getState();
+    if (state.hasSyncedThisSession && !force) {
+      if (__DEV__) console.log('[Sync Engine] Already synced this session. Skipping background sync...');
+      return;
+    }
+
     // 2. Request Deduplication & Coalescing (prevent parallel sweeps)
     if (isSyncInFlight.current) return;
-
-    const state = usePlaylistStateStore.getState();
 
     // 3. Pause sync check (unless forced via Home screen return)
     if (state.isLiveSyncPaused && !force) {
@@ -223,6 +229,9 @@ export function useSyncEngine() {
     const activeGen = state.incrementSyncGeneration();
 
     const startTime = performance.now();
+    let cardsCount = 0;
+    let foldersCount = 0;
+    let playlistsCount = 0;
 
     try {
       // Pre-sync token validity check (Bug 4)
@@ -296,6 +305,18 @@ export function useSyncEngine() {
       const sinceParam = state.lastSyncedAt ? encodeURIComponent(state.lastSyncedAt) : '';
       const response = await api.get(`/sync?since=${sinceParam}`);
 
+      // Proactively sync senior quotes from server to keep local phone cache up-to-date
+      try {
+        if (__DEV__) console.log('[Sync Engine] Syncing senior quotes from server...');
+        const quotesRes = await api.get('/senior-quotes');
+        if (quotesRes.data?.success && quotesRes.data?.data && quotesRes.data.data.length > 0) {
+          usePlaylistStateStore.getState().setSeniorQuotes(quotesRes.data.data);
+          if (__DEV__) console.log(`[Sync Engine] Synced ${quotesRes.data.data.length} senior quotes.`);
+        }
+      } catch (err) {
+        if (__DEV__) console.warn('[Sync Engine] Senior quotes sync failed silently:', err);
+      }
+
       // Stale Snapshot Protection check right at network resolution time!
       const currentState = usePlaylistStateStore.getState();
       if (activeGen !== currentState.syncGenerationId || currentState.isLiveSyncPaused) {
@@ -306,11 +327,50 @@ export function useSyncEngine() {
 
       const payload = response.data?.data;
 
-      let cardsCount = 0;
-      let foldersCount = 0;
-      let playlistsCount = 0;
-
       if (payload) {
+        const serverDbVersion = payload.dbVersion || 'striver-sde-sheet-v1';
+        const currentDbVersion = usePlaylistStateStore.getState().dbVersion;
+        
+        if (currentDbVersion && serverDbVersion !== currentDbVersion) {
+          if (__DEV__) console.warn(`[Sync Engine] DB version mismatch (Server: ${serverDbVersion}, Local: ${currentDbVersion}). Auto-purging stale cache...`);
+          
+          const localQueue = usePlaylistStateStore.getState().offlineActionQueue;
+          usePlaylistStateStore.getState().hardResetStore();
+          
+          usePlaylistStateStore.setState({
+            offlineActionQueue: localQueue,
+            dbVersion: serverDbVersion,
+            lastSyncedAt: null,
+          });
+          
+          isSyncInFlight.current = false;
+          setTimeout(() => {
+            triggerBackgroundSync(true);
+          }, 100);
+          return;
+        }
+
+        if (!currentDbVersion) {
+          usePlaylistStateStore.setState({ dbVersion: serverDbVersion });
+          
+          const existingFoldersCount = Object.keys(usePlaylistStateStore.getState().foldersById).length;
+          if (existingFoldersCount > 0 && serverDbVersion !== 'striver-sde-sheet-v1') {
+            if (__DEV__) console.warn(`[Sync Engine] Existing cache detected without DB version anchor. Purging once to initialize safely under ${serverDbVersion}...`);
+            const localQueue = usePlaylistStateStore.getState().offlineActionQueue;
+            usePlaylistStateStore.getState().hardResetStore();
+            usePlaylistStateStore.setState({
+              offlineActionQueue: localQueue,
+              dbVersion: serverDbVersion,
+              lastSyncedAt: null,
+            });
+            isSyncInFlight.current = false;
+            setTimeout(() => {
+              triggerBackgroundSync(true);
+            }, 100);
+            return;
+          }
+        }
+
         const {
           cards = [],
           folders = [],
@@ -497,6 +557,7 @@ export function useSyncEngine() {
           lastSyncedAt: payload.timestamp || new Date().toISOString(),
           lastSuccessfulSyncAt: Date.now(),
           syncStatus: 'synced',
+          hasSyncedThisSession: true,
         });
 
         resetSyncFailure();
@@ -666,15 +727,17 @@ export function useSyncEngine() {
     }
   }, [isAuthenticated]);
 
-  // App Startup Sync Trigger: Run exactly once when authenticated and ready
+  // App Startup / Manual Reset Sync Trigger: Run when authenticated and ready
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isAuthenticated && isAuthReady && !startupSyncTriggered.current) {
+    const shouldSync = (isAuthenticated && isAuthReady) && (!startupSyncTriggered.current || bootstrapStatus === 'not_started');
+    
+    if (shouldSync) {
       startupSyncTriggered.current = true;
-      if (__DEV__) console.log('[Sync Engine] Cold-start/Resume session detected. Scheduling initial synchronization...');
+      if (__DEV__) console.log('[Sync Engine] Triggering sync sweep...');
       timer = setTimeout(() => {
-        triggerBackgroundSync();
-      }, 1000); // 1-second delay for Zustand state and UI settles
+        triggerBackgroundSync(true); // Force to run even if paused/already synced this session
+      }, 500); // 500ms delay for state and UI to settle
     }
 
     return () => {
@@ -683,6 +746,32 @@ export function useSyncEngine() {
         clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;
       }
+    };
+  }, [isAuthenticated, isAuthReady, bootstrapStatus, triggerBackgroundSync]);
+
+  // Listen for network connectivity transitions to perform delayed session sync
+  useEffect(() => {
+    if (!isAuthenticated || !isAuthReady) return;
+
+    // If already synced this session, do not subscribe to reconnect triggers
+    const state = usePlaylistStateStore.getState();
+    if (state.hasSyncedThisSession) return;
+
+    if (__DEV__) console.log('[Sync Engine] Subscribing to NetInfo reconnection triggers...');
+
+    const unsubscribe = NetInfo.addEventListener((netState) => {
+      const isConnected = netState.isConnected && netState.isInternetReachable !== false;
+      const currentState = usePlaylistStateStore.getState();
+
+      if (isConnected && !currentState.hasSyncedThisSession) {
+        if (__DEV__) console.log('[Sync Engine] Network transition to ONLINE detected. Syncing...');
+        triggerBackgroundSync(true); // force it to run even if paused
+      }
+    });
+
+    return () => {
+      if (__DEV__) console.log('[Sync Engine] Unsubscribing from NetInfo reconnection triggers.');
+      unsubscribe();
     };
   }, [isAuthenticated, isAuthReady, triggerBackgroundSync]);
 

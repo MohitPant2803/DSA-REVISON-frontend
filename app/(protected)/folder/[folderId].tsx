@@ -150,7 +150,7 @@ export default function FolderCardsScreen() {
       pathname: '/(protected)/(tabs)/reels-player',
       params: {
         folderId,
-        ...(startCardId ? { startCardId } : {}),
+        ...(startCardId ? { startCardId } : { shuffle: 'true' }),
         userDifficultyStates: activeFilters.join(','),
       },
     });

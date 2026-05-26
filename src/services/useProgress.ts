@@ -26,16 +26,13 @@ export const useUpdateCardProgress = () => {
 
   return useMutation({
     mutationFn: ({ cardId, action, value }: { cardId: string; action: progressService.ProgressAction; value: boolean }) => {
-      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-        usePlaylistStateStore.getState().enqueueOfflineAction({
-          action: 'TOGGLE_FAVORITE',
-          payload: { cardId, value },
-          timestamp: Date.now()
-        });
-        usePlaylistStateStore.getState().toggleFavoriteInStore(cardId, value);
-        return Promise.resolve({ message: 'offline', offline: true });
-      }
-      return progressService.updateUserProgress(cardId, action, value);
+      usePlaylistStateStore.getState().enqueueOfflineAction({
+        action: 'TOGGLE_FAVORITE',
+        payload: { cardId, value },
+        timestamp: Date.now()
+      });
+      usePlaylistStateStore.getState().toggleFavoriteInStore(cardId, value);
+      return Promise.resolve({ message: 'offline', offline: true });
     },
 
     onMutate: async ({ cardId, action, value }) => {
@@ -185,19 +182,16 @@ export const useUpdatePlaylistMembership = () => {
 
   return useMutation({
     mutationFn: ({ cardId, addToPlaylist, removeFromPlaylist }: { cardId: string; addToPlaylist?: string; removeFromPlaylist?: string }) => {
-      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-        const playlistId = addToPlaylist || removeFromPlaylist;
-        if (playlistId) {
-          usePlaylistStateStore.getState().enqueueOfflineAction({
-            action: 'TOGGLE_PLAYLIST_ITEM',
-            payload: { playlistId, cardId, value: !!addToPlaylist },
-            timestamp: Date.now()
-          });
-          usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, cardId, !!addToPlaylist);
-        }
-        return Promise.resolve({ offline: true });
+      const playlistId = addToPlaylist || removeFromPlaylist;
+      if (playlistId) {
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'TOGGLE_PLAYLIST_ITEM',
+          payload: { playlistId, cardId, value: !!addToPlaylist },
+          timestamp: Date.now()
+        });
+        usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, cardId, !!addToPlaylist);
       }
-      return progressService.updatePlaylistMembership(cardId, addToPlaylist, removeFromPlaylist);
+      return Promise.resolve({ offline: true });
     },
     onMutate: async ({ cardId, addToPlaylist, removeFromPlaylist }) => {
       await queryClient.cancelQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
@@ -266,17 +260,14 @@ export const useUpdateDifficultyState = () => {
 
   return useMutation({
     mutationFn: ({ cardId, difficultyState }: { cardId: string; difficultyState: 'easy' | 'medium' | 'hard' | 'skipped' | null }) => {
-      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-        usePlaylistStateStore.getState().enqueueOfflineAction({
-          action: 'CLASSIFY_CARD',
-          payload: { cardId, state: difficultyState },
-          timestamp: Date.now()
-        });
-        const cardObj = usePlaylistStateStore.getState().cardsById[cardId] || {};
-        usePlaylistStateStore.getState().transferCard(cardId, cardObj, difficultyState);
-        return Promise.resolve({ message: 'offline', offline: true });
-      }
-      return progressService.updateDifficultyState(cardId, difficultyState);
+      usePlaylistStateStore.getState().enqueueOfflineAction({
+        action: 'CLASSIFY_CARD',
+        payload: { cardId, state: difficultyState },
+        timestamp: Date.now()
+      });
+      const cardObj = usePlaylistStateStore.getState().cardsById[cardId] || {};
+      usePlaylistStateStore.getState().transferCard(cardId, cardObj, difficultyState);
+      return Promise.resolve({ message: 'offline', offline: true });
     },
 
     onMutate: async ({ cardId, difficultyState }) => {

@@ -6,6 +6,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import SyntaxHighlighter from 'react-native-syntax-highlighter';
 import { Tag, Code, BookOpen, Heart, BrainCircuit, Edit, Trash2, Archive, ListMusic, MoreVertical, X, Check } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
+import { RichText } from '@/components/RichText';
 
 import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -189,12 +190,50 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
     });
   };
 
+  const renderHeadline = (headline: string) => {
+    if (!headline) return null;
+    if (headline.includes(':')) {
+      const parts = headline.split(':');
+      const category = parts[0].trim();
+      const text = parts.slice(1).join(':').trim();
+      return (
+        <StyledView className="gap-y-1 mt-1">
+          <StyledText className="text-violet-600 text-[10px] font-black uppercase tracking-widest">{category}</StyledText>
+          <StyledText className="text-slate-900 text-[25px] font-black tracking-tight leading-tight">{text}</StyledText>
+        </StyledView>
+      );
+    }
+    return (
+      <StyledText className="text-slate-900 text-[25px] font-black tracking-tight leading-tight mt-1">
+        {headline}
+      </StyledText>
+    );
+  };
+
   return (
     <StyledView className="flex-1 bg-transparent pr-14">
       <StyledView className="flex-1 pt-2 pb-6">
         <StyledScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }} scrollEnabled={scrollEnabled}>
           <StyledView className="gap-y-5">
             
+            {/* Horizontal Segmented Slide Indicator Track */}
+            <StyledView className="flex-row gap-1 w-full mt-1 mb-2">
+              {Array.from({ length: slide.totalSlides }).map((_, i) => {
+                const isActive = i === slide.slideIndex;
+                const isCompleted = i < slide.slideIndex;
+                return (
+                  <StyledView 
+                    key={i} 
+                    className={`h-1 flex-1 rounded-full ${
+                      isActive ? 'bg-violet-600' :
+                      isCompleted ? 'bg-violet-200' :
+                      'bg-slate-100'
+                    }`} 
+                  />
+                );
+              })}
+            </StyledView>
+
             {/* Premium Apple-style Badge Row */}
             <StyledView className="flex-row flex-wrap gap-2 items-center">
               <StyledView className="px-3 py-1 rounded-full bg-violet-50 border border-violet-100/80">
@@ -218,16 +257,16 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
               )}
             </StyledView>
 
-            <StyledText className="text-slate-900 text-[28px] font-extrabold tracking-tighter leading-tight">
-              {slide.headline}
-            </StyledText>
+            {renderHeadline(slide.headline)}
 
             {/* 1. Intro / Cover & 2. Intuition / Explanation slide rendering */}
             {(slide.type === 'intro' || slide.type === 'explanation' || slide.type === 'intuition') && (
               <StyledView className="gap-y-4">
-                <StyledText className="text-slate-600 text-[15px] leading-relaxed">
-                  {slide.body || card.explanation}
-                </StyledText>
+                <RichText
+                  text={slide.body || card.explanation || ''}
+                  style={{ color: '#475569', fontSize: 15, lineHeight: 24 }}
+                  boldStyle={{ color: '#0F172A' }}
+                />
                 
                 {/* Premium Takeaways violet outline summary box */}
                 <StyledView className="bg-violet-50/40 rounded-2xl p-5 border border-violet-200/50 gap-4 mt-2">
@@ -259,49 +298,54 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
 
             {/* 3. Code Walkthrough slide (Progressive Highlights) */}
             {slide.type === 'code' && card.code && (
-              <StyledView className="rounded-2xl border border-slate-800 overflow-hidden shadow-lg bg-[#0B0F19]">
-                {/* macOS Style Mock Header */}
-                <StyledView className="flex-row items-center gap-1.5 px-4 py-3 bg-[#111827] border-b border-slate-800">
-                  <StyledView className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
-                  <StyledView className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
-                  <StyledView className="w-2.5 h-2.5 rounded-full bg-[#10B981]" />
-                  <StyledText className="text-slate-500 font-mono text-[10px] ml-auto">javascript</StyledText>
-                </StyledView>
-                
-                {isCodeLoaded ? (
-                  <SyntaxHighlighter
-                    language="javascript"
-                    style={atomOneDark}
-                    customStyle={{ 
-                      borderRadius: 0, 
-                      padding: 16, 
-                      fontSize: 12, 
-                      lineHeight: 18, 
-                      fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
-                      backgroundColor: '#0B0F19' 
-                    } as any}
-                    // @ts-ignore
-                    CodeTag={CodeText}
-                    // @ts-ignore
-                    PreTag={Platform.OS === 'web' ? 'pre' : View}
-                  >
-                    {card.code}
-                  </SyntaxHighlighter>
-                ) : (
-                  /* Premium macOS Code Mockup Skeleton Placeholder */
-                  <StyledView className="p-6 bg-[#0B0F19] min-h-[180px] gap-y-4">
-                    <StyledView className="flex-row items-center gap-2">
-                      <StyledView className="w-12 h-3.5 bg-slate-800/60 rounded" />
-                      <StyledView className="w-24 h-3.5 bg-slate-800/40 rounded" />
+              (() => {
+                const codeLang = 'cpp';
+                return (
+                  <StyledView className="rounded-2xl border border-slate-800 overflow-hidden shadow-lg bg-[#0B0F19]">
+                    {/* macOS Style Mock Header */}
+                    <StyledView className="flex-row items-center gap-1.5 px-4 py-3 bg-[#111827] border-b border-slate-800">
+                      <StyledView className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
+                      <StyledView className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
+                      <StyledView className="w-2.5 h-2.5 rounded-full bg-[#10B981]" />
+                      <StyledText className="text-slate-500 font-mono text-[10px] ml-auto">{codeLang}</StyledText>
                     </StyledView>
-                    <StyledView className="w-3/4 h-3 bg-slate-800/60 rounded" />
-                    <StyledView className="w-1/2 h-3 bg-slate-800/60 rounded" />
-                    <StyledView className="w-5/6 h-3 bg-slate-800/60 rounded" />
-                    <StyledView className="w-2/3 h-3 bg-slate-800/60 rounded" />
-                    <StyledView className="w-4/5 h-3 bg-slate-800/60 rounded" />
+                    
+                    {isCodeLoaded ? (
+                      <SyntaxHighlighter
+                        language={codeLang}
+                        style={atomOneDark}
+                        customStyle={{ 
+                          borderRadius: 0, 
+                          padding: 16, 
+                          fontSize: 12, 
+                          lineHeight: 18, 
+                          fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+                          backgroundColor: '#0B0F19' 
+                        } as any}
+                        // @ts-ignore
+                        CodeTag={CodeText}
+                        // @ts-ignore
+                        PreTag={Platform.OS === 'web' ? 'pre' : View}
+                      >
+                        {card.code}
+                      </SyntaxHighlighter>
+                    ) : (
+                      /* Premium macOS Code Mockup Skeleton Placeholder */
+                      <StyledView className="p-6 bg-[#0B0F19] min-h-[180px] gap-y-4">
+                        <StyledView className="flex-row items-center gap-2">
+                          <StyledView className="w-12 h-3.5 bg-slate-800/60 rounded" />
+                          <StyledView className="w-24 h-3.5 bg-slate-800/40 rounded" />
+                        </StyledView>
+                        <StyledView className="w-3/4 h-3 bg-slate-800/60 rounded" />
+                        <StyledView className="w-1/2 h-3 bg-slate-800/60 rounded" />
+                        <StyledView className="w-5/6 h-3 bg-slate-800/60 rounded" />
+                        <StyledView className="w-2/3 h-3 bg-slate-800/60 rounded" />
+                        <StyledView className="w-4/5 h-3 bg-slate-800/60 rounded" />
+                      </StyledView>
+                    )}
                   </StyledView>
-                )}
-              </StyledView>
+                );
+              })()
             )}
 
             {/* 4. Dry Run Step Timelines */}
@@ -315,7 +359,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                     <StyledView className="w-5 h-5 rounded-full bg-violet-100 border border-violet-200 justify-center items-center mt-0.5">
                       <StyledText className="text-violet-700 text-[10px] font-black">{i + 1}</StyledText>
                     </StyledView>
-                    <StyledText className="text-slate-700 text-sm leading-relaxed font-mono flex-1">{ex}</StyledText>
+                    <RichText text={ex || ''} style={{ color: '#334155', fontSize: 14, lineHeight: 22, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', flex: 1 }} boldStyle={{ color: '#0F172A' }} />
                   </StyledView>
                 ))}
               </StyledView>
@@ -359,9 +403,11 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                 </StyledView>
                 
                 <StyledView className="bg-slate-50 border border-slate-100 rounded-xl p-4 mt-2">
-                  <StyledText className="text-slate-500 text-[11px] leading-relaxed">
-                    💡 **Note**: Optimal algorithms aim to minimize space complexity to O(1) in-place adjustments, while caching indices if a speed lookup tradeoff is desired.
-                  </StyledText>
+                  <RichText
+                    text="💡 **Note**: Optimal algorithms aim to minimize space complexity to O(1) in-place adjustments, while caching indices if a speed lookup tradeoff is desired."
+                    style={{ color: '#64748B', fontSize: 11, lineHeight: 18 }}
+                    boldStyle={{ color: '#334155' }}
+                  />
                 </StyledView>
               </StyledView>
             )}
@@ -403,9 +449,11 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                     Key Takeaways
                   </StyledText>
                 </StyledView>
-                <StyledText className="text-slate-600 text-[14px] leading-relaxed">
-                  {slide.body || 'Successfully mastered this DSA pattern! Retain this core logic for coding interviews.'}
-                </StyledText>
+                <RichText
+                  text={slide.body || 'Successfully mastered this DSA pattern! Retain this core logic for coding interviews.'}
+                  style={{ color: '#475569', fontSize: 14, lineHeight: 22 }}
+                  boldStyle={{ color: '#0F172A' }}
+                />
               </StyledView>
             )}
           </StyledView>

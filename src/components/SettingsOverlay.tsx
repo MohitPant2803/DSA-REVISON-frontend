@@ -286,6 +286,79 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                 )}
               </TouchableOpacity>
             </View>
+
+            {/* Sync / Content Control Section */}
+            <View style={styles.settingGroup}>
+              <Text style={styles.groupLabel}>Sync</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  lightHaptic();
+                  Alert.alert(
+                    "Refresh Content",
+                    "This will refresh all cards and playlists from the database.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Refresh",
+                        onPress: () => {
+                          try {
+                            const { usePlaylistStateStore } = require('@/store/usePlaylistStateStore');
+                            const storeState = usePlaylistStateStore.getState();
+                            
+                            // Retain local action queue so pending offline modifications aren't destroyed
+                            const offlineQueue = storeState.offlineActionQueue;
+                            
+                            // WIPE local cache entirely
+                            storeState.hardResetStore();
+                            
+                            // Clear lastSyncedAt and dbVersion to force full bootstrap on next sweep
+                            usePlaylistStateStore.setState({
+                              offlineActionQueue: offlineQueue,
+                              lastSyncedAt: null,
+                              dbVersion: null,
+                              hasSyncedThisSession: false,
+                              bootstrapStatus: 'not_started',
+                            });
+
+                            Toast.show({
+                              type: 'success',
+                              text1: 'Content Refreshed',
+                            });
+                            
+                            // Close settings overlay to trigger immediate react-query refetches
+                            onClose();
+                            
+                            // Invalidate React Query caches to boot fresh
+                            const queryClient = useQueryClient();
+                            queryClient.invalidateQueries();
+                          } catch (err) {
+                            console.error('[Manual Refresh Error]', err);
+                            Toast.show({
+                              type: 'error',
+                              text1: 'Refresh Failed',
+                              text2: 'Please restart the app and try again.',
+                            });
+                          }
+                        }
+                      }
+                    ]
+                  );
+                }}
+                activeOpacity={0.8}
+                style={[
+                  styles.authButton,
+                  {
+                    backgroundColor: '#FAF9F7',
+                    borderColor: 'rgba(148, 163, 184, 0.1)',
+                    marginTop: 4,
+                  }
+                ]}
+              >
+                <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#64748B' }}>
+                  Refresh Content
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </Animated.View>
       </View>

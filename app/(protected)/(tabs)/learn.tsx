@@ -76,6 +76,7 @@ let globalHasPlayedLearnAnimation = false;
 let globalQuotesList: any[] = [];
 
 
+
 // Staggered Chained Card Drag-Chain Momentum Component with Stretch and Compress Physics
 const StaggeredCard = ({
   children,
@@ -183,47 +184,54 @@ export default function LearnScreen() {
   const folders = useMemo(() => data?.results ?? [], [data]);
 
   // Explicit cinematic loading phases
-  const [phase, setPhase] = useState<'typing' | 'authorReveal' | 'waitingForContent' | 'contentReady' | 'timeoutWarning' | 'settled'>(globalHasPlayedLearnAnimation ? 'settled' : 'typing');
+  const [phase, setPhase] = useState<'typing' | 'authorReveal' | 'contentReady' | 'settled'>(globalHasPlayedLearnAnimation ? 'settled' : 'typing');
   const [showAuthor, setShowAuthor] = useState(globalHasPlayedLearnAnimation);
   const [isTypingComplete, setIsTypingComplete] = useState(globalHasPlayedLearnAnimation);
-  const [isWarningStarted, setIsWarningStarted] = useState(false);
   const [displayedMessage, setDisplayedMessage] = useState('');
   const [seniorModalVisible, setSeniorModalVisible] = useState(false);
 
-  // Dynamic MongoDB Quote integration
-  const [quotesList, setQuotesList] = useState<any[]>(globalQuotesList);
+  // Dynamic MongoDB Quote integration with Zustand Local-First Persistence
+  const cachedQuotes = usePlaylistStateStore((s) => s.seniorQuotes);
+  const setSeniorQuotes = usePlaylistStateStore((s) => s.setSeniorQuotes);
+  const [quotesList, setQuotesList] = useState<any[]>(cachedQuotes || []);
 
   useEffect(() => {
     const fetchQuotes = async () => {
-      if (globalQuotesList.length > 0) return; // Retrieve from cached global to prevent blank flashes
       try {
-        // Prepend is omitted because api baseURL already concludes with /api
         const response = await api.get('/senior-quotes');
         if (response.data?.success && response.data?.data && response.data.data.length > 0) {
-          globalQuotesList = response.data.data;
-          setQuotesList(globalQuotesList);
+          const freshQuotes = response.data.data;
+          setSeniorQuotes(freshQuotes);
+          setQuotesList(freshQuotes);
         }
       } catch (err) {
-        console.warn('Failed to fetch senior quotes from DB:', err);
+        // Safe silent background catch to comply with offline-first guidelines
       }
     };
     fetchQuotes();
-  }, []);
+  }, [setSeniorQuotes]);
 
-  // Selected Quote Selection for Ghost Typing - deterministically shifts to the next quote every 12 hours (at 12:00 AM and 12:00 PM)
-  const selectedQuote = useMemo(() => {
-    if (!quotesList || quotesList.length === 0) {
-      return {
-        text: "",
-        author: "",
-        collegeName: "",
-        branch: "",
-        yearOfGraduation: 2026
-      };
+  // Selected Quote Selection for Ghost Typing - sequential rotation per user entry
+  const [selectedQuote, setSelectedQuote] = useState<any>(null);
+
+  useEffect(() => {
+    if (selectedQuote || !quotesList || quotesList.length === 0) return;
+
+    const store = usePlaylistStateStore.getState();
+    let index = store.currentQuoteIndex;
+
+    // Safety bounds check: if out of bounds, reset back to 0th index
+    if (index >= quotesList.length || index < 0) {
+      index = 0;
+      usePlaylistStateStore.setState({ currentQuoteIndex: 0 });
     }
-    const twelveHourIntervals = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
-    return quotesList[twelveHourIntervals % quotesList.length];
-  }, [quotesList]);
+
+    const quote = quotesList[index];
+    setSelectedQuote(quote);
+
+    // Increment index so the next app entry shows the next quote
+    store.incrementQuoteIndex(quotesList.length);
+  }, [quotesList, selectedQuote]);
 
   const authorName = selectedQuote?.author || selectedQuote?.name || selectedQuote?.studentName || "Senior Author";
 
@@ -260,9 +268,6 @@ export default function LearnScreen() {
   useEffect(() => {
     // If quotes are not yet loaded from DB, remain completely quiet, clean, and empty
     if (!selectedQuote || !selectedQuote.text) {
-      setDisplayedMessage('');
-      setIsTypingComplete(globalHasPlayedLearnAnimation);
-      timelineProgress.value = globalHasPlayedLearnAnimation ? 100 : 0;
       return;
     }
 
@@ -282,8 +287,8 @@ export default function LearnScreen() {
 
     cursorOpacity.value = withRepeat(
       withSequence(
-        withTiming(0, { duration: 500 }),
-        withTiming(1, { duration: 500 })
+        withTiming(0, { duration: 300 }),
+        withTiming(1, { duration: 300 })
       ),
       -1,
       true
@@ -292,7 +297,6 @@ export default function LearnScreen() {
     let index = 0;
     setDisplayedMessage('');
     setIsTypingComplete(false);
-    setIsWarningStarted(false);
 
     let timer: NodeJS.Timeout;
 
@@ -308,8 +312,8 @@ export default function LearnScreen() {
         const currentProgress = (index / selectedQuote.text.length) * 30;
         timelineProgress.value = currentProgress;
         
-        // Pacing irregularity (timing variation) between 25ms and 55ms
-        const randomDelay = 25 + Math.random() * 30;
+        // Pacing irregularity (timing variation) between 20ms and 50ms for natural human typing feel
+        const randomDelay = 20 + Math.random() * 30;
         timer = setTimeout(typeNextChar, randomDelay);
       } else {
         timelineProgress.value = 30;
@@ -329,46 +333,7 @@ export default function LearnScreen() {
     };
   }, [selectedQuote]);
 
-  // 2. Continuous Typewriter Timeout Warning with Natural Pause
-  useEffect(() => {
-    let isActive = true;
-    let timer: NodeJS.Timeout;
-    
-    if (phase === 'timeoutWarning' && isTypingComplete && !isWarningStarted) {
-      setIsWarningStarted(true);
-      
-      // Natural, patient 1-second pause to imply system waiting calmly
-      timer = setTimeout(() => {
-        if (!isActive) return;
-        
-        const warningText = "  Check your internet connection. Still trying to prepare your workspace...";
-        let index = 0;
-        
-        const typeWarningChar = () => {
-          if (!isActive) return;
-          
-          if (index < warningText.length) {
-            setDisplayedMessage(selectedQuote.text + warningText.substring(0, index + 1));
-            index++;
-            // Dynamic variable pacing for error flow
-            const randomDelay = 30 + Math.random() * 35;
-            timer = setTimeout(typeWarningChar, randomDelay);
-          }
-        };
-        
-        typeWarningChar();
-      }, 1000);
-    }
-
-    return () => {
-      isActive = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [phase, isTypingComplete, isWarningStarted]);
-
   // 3. State-Driven Loading Check
-  const isDataReady = !isLoading && data !== undefined;
-
   useEffect(() => {
     if (phase === 'settled') return;
 
@@ -386,38 +351,16 @@ export default function LearnScreen() {
     if (phase === 'authorReveal') {
       setShowAuthor(true);
       authorOpacity.value = withTiming(1, { 
-        duration: 500, 
+        duration: 400, 
         easing: Easing.out(Easing.ease) 
       });
 
       const timer = setTimeout(() => {
-        if (isDataReady) {
-          setPhase('contentReady');
-        } else {
-          setPhase('waitingForContent');
-        }
-      }, 700); // 500ms fade-in + 200ms pause for calm breathing room
+        setPhase('contentReady');
+      }, 500); // 400ms fade-in + 100ms pause for calm breathing room
 
       return () => clearTimeout(timer);
     }
-  }, [phase, isDataReady]);
-
-  useEffect(() => {
-    if ((phase === 'waitingForContent' || phase === 'timeoutWarning') && isDataReady) {
-      setPhase('contentReady');
-    }
-  }, [isDataReady, phase]);
-
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (phase === 'waitingForContent') {
-      timer = setTimeout(() => {
-        setPhase('timeoutWarning');
-      }, 10000); // 10-second network fallback
-    }
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
   }, [phase]);
 
   // 4. Content Reveal Transition with Premium Easing (Text pulls cards upward)
@@ -425,13 +368,13 @@ export default function LearnScreen() {
     if (phase === 'contentReady') {
       // Luxurious cinematic workspace assembly timeline animation (T = 30 to 100)
       timelineProgress.value = withTiming(100, {
-        duration: 1500, // Reduced pace for a smoother, calmer meditative motion
+        duration: 1400, // Luxurious 1400ms folder reveal animation
         easing: Easing.bezier(0.25, 1, 0.5, 1), // Soothing easeOutCubic curve
       });
 
       const timer = setTimeout(() => {
         setPhase('settled');
-      }, 1500);
+      }, 1400);
 
       return () => clearTimeout(timer);
     }
@@ -600,30 +543,32 @@ export default function LearnScreen() {
           </Animated.Text>
           
           {/* ONE Persistent, continuous Quote block that slides upward with 100% object permanence */}
-          <Animated.View style={[styles.headerQuoteContainer, quoteAnimatedStyle]}>
-            <Text style={styles.greetingSub}>
-              {displayedMessage}
-              {(!isTypingComplete || (phase === 'timeoutWarning' && displayedMessage.length < (selectedQuote.text.length + 72))) && (
-                <Animated.Text style={[styles.cursor, cursorAnimatedStyle]}>|</Animated.Text>
-              )}
-            </Text>
-            
-            {/* Senior Attribution rendered gently to occupy layout space permanently, avoiding folder layout displacement */}
-            <Animated.View 
-              style={[
-                styles.headerAuthorContainer, 
-                authorAnimatedStyle
-              ]}
-              pointerEvents={showAuthor ? 'auto' : 'none'}
-            >
-              <TouchableOpacity 
-                onPress={() => setSeniorModalVisible(true)} 
-                activeOpacity={0.6}
+          {selectedQuote && (
+            <Animated.View style={[styles.headerQuoteContainer, quoteAnimatedStyle]}>
+              <Text style={styles.greetingSub}>
+                {displayedMessage}
+                {!isTypingComplete && (
+                  <Animated.Text style={[styles.cursor, cursorAnimatedStyle]}>|</Animated.Text>
+                )}
+              </Text>
+              
+              {/* Senior Attribution rendered gently to occupy layout space permanently, avoiding folder layout displacement */}
+              <Animated.View 
+                style={[
+                  styles.headerAuthorContainer, 
+                  authorAnimatedStyle
+                ]}
+                pointerEvents={showAuthor ? 'auto' : 'none'}
               >
-                <Text style={styles.headerAuthorText}>— {authorName}</Text>
-              </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={() => setSeniorModalVisible(true)} 
+                  activeOpacity={0.6}
+                >
+                  <Text style={styles.headerAuthorText}>— {authorName}</Text>
+                </TouchableOpacity>
+              </Animated.View>
             </Animated.View>
-          </Animated.View>
+          )}
           
 
         </View>
@@ -643,7 +588,7 @@ export default function LearnScreen() {
 
         {/* Render collections list with staggered drag-chain momentum effects directly in ScrollView to avoid parent clipping and fade delays */}
         <View style={styles.collectionsList}>
-          {isLoading || phase === 'waitingForContent' ? (
+          {isLoading ? (
             <>
               <FolderCardSkeleton />
               <FolderCardSkeleton />
@@ -685,7 +630,7 @@ export default function LearnScreen() {
       />
 
       {/* 3. Senior Details Glassmorphism Overlay */}
-      {seniorModalVisible && (
+      {seniorModalVisible && selectedQuote && (
         <Animated.View 
           entering={FadeIn.duration(300)} 
           exiting={FadeOut.duration(200)} 

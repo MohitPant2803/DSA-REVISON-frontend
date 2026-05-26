@@ -462,7 +462,7 @@ const ReelsActionRail = React.memo(({
       <ClassificationButton
         label="Easy"
         icon={Flame}
-        activeColor="#10B981"
+        activeColor="#22C55E"
         isActive={currentDifficulty === 'easy'}
         onPress={() => onDifficultyStateUpdate('easy')}
         shouldPulse={shouldPulse}
@@ -492,7 +492,7 @@ const ReelsActionRail = React.memo(({
       <ClassificationButton
         label="Skipped"
         icon={SkipForward}
-        activeColor="#64748B"
+        activeColor="#3B82F6"
         isActive={currentDifficulty === 'skipped'}
         onPress={() => onDifficultyStateUpdate('skipped')}
         shouldPulse={shouldPulse}
@@ -1692,11 +1692,51 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   const [page, setPage] = useState(1);
   const [allCards, setAllCards] = useState<string[]>([]);
-  const [navState, setNavState] = useState({ activeIndex: 0, prevIdx: -1 });
-  const activeIndex = navState.activeIndex;
-  const prevIdx = navState.prevIdx;
   const shuffledOrderRef = useRef<string[]>([]);
   const flatListRef = useRef<any>(null);
+
+  const { activePlaylistId: storedPlaylistId, setActivePlaylistId } = useBookmarkStore();
+  const activePlaylistId = isCustomPlayer ? storedPlaylistId : null;
+
+  const [navState, setNavState] = useState(() => {
+    // Pre-calculate initial index on mount to prevent any visual first-card flickering!
+    let targetIndex = 0;
+    if (isCustomPlayer && startCardIdParam) {
+      let ids: string[] = [];
+      const state = usePlaylistStateStore.getState();
+      const folderId = folderIdParam;
+      const playlistId = isCustomPlayer ? storedPlaylistId : null;
+      
+      if (playlistId) {
+        ids = state.playlistCardOrderMap[playlistId] || [];
+        if (ids.length === 0 && state.playlistsById[playlistId]) {
+          ids = state.playlistsById[playlistId].cardIds || state.playlistsById[playlistId].orderedCardIds || [];
+        }
+      } else if (folderId) {
+        const { cardsById } = state;
+        ids = Object.values(cardsById)
+          .filter((c) => {
+            if (!c) return false;
+            const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
+            return fid === folderId || c.rootFolderId === folderId || c.subfolderIds?.includes(folderId);
+          })
+          .sort((a, b) => (a.order || 0) - (b.order || 0))
+          .map((c) => c._id);
+      }
+      
+      const cleanIds = ids.map(id => id.split('-loop-')[0]);
+      const foundIdx = cleanIds.indexOf(startCardIdParam.split('-loop-')[0]);
+      if (foundIdx !== -1) {
+        targetIndex = foundIdx;
+      }
+    }
+    return { activeIndex: targetIndex, prevIdx: -1 };
+  });
+  const activeIndex = navState.activeIndex;
+  const prevIdx = navState.prevIdx;
+
+  const { data: playlists = [] } = usePlaylists();
+  const { data: foldersData } = useGetFolders({ limit: 100 });
 
   const disableScrollNatively = useCallback(() => {
     try {
@@ -1740,11 +1780,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const hasScrolledToInitial = useRef(false);
   const sessionStartCardId = useRef<string | null>(null);
   const recentCardIdsRef = useRef<string[]>([]);
-
-  const { activePlaylistId: storedPlaylistId, setActivePlaylistId } = useBookmarkStore();
-  const activePlaylistId = isCustomPlayer ? storedPlaylistId : null;
-  const { data: playlists = [] } = usePlaylists();
-  const { data: foldersData } = useGetFolders({ limit: 100 });
 
   // Zustand scalable tracking store
   const {
@@ -2019,6 +2054,36 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     })
   );
 
+  // Derived visible limit for progressive rendering to maximize memory/performance
+  const visibleCardsList = useMemo(() => {
+    const totalLength = cardsList.length;
+    if (totalLength <= 20) return cardsList;
+    
+    let limit = 20;
+    if (activeIndex >= 10) {
+      limit = 20 + Math.floor((activeIndex - 10) / 10 + 1) * 10;
+    }
+    
+    // Edge case: If remaining reels < 10, render all remaining reels immediately
+    if (totalLength - limit < 10) {
+      limit = totalLength;
+    }
+    
+    return cardsList.slice(0, limit);
+  }, [cardsList, activeIndex]);
+
+  const activeCardId = cardsList[activeIndex];
+  const activeCardIdClean = activeCardId ? activeCardId.split('-loop-')[0] : null;
+
+  // Reactively subscribe to active card difficultyState so lock unlocks instantly on classification!
+  const isActiveCardClassified = usePlaylistStateStore(
+    useCallback((s) => {
+      if (!activeCardIdClean) return true;
+      const card = s.cardsById[activeCardIdClean];
+      return card ? (card.difficultyState !== null && card.difficultyState !== undefined) : true;
+    }, [activeCardIdClean])
+  );
+
 
   // Reset index 0 on mode changes
   useEffect(() => {
@@ -2042,19 +2107,21 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     }
   }, [activeIndex, cardsList, markCardCompleted, isGuest]);
 
-  // Hydrate watchLater list from backend on mount
+  // Hydrate watchLater list: local-first from persisted tracking store, background-sync from API
   useEffect(() => {
     if (isGuest) return;
-    const fetchWatchLater = async () => {
+    // Local-first: watchLaterCardIds is already persisted in useTrackingStore
+    // Only attempt background API sync if online
+    const syncWatchLater = async () => {
       try {
         const data = await userCardStateService.getWatchLaterCards(1, 100);
         const cardIds = data.results.map((c) => c._id);
         setWatchLater(cardIds);
       } catch (err) {
-        console.error('[Hydrate Watch Later Error]', err);
+        // Offline — tracking store already has persisted watch-later IDs, no action needed
       }
     };
-    fetchWatchLater();
+    syncWatchLater();
   }, [isGuest]);
 
   // Reset standard queries when parameters change
@@ -2065,7 +2132,30 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     if (!activePlaylistId) {
       setPage(1);
       setAllCards([]);
-      setNavState({ activeIndex: 0, prevIdx: -1 });
+      
+      let targetIndex = 0;
+      if (startCardIdParam) {
+        let ids: string[] = [];
+        const state = usePlaylistStateStore.getState();
+        const folderId = folderIdParam;
+        if (folderId) {
+          const { cardsById } = state;
+          ids = Object.values(cardsById)
+            .filter((c) => {
+              if (!c) return false;
+              const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
+              return fid === folderId || c.rootFolderId === folderId || c.subfolderIds?.includes(folderId);
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map((c) => c._id);
+        }
+        const cleanIds = ids.map(id => id.split('-loop-')[0]);
+        const foundIdx = cleanIds.indexOf(startCardIdParam.split('-loop-')[0]);
+        if (foundIdx !== -1) {
+          targetIndex = foundIdx;
+        }
+      }
+      setNavState({ activeIndex: targetIndex, prevIdx: -1 });
     }
   }, [folderIdParam, topicParam, tagsParam, difficultyParam, searchParam, activePlaylistId, startCardIdParam]);
 
@@ -2425,6 +2515,33 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     });
   }, [activePlaylistId]);
 
+  // Immediate local-first seeding: populate allCards from Zustand store on mount
+  // This ensures reels display instantly even when offline, before any network query resolves
+  useEffect(() => {
+    if (activePlaylistId) return; // Playlist mode handled separately by playlistCards
+    if (allCards.length > 0) return; // Already populated
+    
+    const storeState = usePlaylistStateStore.getState();
+    if (!storeState.hasHydrated) return;
+    
+    let localCards = Object.values(storeState.cardsById).filter(Boolean);
+    
+    if (folderIdParam) {
+      localCards = localCards.filter((c) => {
+        const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
+        return fid === folderIdParam || c.rootFolderId === folderIdParam || c.subfolderIds?.includes(folderIdParam);
+      });
+    }
+    
+    const sortedIds = localCards
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map((c) => c._id);
+    
+    if (sortedIds.length > 0) {
+      setAllCards(sortedIds);
+    }
+  }, [activePlaylistId, folderIdParam]);
+
   // Synchronize and merge new/updated API pages to the continuous deck
   useEffect(() => {
     if (activePlaylistId || !data?.results) return;
@@ -2756,11 +2873,15 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     if (index !== activeIndex && index >= 0 && index < cardsList.length) {
       setNavState({ activeIndex: index, prevIdx: activeIndex });
       transitionToCard(index);
+      // Increment manual scroll count strictly on drag completions
+      useTrackingStore.getState().incrementScroll();
     }
   }, [activeIndex, cardsList.length, cardHeight, transitionToCard]);
 
   // Hydration Mount Scrolling
   useEffect(() => {
+    if (sessionLoading) return; // Wait until session has resolved and index has settled!
+    
     if (cardsList.length > 0 && !hasScrolledToInitial.current) {
       if (activeIndex > 0) {
         setTimeout(() => {
@@ -2776,7 +2897,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         hasScrolledToInitial.current = true;
       }
     }
-  }, [cardsList.length, activeIndex]);
+  }, [cardsList.length, activeIndex, sessionLoading]);
 
   // Auto-pop reels-player when switching away to another tab
   useEffect(() => {
@@ -2791,17 +2912,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     return unsubscribe;
   }, [navigation, isCustomPlayer]);
 
-  // Analytics: Track dynamic vertical scrolls
-  const isFirstScrollMount = useRef(true);
-  useEffect(() => {
-    if (isFirstScrollMount.current) {
-      isFirstScrollMount.current = false;
-      return;
-    }
-    if (!hasScrolledToInitial.current) return;
-    
-    useTrackingStore.getState().incrementScroll();
-  }, [activeIndex]);
+  // Analytics: Removed vertical scroll useEffect to avoid programmatic snap duplicates
 
   // Listen to activeIndex changes to sync session, prefetch images, and handle infinite pagination load
   useEffect(() => {
@@ -3029,13 +3140,10 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         {cardsList.length > 0 ? (
           <FlashListElement
             ref={flatListRef}
-            data={cardsList}
+            data={visibleCardsList}
             scrollEnabled={scrollEnabled}
+            initialScrollIndex={activeIndex}
             renderItem={({ item, index }: { item: any; index: number }) => {
-              const activeCardId = cardsList[activeIndex];
-              const activeCardItem = activeCardId ? usePlaylistStateStore.getState().cardsById[activeCardId.split('-loop-')[0]] : null;
-              const isActiveCardClassified = activeCardItem ? (activeCardItem.difficultyState !== null && activeCardItem.difficultyState !== undefined) : true;
-
               return (
                 <ReelsRenderItem
                   cardId={item}

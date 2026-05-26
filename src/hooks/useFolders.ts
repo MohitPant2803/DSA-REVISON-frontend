@@ -10,6 +10,8 @@ import type { QueryFoldersInput } from '@/services/folderService';
 export const useGetFolders = (query?: QueryFoldersInput) => {
   const foldersById = usePlaylistStateStore((s) => s.foldersById);
   const hydrateFolders = usePlaylistStateStore((s) => s.hydrateFolders);
+  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const folderList = useMemo(() => {
     let list = Object.values(foldersById);
@@ -55,10 +57,12 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
         } as PaginatedFolders;
       }
     },
+    enabled: !hasSyncedThisSession && !isGuest,
     staleTime: 1000 * 60,
   });
 
-  const hasLocal = folderList.length > 0;
+  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
+  const hasLocal = hasHydrated;
 
   return {
     data: hasLocal ? {
@@ -79,6 +83,8 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
 export const useGetFolder = (folderId: string | undefined) => {
   const folder = usePlaylistStateStore((s) => folderId ? s.foldersById[folderId] : undefined);
   const hydrateFolders = usePlaylistStateStore((s) => s.hydrateFolders);
+  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const queryResult = useQuery({
     queryKey: ['folders', folderId],
@@ -94,13 +100,15 @@ export const useGetFolder = (folderId: string | undefined) => {
         return folder || null;
       }
     },
-    enabled: !!folderId,
+    enabled: !!folderId && !hasSyncedThisSession && !isGuest,
   });
+
+  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
 
   return {
     data: folder || queryResult.data,
-    isLoading: queryResult.isLoading && !folder,
-    isError: queryResult.isError && !folder,
+    isLoading: queryResult.isLoading && !hasHydrated && !folder,
+    isError: queryResult.isError && !hasHydrated && !folder,
     error: queryResult.error,
     refetch: queryResult.refetch,
   };
@@ -146,24 +154,7 @@ export const useCreateFolder = () => {
         timestamp: Date.now(),
       });
 
-      // 3. Silent background call
-      try {
-        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-          if (__DEV__) console.log('[useCreateFolder] Local-first mode active. Skipping immediate API call.');
-          return tempFolder;
-        }
-        const folder = await folderService.createFolder(dto);
-        usePlaylistStateStore.setState((state) => {
-          const nextFolders = { ...state.foldersById };
-          delete nextFolders[tempId];
-          nextFolders[folder._id] = folder;
-          return { foldersById: nextFolders };
-        });
-        return folder;
-      } catch (error) {
-        if (__DEV__) console.warn('[Offline Mode] Folder created locally. Sync queued.', error);
-        return tempFolder;
-      }
+      return Promise.resolve(tempFolder);
     },
   });
 };
@@ -184,18 +175,7 @@ export const useUpdateFolder = () => {
         timestamp: Date.now(),
       });
 
-      // 3. Silent background call
-      try {
-        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-          if (__DEV__) console.log('[useUpdateFolder] Local-first mode active. Skipping immediate API call.');
-          return { _id: folderId, ...updateData } as IFolder;
-        }
-        const updated = await folderService.updateFolder({ folderId, updateData });
-        return updated;
-      } catch (error) {
-        if (__DEV__) console.warn('[Offline Mode] Folder updated locally. Sync queued.', error);
-        return { _id: folderId, ...updateData } as IFolder;
-      }
+      return Promise.resolve({ _id: folderId, ...updateData } as IFolder);
     },
   });
 };
@@ -216,16 +196,7 @@ export const useDeleteFolder = () => {
         timestamp: Date.now(),
       });
 
-      // 3. Silent background call
-      try {
-        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-          if (__DEV__) console.log('[useDeleteFolder] Local-first mode active. Skipping immediate API call.');
-          return;
-        }
-        await folderService.deleteFolder(folderId);
-      } catch (error) {
-        if (__DEV__) console.warn('[Offline Mode] Folder deleted locally. Sync queued.', error);
-      }
+      return Promise.resolve();
     },
   });
 };

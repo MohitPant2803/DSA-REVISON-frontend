@@ -19,6 +19,8 @@ export type { QueryRevisionCardsInput } from '@/services/revisionService';
 
 // 1. Local-First Hybrid Read hooks for Revision Cards
 export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
+  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
   const cardIds = usePlaylistStateStore(
     useShallow((s) => {
       let list = Object.values(s.cardsById);
@@ -62,10 +64,12 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
         } as any;
       }
     },
+    enabled: !hasSyncedThisSession && !isGuest,
     staleTime: 1000 * 60,
   });
 
-  const hasLocal = cardIds.length > 0;
+  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
+  const hasLocal = hasHydrated;
 
   return {
     data: hasLocal ? {
@@ -90,6 +94,8 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
 export const useGetRevisionCard = (cardId: string | undefined) => {
   const card = usePlaylistStateStore((s) => cardId ? s.cardsById[cardId] : undefined);
   const hydratePlaylistCards = usePlaylistStateStore((s) => s.hydratePlaylistCards);
+  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const queryResult = useQuery({
     queryKey: ['revisionCards', 'detail', cardId],
@@ -105,7 +111,7 @@ export const useGetRevisionCard = (cardId: string | undefined) => {
         return card || null;
       }
     },
-    enabled: !!cardId,
+    enabled: !!cardId && !hasSyncedThisSession && !isGuest,
   });
 
   return {
@@ -124,6 +130,8 @@ export const useGetCardsByFolder = (
 ) => {
   const cardsById = usePlaylistStateStore((s) => s.cardsById);
   const hydratePlaylistCards = usePlaylistStateStore((s) => s.hydratePlaylistCards);
+  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const filteredCards = useMemo(() => {
     if (!folderId) return [];
@@ -156,11 +164,12 @@ export const useGetCardsByFolder = (
         } as PaginatedRevisionCards;
       }
     },
-    enabled: !!folderId,
+    enabled: !!folderId && !hasSyncedThisSession && !isGuest,
     staleTime: 1000 * 30,
   });
 
-  const hasLocal = filteredCards.length > 0;
+  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
+  const hasLocal = hasHydrated;
 
   return {
     data: hasLocal ? {
@@ -221,23 +230,7 @@ export const useCreateRevisionCard = () => {
         timestamp: Date.now(),
       });
 
-      try {
-        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-          if (__DEV__) console.log('[useCreateRevisionCard] Local-first mode active. Skipping immediate API call.');
-          return tempCard;
-        }
-        const card = await revisionService.createRevisionCard(dto);
-        usePlaylistStateStore.setState((state) => {
-          const nextCards = { ...state.cardsById };
-          delete nextCards[tempId];
-          nextCards[card._id] = card;
-          return { cardsById: nextCards };
-        });
-        return card;
-      } catch (error) {
-        if (__DEV__) console.warn('[Offline Mode] Card created locally. Sync queued.', error);
-        return tempCard;
-      }
+      return Promise.resolve(tempCard);
     },
   });
 };
@@ -266,17 +259,7 @@ export const useUpdateRevisionCard = () => {
         timestamp: Date.now(),
       });
 
-      try {
-        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-          if (__DEV__) console.log('[useUpdateRevisionCard] Local-first mode active. Skipping immediate API call.');
-          return { _id: cardId, ...updateData } as any;
-        }
-        const card = await revisionService.updateRevisionCard({ cardId, updateData });
-        return card;
-      } catch (error) {
-        if (__DEV__) console.warn('[Offline Mode] Card updated locally. Sync queued.', error);
-        return { _id: cardId, ...updateData } as any;
-      }
+      return Promise.resolve({ _id: cardId, ...updateData } as any);
     },
   });
 };
@@ -297,15 +280,7 @@ export const useDeleteRevisionCard = () => {
         timestamp: Date.now(),
       });
 
-      try {
-        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
-          if (__DEV__) console.log('[useDeleteRevisionCard] Local-first mode active. Skipping immediate API call.');
-          return;
-        }
-        await revisionService.deleteRevisionCard(cardId);
-      } catch (error) {
-        if (__DEV__) console.warn('[Offline Mode] Card deleted locally. Sync queued.', error);
-      }
+      return Promise.resolve();
     },
   });
 };

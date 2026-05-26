@@ -498,6 +498,8 @@ const AnalyticsStatsRow = React.memo(() => {
   );
 });
 
+
+
 // -------------------------------------------------------------
 // PRIMARY REVISION BRAIN DASHBOARD
 // -------------------------------------------------------------
@@ -541,6 +543,10 @@ export default function PersonalScreen() {
   const [isCreating, setIsCreating] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false);
+  const [isAnalyticsOverlayOpen, setIsAnalyticsOverlayOpen] = useState(false);
+
+  const totalSwipes = useTrackingStore((state) => state.totalSwipes);
+  const totalScrolls = useTrackingStore((state) => state.totalScrolls);
 
   // Custom long-press menu context
   const [selectedPlaylist, setSelectedPlaylist] = useState<any | null>(null);
@@ -777,10 +783,6 @@ export default function PersonalScreen() {
                 Good evening, {user?.name ? user.name.split(' ')[0] : 'Mohit'}
               </Text>
               
-              <Text className="text-[#7F8A9E] text-xs font-semibold mt-1.5 leading-normal">
-                You revised {stats?.totalRevisions ?? 116} cards this week.
-              </Text>
-              
               {/* Dynamic Analytics Stats Row (Isolated to avoid page rerenders) */}
               <AnalyticsStatsRow />
 
@@ -794,9 +796,8 @@ export default function PersonalScreen() {
                 activeOpacity={0.85}
                 className="flex-row items-center px-4 py-2 rounded-full bg-[#8B5CF6] self-start mt-4 justify-between"
               >
-                <Play color="#FFFFFF" size={10} strokeWidth={3.0} fill="#FFFFFF" className="mr-1.5" />
                 <Text className="text-white font-bold text-[11px] tracking-tight">
-                  Continue Revising
+                    Continue Revising
                 </Text>
                 <ChevronRight color="#FFFFFF" size={11} strokeWidth={3.0} className="ml-2" />
               </TouchableOpacity>
@@ -1002,6 +1003,72 @@ export default function PersonalScreen() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {/* SMALL ELEGANT ANALYTICS OVERLAY MODAL */}
+      <Modal
+        visible={isAnalyticsOverlayOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsAnalyticsOverlayOpen(false)}
+      >
+        <Pressable 
+          className="flex-1 bg-black/25 justify-center items-center px-6" 
+          onPress={() => setIsAnalyticsOverlayOpen(false)}
+        >
+          <View 
+            className="bg-white w-full max-w-[280px] rounded-[32px] p-6 border relative overflow-hidden"
+            style={{
+              borderColor: 'rgba(139, 92, 246, 0.15)',
+              shadowColor: '#8B5CF6',
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.06,
+              shadowRadius: 24,
+              elevation: 5,
+            }}
+            onTouchEnd={(e) => e.stopPropagation()}
+          >
+            {/* Decorative top stripe */}
+            <View className="absolute top-0 left-0 right-0 h-1.5 bg-[#8B5CF6]" />
+
+            <Text className="text-[#0B1327] text-base font-black tracking-tight text-center mb-4 mt-2">
+              Revision Activity
+            </Text>
+
+            <View className="gap-4 py-2">
+              <View className="flex-row items-center justify-between bg-[#F5F3FF]/40 border border-[#8B5CF6]/5 rounded-2xl p-4">
+                <View className="flex-row items-center gap-3">
+                  <View className="w-8 h-8 rounded-xl bg-[#F5F3FF] items-center justify-center border border-[#8B5CF6]/10">
+                    <Zap color="#8B5CF6" size={14} strokeWidth={2.5} />
+                  </View>
+                  <Text className="text-sm font-semibold text-[#0B1327]">Total Swipes</Text>
+                </View>
+                <Text className="text-lg font-black text-[#8B5CF6]">{totalSwipes}</Text>
+              </View>
+
+              <View className="flex-row items-center justify-between bg-[#F5F3FF]/40 border border-[#8B5CF6]/5 rounded-2xl p-4">
+                <View className="flex-row items-center gap-3">
+                  <View className="w-8 h-8 rounded-xl bg-[#F5F3FF] items-center justify-center border border-[#8B5CF6]/10">
+                    <ListMusic color="#8B5CF6" size={14} strokeWidth={2.5} />
+                  </View>
+                  <Text className="text-sm font-semibold text-[#0B1327]">Total Scrolls</Text>
+                </View>
+                <Text className="text-lg font-black text-[#8B5CF6]">{totalScrolls}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => {
+                lightHaptic();
+                setIsAnalyticsOverlayOpen(false);
+              }}
+              activeOpacity={0.8}
+              className="w-full mt-4 py-3 rounded-2xl bg-[#8B5CF6] items-center"
+            >
+              <Text className="text-white font-bold text-xs">Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Guest Sign-In Prompt Modal Dialog */}
       <SignInPromptModal

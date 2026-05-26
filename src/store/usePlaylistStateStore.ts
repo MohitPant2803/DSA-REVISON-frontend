@@ -142,6 +142,8 @@ interface PlaylistState {
   setBootstrapStatus: (status: BootstrapStatus) => void;
   syncStatus: 'synced' | 'syncing' | 'offline';
   setSyncStatus: (status: 'synced' | 'syncing' | 'offline') => void;
+  hasSyncedThisSession: boolean;
+  setHasSyncedThisSession: (val: boolean) => void;
 
   // Local-First Sync Coordination flags
   isLiveSyncPaused: boolean;
@@ -231,6 +233,12 @@ interface PlaylistState {
   // Entire Cache Hard Reset for corruption self-healing recovery
   hardResetStore: () => void;
   pruneStaleCache: () => void;
+
+  seniorQuotes: any[];
+  setSeniorQuotes: (quotes: any[]) => void;
+  currentQuoteIndex: number;
+  incrementQuoteIndex: (quotesCount: number) => void;
+  dbVersion: string | null;
 }
 
 const DEFAULT_STATE = {
@@ -238,6 +246,7 @@ const DEFAULT_STATE = {
   bootstrapStatus: 'not_started' as BootstrapStatus,
   syncStatus: 'synced' as 'synced' | 'syncing' | 'offline',
   isLiveSyncPaused: false,
+  hasSyncedThisSession: false,
   syncGenerationId: 0,
   currentRevisionCounter: 0,
   deadLetterQueue: [],
@@ -257,6 +266,18 @@ const DEFAULT_STATE = {
   lastCatalogIntegrityCheck: null,
   syncFailureCount: 0,
   pruneStaleCache: () => {},
+  seniorQuotes: [
+    {
+      _id: "6a13357421b348638d89b061",
+      text: "It's a marathon to be endured, not a sprint to be ran.",
+      author: "Mohit Pant",
+      collegeName: "IIT KGP",
+      branch: "Mining",
+      yearOfGraduation: 2027
+    }
+  ],
+  currentQuoteIndex: 0,
+  dbVersion: null,
 };
 
 export const usePlaylistStateStore = create<PlaylistState>()(
@@ -268,6 +289,16 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       setBootstrapStatus: (status) => set({ bootstrapStatus: status }),
       setSyncStatus: (status) => set({ syncStatus: status }),
       setLiveSyncPaused: (val) => set({ isLiveSyncPaused: val }),
+      setHasSyncedThisSession: (val) => set({ hasSyncedThisSession: val }),
+      setSeniorQuotes: (quotes) => set({ seniorQuotes: quotes }),
+      incrementQuoteIndex: (quotesCount) => {
+        set((state) => {
+          const nextIndex = state.currentQuoteIndex + 1;
+          return {
+            currentQuoteIndex: nextIndex >= quotesCount ? 0 : nextIndex
+          };
+        });
+      },
       incrementSyncGeneration: () => {
         const next = get().syncGenerationId + 1;
         set({ syncGenerationId: next });
@@ -1127,6 +1158,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         hydratedPlaylists: state.hydratedPlaylists,
         initialSmartCounts: state.initialSmartCounts,
         smartPlaylistDeltaCounts: state.smartPlaylistDeltaCounts,
+        seniorQuotes: state.seniorQuotes,
+        currentQuoteIndex: state.currentQuoteIndex,
+        dbVersion: state.dbVersion,
       }),
       migrate: (persistedState: any, version: number) => {
         if (__DEV__) console.log(`[Schema Migration] Migrating from version ${version} to 2`);

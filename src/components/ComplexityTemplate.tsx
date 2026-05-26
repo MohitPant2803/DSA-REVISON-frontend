@@ -1,9 +1,10 @@
 // src/components/ComplexityTemplate.tsx
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
+import { RichText } from '@/components/RichText';
 
 export const ComplexityTemplate = ({ headline, body }: any) => (
   <View className="flex-1">
-    <Text className="text-slate-600 text-base leading-relaxed font-medium">{body}</Text>
+    <RichText text={body || ''} style={{ color: '#475569', fontSize: 16, lineHeight: 24, fontWeight: '500' }} boldStyle={{ color: '#0F172A' }} />
   </View>
-);
+);
