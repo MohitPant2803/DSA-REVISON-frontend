@@ -21,7 +21,7 @@ export function useCardDifficulty(cardId: string): DifficultyState {
  * Dynamically computes smart/custom playlist lengths in O(1) derived from normalized state.
  * Rerenders ONLY when count changes.
  */
-export function usePlaylistCount(playlistId: string): number {
+export function usePlaylistCount(playlistId: string): number | undefined {
   return usePlaylistStateStore(
     useShallow(
       useCallback((state) => {
@@ -29,13 +29,13 @@ export function usePlaylistCount(playlistId: string): number {
         if (!isSmart) {
           const order = state.playlistCardOrderMap[playlistId];
           if (order === undefined) {
-            return state.initialSmartCounts[playlistId] || 0;
+            return undefined;
           }
           return order.length;
         }
         
-        // If the smart playlist is hydrated, return the exact unique cards count inside
-        if (state.hydratedPlaylists[playlistId]) {
+        // Helper to compute live unique count from cache
+        const getLiveCount = () => {
           const cardDifficultyMap = state.cardDifficultyMap;
           const resolved = Object.keys(state.cardsById)
             .map((cardId) => state.cardsById[cardId])
@@ -53,11 +53,21 @@ export function usePlaylistCount(playlistId: string): number {
           });
 
           return uniqueResolved.length;
+        };
+
+        // If the smart playlist is hydrated, return the exact unique cards count inside
+        if (state.hydratedPlaylists[playlistId]) {
+          return getLiveCount();
         }
         
-        const initial = state.initialSmartCounts[playlistId] || 0;
-        const delta = state.smartPlaylistDeltaCounts[playlistId] || 0;
-        return Math.max(0, initial + delta);
+        const liveCount = getLiveCount();
+        const fallbackCount = Math.max(0, (state.initialSmartCounts[playlistId] || 0) + (state.smartPlaylistDeltaCounts[playlistId] || 0));
+        
+        // Self-healing: if live cache has cards, prioritize live count correctness
+        if (liveCount > 0 && (liveCount >= fallbackCount || fallbackCount === 0)) {
+          return liveCount;
+        }
+        return fallbackCount;
       }, [playlistId])
     )
   );

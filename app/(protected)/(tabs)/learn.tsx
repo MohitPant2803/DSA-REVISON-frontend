@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,7 @@ import {
   Skull,
   Activity,
 } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { useRole } from '@/hooks/useRole';
@@ -40,7 +40,6 @@ import { useFolderLoops } from '@/services/useUserProgress';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { usePlaylists } from '@/hooks/usePlaylists';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
-import { useBiometricReauth } from '@/hooks/useBiometricReauth';
 import { theme } from '@/theme';
 import { FolderCard } from '@/components/FolderCard';
 import { FolderFormModal } from '@/components/FolderFormModal';
@@ -149,10 +148,15 @@ const FolderCardSkeleton = () => {
 
 export default function LearnScreen() {
   useAppBackHandler();
+  const resumeSyncGate = usePlaylistStateStore((s) => s.resumeSyncGate);
+  useFocusEffect(
+    useCallback(() => {
+      resumeSyncGate?.();
+    }, [resumeSyncGate])
+  );
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, isSessionExpired } = useAuthStore();
-  const { triggerBiometricReauth } = useBiometricReauth();
+  const { user } = useAuthStore();
   const { preferences } = useOnboardingStore();
   const { canManageContent, role } = useRole();
   const { setHasAppBeenAnimated } = useUIStore();
@@ -234,12 +238,14 @@ export default function LearnScreen() {
 
   // Reveal senior author gently exactly 0.5s after animations settle
   useEffect(() => {
-    if (phase === 'settled') {
+    if (phase === 'authorReveal' || phase === 'contentReady' || phase === 'settled') {
       setHasAppBeenAnimated(true);
-      if (!globalHasPlayedLearnAnimation) {
+      if (phase === 'settled' && !globalHasPlayedLearnAnimation) {
         globalHasPlayedLearnAnimation = true;
       }
-    } else if (globalHasPlayedLearnAnimation) {
+    }
+
+    if (globalHasPlayedLearnAnimation) {
       setShowAuthor(true);
       authorOpacity.value = 1;
     } else if (phase === 'authorReveal' || phase === 'contentReady') {
@@ -314,7 +320,7 @@ export default function LearnScreen() {
     // Soft delay before start typing
     const startDelay = setTimeout(() => {
       if (isActive) typeNextChar();
-    }, 400);
+    }, 0);
 
     return () => {
       isActive = false;
@@ -380,7 +386,7 @@ export default function LearnScreen() {
     if (phase === 'authorReveal') {
       setShowAuthor(true);
       authorOpacity.value = withTiming(1, { 
-        duration: 800, 
+        duration: 500, 
         easing: Easing.out(Easing.ease) 
       });
 
@@ -390,7 +396,7 @@ export default function LearnScreen() {
         } else {
           setPhase('waitingForContent');
         }
-      }, 1100); // 800ms fade-in + 300ms pause for calm breathing room
+      }, 700); // 500ms fade-in + 200ms pause for calm breathing room
 
       return () => clearTimeout(timer);
     }
@@ -419,13 +425,13 @@ export default function LearnScreen() {
     if (phase === 'contentReady') {
       // Luxurious cinematic workspace assembly timeline animation (T = 30 to 100)
       timelineProgress.value = withTiming(100, {
-        duration: 2500, // Reduced pace for a smoother, calmer meditative motion
+        duration: 1500, // Reduced pace for a smoother, calmer meditative motion
         easing: Easing.bezier(0.25, 1, 0.5, 1), // Soothing easeOutCubic curve
       });
 
       const timer = setTimeout(() => {
         setPhase('settled');
-      }, 2500);
+      }, 1500);
 
       return () => clearTimeout(timer);
     }
@@ -619,60 +625,7 @@ export default function LearnScreen() {
             </Animated.View>
           </Animated.View>
           
-          {/* Soft Session Expired warning banner */}
-          {isSessionExpired && (
-            <Animated.View 
-              entering={FadeInUp.duration(400)}
-              exiting={FadeOut.duration(300)}
-              style={{
-                backgroundColor: '#FEF3C7',
-                borderRadius: 16,
-                borderWidth: 1,
-                borderColor: '#FCD34D',
-                padding: 16,
-                marginTop: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                width: '100%',
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#78350F' }}>
-                  Sync Suspended
-                </Text>
-                <Text style={{ fontSize: 11, fontWeight: '500', color: '#92400E', marginTop: 2 }}>
-                  Your session expired. Verify your identity to resume progress backup.
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={async () => {
-                  const success = await triggerBiometricReauth();
-                  if (!success) {
-                    Alert.alert('Authentication Required', 'Please sign in to continue.', [
-                      { text: 'Sign In', onPress: async () => {
-                          const { logout } = useAuthStore.getState();
-                          await logout();
-                          router.replace('/(auth)/login');
-                        }
-                      },
-                      { text: 'Cancel', style: 'cancel' }
-                    ]);
-                  }
-                }}
-                style={{
-                  backgroundColor: '#78350F',
-                  paddingVertical: 8,
-                  paddingHorizontal: 12,
-                  borderRadius: 12,
-                }}
-              >
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
-                  Unlock
-                </Text>
-              </TouchableOpacity>
-            </Animated.View>
-          )}
+
         </View>
 
         {/* Section Header Row softly fades and slides upward */}

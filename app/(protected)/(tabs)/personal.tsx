@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import Animated, { FadeInUp, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
@@ -40,6 +40,8 @@ import { MySpaceSettingsOverlay } from '@/components/SettingsOverlay';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useTrackingStore } from '@/store/useTrackingStore';
+import { SyncPauseGate } from '@/components/SyncPauseGate';
 import { usePlaylistCount } from '@/hooks/usePlaylistStoreSelectors';
 import { useBiometricReauth } from '@/hooks/useBiometricReauth';
 import { theme } from '@/theme';
@@ -458,6 +460,45 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
 });
 
 // -------------------------------------------------------------
+// MEMOIZED ANALYTICS STATISTICS ROW (PREVENTS RERENDERS)
+// -------------------------------------------------------------
+const AnalyticsStatsRow = React.memo(() => {
+  const totalSwipes = useTrackingStore((state) => state.totalSwipes);
+  const totalScrolls = useTrackingStore((state) => state.totalScrolls);
+
+  // Compact formatter following exact rules:
+  // - 999 -> 999
+  // - 1000 -> 1K
+  // - 1200 -> 1.2K
+  // - 10000 -> 10K
+  // - 1250000 -> 1.2M
+  // Truncates to 1 decimal place and strips trailing .0
+  const formatCompact = (num: number): string => {
+    if (num < 1000) return num.toString();
+    if (num < 1000000) {
+      const val = Math.floor((num / 1000) * 10) / 10;
+      return `${val}K`;
+    }
+    const val = Math.floor((num / 1000000) * 10) / 10;
+    return `${val}M`;
+  };
+
+  return (
+    <View className="flex-row items-center gap-4 mt-3 mb-1">
+      <View>
+        <Text className="text-[10px] font-bold text-[#7F8A9E] uppercase tracking-wider">Swipes</Text>
+        <Text className="text-base font-extrabold text-[#8B5CF6]">{formatCompact(totalSwipes)}</Text>
+      </View>
+      <View style={{ width: 1, height: 16, backgroundColor: '#E2E8F0' }} />
+      <View>
+        <Text className="text-[10px] font-bold text-[#7F8A9E] uppercase tracking-wider">Scrolls</Text>
+        <Text className="text-base font-extrabold text-[#8B5CF6]">{formatCompact(totalScrolls)}</Text>
+      </View>
+    </View>
+  );
+});
+
+// -------------------------------------------------------------
 // PRIMARY REVISION BRAIN DASHBOARD
 // -------------------------------------------------------------
 export default function PersonalScreen() {
@@ -466,6 +507,8 @@ export default function PersonalScreen() {
   const { user, logout, isSessionExpired } = useAuthStore();
   const { triggerBiometricReauth } = useBiometricReauth();
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
+
+  // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
 
   const { data: playlists = [], isLoading: playlistsLoading, isError: playlistsError, refetch } = usePlaylists();
   const { data: stats, isLoading: statsLoading } = useDashboard();
@@ -515,10 +558,10 @@ export default function PersonalScreen() {
         const p = playlists.find(pl => pl.id === id);
         if (!p) return undefined;
         let count = p.itemCount ?? 0;
-        if (id === 'easy') count = easyCount;
-        else if (id === 'medium') count = mediumCount;
-        else if (id === 'hard') count = hardCount;
-        else if (id === 'skipped') count = skippedCount;
+        if (id === 'easy') count = easyCount ?? 0;
+        else if (id === 'medium') count = mediumCount ?? 0;
+        else if (id === 'hard') count = hardCount ?? 0;
+        else if (id === 'skipped') count = skippedCount ?? 0;
         return {
           ...p,
           itemCount: count,
@@ -634,6 +677,7 @@ export default function PersonalScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
+      <SyncPauseGate />
       
       {/* Sleek Minimalist Background Ambient Orbs */}
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', zIndex: -1 }}>
@@ -702,60 +746,7 @@ export default function PersonalScreen() {
             </View>
           </View>
 
-          {/* Soft Session Expired warning banner */}
-          {isSessionExpired && (
-            <Animated.View 
-              entering={FadeInUp.duration(400)}
-              exiting={FadeOut.duration(300)}
-              style={{
-                backgroundColor: '#FEF3C7',
-                borderRadius: 16,
-                borderWidth: 1,
-                borderColor: '#FCD34D',
-                padding: 16,
-                marginTop: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                width: '100%',
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#78350F' }}>
-                  Sync Suspended
-                </Text>
-                <Text style={{ fontSize: 11, fontWeight: '500', color: '#92400E', marginTop: 2 }}>
-                  Your session expired. Verify your identity to resume progress backup.
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={async () => {
-                  const success = await triggerBiometricReauth();
-                  if (!success) {
-                    Alert.alert('Authentication Required', 'Please sign in to continue.', [
-                      { text: 'Sign In', onPress: async () => {
-                          const { logout } = useAuthStore.getState();
-                          await logout();
-                          router.replace('/(auth)/login');
-                        }
-                      },
-                      { text: 'Cancel', style: 'cancel' }
-                    ]);
-                  }
-                }}
-                style={{
-                  backgroundColor: '#78350F',
-                  paddingVertical: 8,
-                  paddingHorizontal: 12,
-                  borderRadius: 12,
-                }}
-              >
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
-                  Unlock
-                </Text>
-              </TouchableOpacity>
-            </Animated.View>
-          )}
+
         </View>
 
         {/* ==========================================
@@ -789,7 +780,11 @@ export default function PersonalScreen() {
               <Text className="text-[#7F8A9E] text-xs font-semibold mt-1.5 leading-normal">
                 You revised {stats?.totalRevisions ?? 116} cards this week.
               </Text>
-              <Text className="text-[#7F8A9E] text-xs font-semibold leading-normal">
+              
+              {/* Dynamic Analytics Stats Row (Isolated to avoid page rerenders) */}
+              <AnalyticsStatsRow />
+
+              <Text className="text-[#7F8A9E] text-xs font-semibold leading-normal mt-1">
                 Let's keep the flow going.
               </Text>
 

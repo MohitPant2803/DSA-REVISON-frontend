@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { InteractionManager } from 'react-native';
 import { storageEngine } from '../utils/StorageEngine';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import { useTrackingStore } from './useTrackingStore';
@@ -23,6 +24,8 @@ export interface OfflineAction {
     | 'UPDATE_FOLDER';
   payload: any;
   timestamp: number;
+  retryCount?: number;
+  localRevision?: number;
 }
 
 export type DifficultyState = 'easy' | 'medium' | 'hard' | 'skipped' | null;
@@ -32,9 +35,104 @@ export interface LocalCardState {
   originalDifficulty: DifficultyState;
   updatedAt: number;
   optimistic: boolean;
+  dirty?: boolean;
+  localRevision?: number;
 }
 
 export type BootstrapStatus = 'not_started' | 'in_progress' | 'completed' | 'failed';
+
+// Action-Aware Entity Compression Helper Function
+export function compressQueue(queue: OfflineAction[]): OfflineAction[] {
+  const output: OfflineAction[] = [];
+  const activeClassifications = new Map<string, OfflineAction>();
+  const activeFavorites = new Map<string, OfflineAction>();
+  const activePlaylistItems = new Map<string, OfflineAction>();
+  const activePlaylistReorders = new Map<string, OfflineAction>();
+  const folderCreates = new Map<string, OfflineAction>(); // tempFolderId -> CREATE_FOLDER action
+  const folderDeletes = new Set<string>(); // folderId deleted
+  const playlistCreates = new Map<string, OfflineAction>(); // tempPlaylistId -> CREATE_PLAYLIST action
+  const playlistDeletes = new Set<string>(); // playlistId deleted
+  
+  for (const action of queue) {
+    const act = action.action;
+    const payload = action.payload;
+    
+    if (act === 'CLASSIFY_CARD') {
+      activeClassifications.set(payload.cardId, action);
+    } else if (act === 'TOGGLE_FAVORITE') {
+      activeFavorites.set(payload.cardId, action);
+    } else if (act === 'TOGGLE_PLAYLIST_ITEM') {
+      const key = `${payload.playlistId}-${payload.cardId}`;
+      activePlaylistItems.set(key, action);
+    } else if (act === 'REORDER_PLAYLIST') {
+      activePlaylistReorders.set(payload.playlistId, action);
+    } else if (act === 'CREATE_FOLDER') {
+      folderCreates.set(payload.tempId, action);
+    } else if (act === 'DELETE_FOLDER') {
+      const fId = payload.folderId;
+      if (folderCreates.has(fId)) {
+        folderCreates.delete(fId);
+      } else {
+        folderDeletes.add(fId);
+      }
+    } else if (act === 'CREATE_PLAYLIST') {
+      playlistCreates.set(payload.tempId, action);
+    } else if (act === 'DELETE_PLAYLIST') {
+      const pId = payload.playlistId;
+      if (playlistCreates.has(pId)) {
+        playlistCreates.delete(pId);
+      } else {
+        playlistDeletes.add(pId);
+      }
+    } else {
+      output.push(action);
+    }
+  }
+  
+  const finalQueue: OfflineAction[] = [];
+  folderCreates.forEach(a => finalQueue.push(a));
+  playlistCreates.forEach(a => finalQueue.push(a));
+  
+  for (const action of queue) {
+    const act = action.action;
+    const payload = action.payload;
+    
+    if (act === 'CLASSIFY_CARD') {
+      if (activeClassifications.get(payload.cardId) === action) {
+        finalQueue.push(action);
+      }
+    } else if (act === 'TOGGLE_FAVORITE') {
+      if (activeFavorites.get(payload.cardId) === action) {
+        finalQueue.push(action);
+      }
+    } else if (act === 'TOGGLE_PLAYLIST_ITEM') {
+      const key = `${payload.playlistId}-${payload.cardId}`;
+      if (activePlaylistItems.get(key) === action) {
+        finalQueue.push(action);
+      }
+    } else if (act === 'REORDER_PLAYLIST') {
+      if (activePlaylistReorders.get(payload.playlistId) === action) {
+        finalQueue.push(action);
+      }
+    } else if (act === 'DELETE_FOLDER') {
+      if (folderDeletes.has(payload.folderId)) {
+        finalQueue.push(action);
+        folderDeletes.delete(payload.folderId);
+      }
+    } else if (act === 'DELETE_PLAYLIST') {
+      if (playlistDeletes.has(payload.playlistId)) {
+        finalQueue.push(action);
+        playlistDeletes.delete(payload.playlistId);
+      }
+    } else if (act !== 'CREATE_FOLDER' && act !== 'CREATE_PLAYLIST') {
+      if (output.includes(action)) {
+        finalQueue.push(action);
+      }
+    }
+  }
+  
+  return finalQueue.sort((a, b) => a.timestamp - b.timestamp);
+}
 
 interface PlaylistState {
   // Hydration Gate & Status Boundaries
@@ -45,10 +143,20 @@ interface PlaylistState {
   syncStatus: 'synced' | 'syncing' | 'offline';
   setSyncStatus: (status: 'synced' | 'syncing' | 'offline') => void;
 
+  // Local-First Sync Coordination flags
+  isLiveSyncPaused: boolean;
+  setLiveSyncPaused: (val: boolean) => void;
+  syncGenerationId: number;
+  incrementSyncGeneration: () => number;
+  currentRevisionCounter: number;
+  deadLetterQueue: OfflineAction[];
+  pauseSyncGate: (() => void) | null;
+  resumeSyncGate: (() => void) | null;
+
   // Authoritative Cache Entities
-  foldersById: Record<string, IFolder>;
-  playlistsById: Record<string, ApiPlaylist>;
-  cardsById: Record<string, IPopulatedRevisionCard>;
+  foldersById: Record<string, IFolder & { dirty?: boolean; localRevision?: number }>;
+  playlistsById: Record<string, ApiPlaylist & { dirty?: boolean; localRevision?: number }>;
+  cardsById: Record<string, IPopulatedRevisionCard & { dirty?: boolean; localRevision?: number }>;
   
   // Interactive Mappings
   cardDifficultyMap: Record<string, LocalCardState>;
@@ -103,6 +211,9 @@ interface PlaylistState {
   offlineActionQueue: OfflineAction[];
   enqueueOfflineAction: (action: Omit<OfflineAction, 'id'>) => void;
   clearOfflineActions: () => void;
+  removeProcessedActions: (processedIds: string[]) => void;
+  isolatePoisonActions: (failedIds: string[]) => void;
+  compressOfflineQueue: () => void;
   lastSyncedAt: string | null;
   setLastSyncedAt: (timestamp: string) => void;
 
@@ -115,15 +226,23 @@ interface PlaylistState {
   createFolderInStore: (folder: IFolder) => void;
   deleteFolderInStore: (folderId: string) => void;
   updateFolderInStore: (folderId: string, updateData: Partial<IFolder>) => void;
+  deleteCardInStore: (cardId: string) => void;
   
   // Entire Cache Hard Reset for corruption self-healing recovery
   hardResetStore: () => void;
+  pruneStaleCache: () => void;
 }
 
 const DEFAULT_STATE = {
   hasHydrated: false,
   bootstrapStatus: 'not_started' as BootstrapStatus,
   syncStatus: 'synced' as 'synced' | 'syncing' | 'offline',
+  isLiveSyncPaused: false,
+  syncGenerationId: 0,
+  currentRevisionCounter: 0,
+  deadLetterQueue: [],
+  pauseSyncGate: null,
+  resumeSyncGate: null,
   foldersById: {},
   playlistsById: {},
   cardsById: {},
@@ -137,6 +256,7 @@ const DEFAULT_STATE = {
   lastSuccessfulSyncAt: null,
   lastCatalogIntegrityCheck: null,
   syncFailureCount: 0,
+  pruneStaleCache: () => {},
 };
 
 export const usePlaylistStateStore = create<PlaylistState>()(
@@ -147,6 +267,12 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       setHasHydrated: (val) => set({ hasHydrated: val }),
       setBootstrapStatus: (status) => set({ bootstrapStatus: status }),
       setSyncStatus: (status) => set({ syncStatus: status }),
+      setLiveSyncPaused: (val) => set({ isLiveSyncPaused: val }),
+      incrementSyncGeneration: () => {
+        const next = get().syncGenerationId + 1;
+        set({ syncGenerationId: next });
+        return next;
+      },
       incrementSyncFailure: () => set((state) => ({ syncFailureCount: state.syncFailureCount + 1 })),
       resetSyncFailure: () => set({ syncFailureCount: 0 }),
       setLastSuccessfulSyncAt: (timestamp) => set({ lastSuccessfulSyncAt: timestamp }),
@@ -234,7 +360,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       setPlaylistCardOrder: (playlistId, cardIds) => {
         set((state) => {
           const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
-          nextPlaylistCardOrderMap[playlistId] = cardIds.map(id => id.split('-loop-')[0]).filter(Boolean);
+          const cleanIds = cardIds.map(id => id.split('-loop-')[0]).filter(Boolean);
+          nextPlaylistCardOrderMap[playlistId] = cleanIds;
+
+          const nextPlaylists = { ...state.playlistsById };
+          if (nextPlaylists[playlistId]) {
+            const nextRev = state.currentRevisionCounter + 1;
+            nextPlaylists[playlistId] = {
+              ...nextPlaylists[playlistId],
+              cardIds: cleanIds,
+              orderedCardIds: cleanIds,
+              dirty: true,
+              localRevision: nextRev,
+            };
+            return {
+              playlistCardOrderMap: nextPlaylistCardOrderMap,
+              playlistsById: nextPlaylists,
+              currentRevisionCounter: nextRev,
+            };
+          }
 
           return {
             playlistCardOrderMap: nextPlaylistCardOrderMap,
@@ -244,6 +388,21 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       hydrateCustomPlaylistOrder: (playlistId, cardIds) => {
         set((state) => {
+          const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+          if (isSmart) return {};
+
+          const isHydrated = state.hydratedPlaylists[playlistId];
+          const isDirty = state.playlistsById[playlistId]?.dirty;
+          const hasPending = state.offlineActionQueue.some(
+            (a) =>
+              (a.action === 'TOGGLE_PLAYLIST_ITEM' && a.payload?.playlistId === playlistId) ||
+              (a.action === 'REORDER_PLAYLIST' && a.payload?.playlistId === playlistId)
+          );
+
+          if (isHydrated || isDirty || hasPending) {
+            return {};
+          }
+
           const cleanIds = cardIds.map(id => id.split('-loop-')[0]).filter(Boolean);
           const nextPlaylistCardOrderMap = {
             ...state.playlistCardOrderMap,
@@ -264,10 +423,13 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         set((state) => {
           const cleanId = cardId.split('-loop-')[0];
           const nextCardsById = { ...state.cardsById };
+          const nextRev = state.currentRevisionCounter + 1;
           if (nextCardsById[cleanId]) {
             nextCardsById[cleanId] = {
               ...nextCardsById[cleanId],
               isFavorite: value,
+              dirty: true,
+              localRevision: nextRev,
             };
           }
           const currentList = state.playlistCardOrderMap['likes'] || [];
@@ -286,6 +448,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           return {
             cardsById: nextCardsById,
             playlistCardOrderMap: nextPlaylistCardOrderMap,
+            currentRevisionCounter: nextRev,
           };
         });
       },
@@ -294,10 +457,13 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         set((state) => {
           const cleanId = cardId.split('-loop-')[0];
           const nextCardsById = { ...state.cardsById };
+          const nextRev = state.currentRevisionCounter + 1;
           if (nextCardsById[cleanId]) {
             nextCardsById[cleanId] = {
               ...nextCardsById[cleanId],
               isWatchLater: value,
+              dirty: true,
+              localRevision: nextRev,
             } as any;
           }
           const currentList = state.playlistCardOrderMap['watch-later'] || [];
@@ -324,6 +490,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           return {
             cardsById: nextCardsById,
             playlistCardOrderMap: nextPlaylistCardOrderMap,
+            currentRevisionCounter: nextRev,
           };
         });
       },
@@ -331,6 +498,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       toggleCustomPlaylistItemInStore: (playlistId, cardId, value) => {
         set((state) => {
           const cleanId = cardId.split('-loop-')[0];
+          const nextRev = state.currentRevisionCounter + 1;
+          const nextPlaylists = { ...state.playlistsById };
+          
           const currentList = state.playlistCardOrderMap[playlistId] || [];
           let newList = currentList;
           if (value) {
@@ -340,12 +510,26 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           } else {
             newList = currentList.filter(id => id !== cleanId);
           }
+
+          if (nextPlaylists[playlistId]) {
+            nextPlaylists[playlistId] = {
+              ...nextPlaylists[playlistId],
+              cardIds: newList,
+              orderedCardIds: newList,
+              itemCount: newList.length,
+              dirty: true,
+              localRevision: nextRev,
+            };
+          }
+
           const nextPlaylistCardOrderMap = {
             ...state.playlistCardOrderMap,
             [playlistId]: newList,
           };
           return {
             playlistCardOrderMap: nextPlaylistCardOrderMap,
+            playlistsById: nextPlaylists,
+            currentRevisionCounter: nextRev,
           };
         });
       },
@@ -362,6 +546,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
           const nextDeltas = { ...state.smartPlaylistDeltaCounts };
           const nextDifficultyMap = { ...state.cardDifficultyMap };
+          const nextRev = state.currentRevisionCounter + 1;
 
           if (isOptimistic) {
             const originalDifficulty = oldStateObj !== undefined
@@ -383,7 +568,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
                 difficulty: newState,
                 originalDifficulty,
                 updatedAt: timestamp,
-                optimistic: true
+                optimistic: true,
+                dirty: true,
+                localRevision: nextRev,
               };
             }
           } else {
@@ -404,6 +591,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             _id: cleanId,
             difficultyState: newState,
             currentUserQuestionProgress: qp,
+            dirty: isOptimistic,
+            localRevision: isOptimistic ? nextRev : undefined,
           };
 
           const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
@@ -417,11 +606,27 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             }
           }
 
+          const nextPlaylists = { ...state.playlistsById };
+          if (oldState && nextPlaylists[oldState]) {
+            nextPlaylists[oldState] = {
+              ...nextPlaylists[oldState],
+              itemCount: Math.max(0, (nextPlaylists[oldState].itemCount ?? 0) - 1),
+            };
+          }
+          if (newState && nextPlaylists[newState]) {
+            nextPlaylists[newState] = {
+              ...nextPlaylists[newState],
+              itemCount: (nextPlaylists[newState].itemCount ?? 0) + 1,
+            };
+          }
+
           return {
             cardDifficultyMap: nextDifficultyMap,
             cardsById: nextCardsById,
             playlistCardOrderMap: nextPlaylistCardOrderMap,
+            playlistsById: nextPlaylists,
             smartPlaylistDeltaCounts: nextDeltas,
+            currentRevisionCounter: isOptimistic ? nextRev : state.currentRevisionCounter,
           };
         });
       },
@@ -486,10 +691,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             }
           }
 
+          const nextPlaylists = { ...state.playlistsById };
+          if (currentState && nextPlaylists[currentState]) {
+            nextPlaylists[currentState] = {
+              ...nextPlaylists[currentState],
+              itemCount: Math.max(0, (nextPlaylists[currentState].itemCount ?? 0) - 1),
+            };
+          }
+          if (oldState && nextPlaylists[oldState]) {
+            nextPlaylists[oldState] = {
+              ...nextPlaylists[oldState],
+              itemCount: (nextPlaylists[oldState].itemCount ?? 0) + 1,
+            };
+          }
+
           return {
             cardDifficultyMap: nextDifficultyMap,
             cardsById: nextCardsById,
             playlistCardOrderMap: nextPlaylistCardOrderMap,
+            playlistsById: nextPlaylists,
             smartPlaylistDeltaCounts: nextDeltas,
           };
         });
@@ -531,6 +751,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       offlineActionQueue: [],
       enqueueOfflineAction: (action) => {
         set((state) => {
+          const nextRev = state.currentRevisionCounter + 1;
           let actionId;
           try {
             const Crypto = require('expo-crypto');
@@ -541,6 +762,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const newAction: OfflineAction = {
             ...action,
             id: actionId,
+            localRevision: nextRev,
+            retryCount: 0,
           };
 
           let compactedQueue = [...state.offlineActionQueue];
@@ -581,16 +804,67 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
           compactedQueue.push(newAction);
           if (__DEV__) {
-            console.log(`[Offline Queue] Enqueued and compacted action:`, newAction, `| Queue Size: ${compactedQueue.length}`);
+            console.log(`[Offline Queue] Enqueued with Monotonic Rev ${nextRev}:`, newAction, `| Queue Size: ${compactedQueue.length}`);
           }
           return {
             offlineActionQueue: compactedQueue,
+            currentRevisionCounter: nextRev,
           };
         });
       },
 
       clearOfflineActions: () => {
         set({ offlineActionQueue: [] });
+      },
+
+      removeProcessedActions: (processedIds) => {
+        set((state) => {
+          const idsSet = new Set(processedIds);
+          const nextQueue = state.offlineActionQueue.filter((a) => !idsSet.has(a.id));
+          if (__DEV__) {
+            console.log(`[Offline Queue] Removed ${processedIds.length} acknowledged actions. Remaining: ${nextQueue.length}`);
+          }
+          return { offlineActionQueue: nextQueue };
+        });
+      },
+
+      isolatePoisonActions: (failedIds) => {
+        set((state) => {
+          const failedSet = new Set(failedIds);
+          const nextQueue: OfflineAction[] = [];
+          const nextDLQ = [...state.deadLetterQueue];
+
+          state.offlineActionQueue.forEach((a) => {
+            if (failedSet.has(a.id)) {
+              const retry = (a.retryCount || 0) + 1;
+              if (retry > 3) {
+                nextDLQ.push({ ...a, retryCount: retry });
+                if (__DEV__) {
+                  console.warn(`[Poison Queue] Action ${a.action} (${a.id}) isolated to Dead Letter Queue after 3 failures.`);
+                }
+              } else {
+                nextQueue.push({ ...a, retryCount: retry });
+              }
+            } else {
+              nextQueue.push(a);
+            }
+          });
+
+          return {
+            offlineActionQueue: nextQueue,
+            deadLetterQueue: nextDLQ,
+          };
+        });
+      },
+
+      compressOfflineQueue: () => {
+        set((state) => {
+          const compressed = compressQueue(state.offlineActionQueue);
+          if (__DEV__) {
+            console.log(`[Offline Queue] Entity-Aware Compaction complete: ${state.offlineActionQueue.length} -> ${compressed.length}`);
+          }
+          return { offlineActionQueue: compressed };
+        });
       },
 
       hydrateFolders: (folders) => {
@@ -606,27 +880,62 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       hydratePlaylists: (playlists) => {
         set((state) => {
           const nextPlaylists = { ...state.playlistsById };
+          const activeQueue = state.offlineActionQueue;
+
           playlists.forEach((p) => {
-            if (p && p._id) nextPlaylists[p._id] = p;
+            if (!p || !p._id) return;
+
+            const localPlaylist = state.playlistsById[p._id];
+            const isDirty = localPlaylist?.dirty;
+            const hasPendingAction = activeQueue.some(
+              (a) =>
+                (a.payload?.playlistId === p._id) ||
+                (a.payload?.tempId === p._id)
+            );
+
+            if (isDirty || hasPendingAction) {
+              return;
+            }
+
+            nextPlaylists[p._id] = p;
           });
           return { playlistsById: nextPlaylists };
         });
       },
 
       createPlaylistInStore: (playlist) => {
-        set((state) => ({
-          playlistsById: {
-            ...state.playlistsById,
-            [playlist._id]: playlist,
-          },
-        }));
+        set((state) => {
+          const nextRev = state.currentRevisionCounter + 1;
+          return {
+            playlistsById: {
+              ...state.playlistsById,
+              [playlist._id]: {
+                ...playlist,
+                dirty: true,
+                localRevision: nextRev,
+              },
+            },
+            currentRevisionCounter: nextRev,
+          };
+        });
       },
 
       deletePlaylistInStore: (playlistId) => {
         set((state) => {
           const nextPlaylists = { ...state.playlistsById };
           delete nextPlaylists[playlistId];
-          return { playlistsById: nextPlaylists };
+          
+          const nextOrderMap = { ...state.playlistCardOrderMap };
+          delete nextOrderMap[playlistId];
+          
+          const nextHydrated = { ...state.hydratedPlaylists };
+          delete nextHydrated[playlistId];
+
+          return {
+            playlistsById: nextPlaylists,
+            playlistCardOrderMap: nextOrderMap,
+            hydratedPlaylists: nextHydrated,
+          };
         });
       },
 
@@ -634,22 +943,32 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         set((state) => {
           const playlist = state.playlistsById[playlistId];
           if (!playlist) return {};
+          const nextRev = state.currentRevisionCounter + 1;
           return {
             playlistsById: {
               ...state.playlistsById,
-              [playlistId]: { ...playlist, name },
+              [playlistId]: { ...playlist, name, dirty: true, localRevision: nextRev },
             },
+            currentRevisionCounter: nextRev,
           };
         });
       },
 
       createFolderInStore: (folder) => {
-        set((state) => ({
-          foldersById: {
-            ...state.foldersById,
-            [folder._id]: folder,
-          },
-        }));
+        set((state) => {
+          const nextRev = state.currentRevisionCounter + 1;
+          return {
+            foldersById: {
+              ...state.foldersById,
+              [folder._id]: {
+                ...folder,
+                dirty: true,
+                localRevision: nextRev,
+              },
+            },
+            currentRevisionCounter: nextRev,
+          };
+        });
       },
 
       deleteFolderInStore: (folderId) => {
@@ -658,14 +977,88 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           delete nextFolders[folderId];
           
           const nextCards = { ...state.cardsById };
+          const nextDifficultyMap = { ...state.cardDifficultyMap };
+          const nextOrderMap = { ...state.playlistCardOrderMap };
+          const nextPlaylists = { ...state.playlistsById };
+          const deletedCardIds: string[] = [];
+
           Object.keys(nextCards).forEach((key) => {
             const card = nextCards[key];
             if (card && (card.folderId === folderId || card.rootFolderId === folderId || card.subfolderIds?.includes(folderId))) {
               delete nextCards[key];
+              deletedCardIds.push(key);
             }
           });
 
-          return { foldersById: nextFolders, cardsById: nextCards };
+          deletedCardIds.forEach((cardId) => {
+            const cleanId = cardId.split('-loop-')[0];
+            delete nextDifficultyMap[cleanId];
+            
+            // Clean up card references from all playlists
+            Object.keys(nextOrderMap).forEach((pId) => {
+              const rawIds = nextOrderMap[pId] || [];
+              if (rawIds.includes(cleanId)) {
+                const validIds = rawIds.filter((id) => id !== cleanId);
+                nextOrderMap[pId] = validIds;
+                
+                if (nextPlaylists[pId]) {
+                  nextPlaylists[pId] = {
+                    ...nextPlaylists[pId],
+                    itemCount: validIds.length,
+                  };
+                }
+              }
+            });
+          });
+
+          return {
+            foldersById: nextFolders,
+            cardsById: nextCards,
+            cardDifficultyMap: nextDifficultyMap,
+            playlistCardOrderMap: nextOrderMap,
+            playlistsById: nextPlaylists,
+          };
+        });
+      },
+
+      deleteCardInStore: (cardId) => {
+        set((state) => {
+          const cleanId = cardId.split('-loop-')[0];
+          
+          // 1. Delete from cardsById
+          const nextCards = { ...state.cardsById };
+          delete nextCards[cleanId];
+          
+          // 2. Delete from cardDifficultyMap
+          const nextDifficultyMap = { ...state.cardDifficultyMap };
+          delete nextDifficultyMap[cleanId];
+
+          // 3. Delete from playlistCardOrderMap and update playlistsById itemCount
+          const nextOrderMap = { ...state.playlistCardOrderMap };
+          const nextPlaylists = { ...state.playlistsById };
+          
+          Object.keys(nextOrderMap).forEach((pId) => {
+            const rawIds = nextOrderMap[pId] || [];
+            if (rawIds.includes(cleanId)) {
+              const validIds = rawIds.filter((id) => id !== cleanId);
+              nextOrderMap[pId] = validIds;
+              
+              // Also update denormalized counts in playlistsById
+              if (nextPlaylists[pId]) {
+                nextPlaylists[pId] = {
+                  ...nextPlaylists[pId],
+                  itemCount: validIds.length,
+                };
+              }
+            }
+          });
+
+          return {
+            cardsById: nextCards,
+            cardDifficultyMap: nextDifficultyMap,
+            playlistCardOrderMap: nextOrderMap,
+            playlistsById: nextPlaylists,
+          };
         });
       },
 
@@ -673,12 +1066,45 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         set((state) => {
           const folder = state.foldersById[folderId];
           if (!folder) return {};
+          const nextRev = state.currentRevisionCounter + 1;
           return {
             foldersById: {
               ...state.foldersById,
-              [folderId]: { ...folder, ...updateData } as IFolder,
+              [folderId]: { ...folder, ...updateData, dirty: true, localRevision: nextRev } as IFolder,
             },
+            currentRevisionCounter: nextRev,
           };
+        });
+      },
+
+      pruneStaleCache: () => {
+        // Run lazily after active interactions to keep UI/JS thread at 60 FPS
+        InteractionManager.runAfterInteractions(() => {
+          set((state) => {
+            const MAX_CARDS_CACHE = 500;
+            const TARGET_CACHE_SIZE = 200;
+            const cardEntries = Object.entries(state.cardsById);
+            
+            if (cardEntries.length <= MAX_CARDS_CACHE) {
+              return {}; // No pruning needed
+            }
+
+            // Sort by updatedAt descending, keep newest 200 (TARGET_CACHE_SIZE)
+            const sorted = cardEntries.sort(([, a], [, b]) => {
+              const timeA = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+              const timeB = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+              return timeB - timeA;
+            });
+
+            const pruned: Record<string, any> = {};
+            for (let i = 0; i < TARGET_CACHE_SIZE && i < sorted.length; i++) {
+              pruned[sorted[i][0]] = sorted[i][1];
+            }
+
+            const removedCount = cardEntries.length - TARGET_CACHE_SIZE;
+            console.log(`[Store] Lazy-Pruned ${removedCount} stale cards from cache. ${TARGET_CACHE_SIZE} retained.`);
+            return { cardsById: pruned };
+          });
         });
       },
     }),
@@ -686,6 +1112,22 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       name: 'dsa-playlist-state',
       storage: createJSONStorage(() => storageEngine),
       version: 2,
+      partialize: (state) => ({
+        offlineActionQueue: state.offlineActionQueue,
+        deadLetterQueue: state.deadLetterQueue,
+        currentRevisionCounter: state.currentRevisionCounter,
+        foldersById: state.foldersById,
+        playlistsById: state.playlistsById,
+        cardDifficultyMap: state.cardDifficultyMap,
+        playlistCardOrderMap: state.playlistCardOrderMap,
+        lastSyncedAt: state.lastSyncedAt,
+        lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
+        lastCatalogIntegrityCheck: state.lastCatalogIntegrityCheck,
+        cardsById: state.cardsById,
+        hydratedPlaylists: state.hydratedPlaylists,
+        initialSmartCounts: state.initialSmartCounts,
+        smartPlaylistDeltaCounts: state.smartPlaylistDeltaCounts,
+      }),
       migrate: (persistedState: any, version: number) => {
         if (__DEV__) console.log(`[Schema Migration] Migrating from version ${version} to 2`);
         if (version < 2) {

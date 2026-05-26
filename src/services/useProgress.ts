@@ -25,8 +25,18 @@ export const useUpdateCardProgress = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ cardId, action, value }: { cardId: string; action: progressService.ProgressAction; value: boolean }) =>
-      progressService.updateUserProgress(cardId, action, value),
+    mutationFn: ({ cardId, action, value }: { cardId: string; action: progressService.ProgressAction; value: boolean }) => {
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'TOGGLE_FAVORITE',
+          payload: { cardId, value },
+          timestamp: Date.now()
+        });
+        usePlaylistStateStore.getState().toggleFavoriteInStore(cardId, value);
+        return Promise.resolve({ message: 'offline', offline: true });
+      }
+      return progressService.updateUserProgress(cardId, action, value);
+    },
 
     onMutate: async ({ cardId, action, value }) => {
       // 1. Cancel outgoing refetches
@@ -133,23 +143,11 @@ export const useUpdateCardProgress = () => {
       return { previousRevisionCards, previousPlaylistCards, previousLibrary, activePlaylistId };
     },
 
-    onError: (err: any, variables, context) => {
-      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
-
-      if (isOffline) {
-        usePlaylistStateStore.getState().enqueueOfflineAction({
-          action: 'TOGGLE_FAVORITE',
-          payload: { cardId: variables.cardId, value: variables.value },
-          timestamp: Date.now()
-        });
-
-        // Optimistically set the local Zustand state for likes
-        usePlaylistStateStore.getState().toggleFavoriteInStore(variables.cardId, variables.value);
-        return;
-      }
-
+    onError: (err: any, variables, context: any) => {
+      // REMOVED: No more offline fallback enqueue here.
+      // The mutationFn already handles this when isLiveSyncPaused is true.
       if (context?.previousRevisionCards) {
-        context.previousRevisionCards.forEach(([key, data]) => queryClient.setQueryData(key, data));
+        context.previousRevisionCards.forEach(([key, data]: [any, any]) => queryClient.setQueryData(key, data));
       }
       if (context?.activePlaylistId && context?.previousPlaylistCards) {
         queryClient.setQueryData(['playlistDetail', context.activePlaylistId, 'cards'], context.previousPlaylistCards);
@@ -157,14 +155,21 @@ export const useUpdateCardProgress = () => {
       if (context?.previousLibrary) {
         queryClient.setQueryData(['personalLibrary'], context.previousLibrary);
       }
-      Toast.show({
-        type: 'error',
-        text1: 'Sync Failed',
-        text2: 'Your action could not be saved. Please try again.',
-      });
+      
+      // Only show toast if NOT a silent network error
+      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
+      if (!isOffline) {
+        Toast.show({
+          type: 'error',
+          text1: 'Sync Failed',
+          text2: 'Your action could not be saved. Please try again.',
+        });
+      }
     },
 
-    onSettled: (data, error, variables, context) => {
+    onSettled: (data, error, variables, context: any) => {
+      if (data && (data as any).offline) return; // Suppression layer
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) return;
       queryClient.invalidateQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
       queryClient.invalidateQueries({ queryKey: ['personalLibrary'] });
@@ -179,8 +184,21 @@ export const useUpdatePlaylistMembership = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ cardId, addToPlaylist, removeFromPlaylist }: { cardId: string; addToPlaylist?: string; removeFromPlaylist?: string }) =>
-      progressService.updatePlaylistMembership(cardId, addToPlaylist, removeFromPlaylist),
+    mutationFn: ({ cardId, addToPlaylist, removeFromPlaylist }: { cardId: string; addToPlaylist?: string; removeFromPlaylist?: string }) => {
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        const playlistId = addToPlaylist || removeFromPlaylist;
+        if (playlistId) {
+          usePlaylistStateStore.getState().enqueueOfflineAction({
+            action: 'TOGGLE_PLAYLIST_ITEM',
+            payload: { playlistId, cardId, value: !!addToPlaylist },
+            timestamp: Date.now()
+          });
+          usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, cardId, !!addToPlaylist);
+        }
+        return Promise.resolve({ offline: true });
+      }
+      return progressService.updatePlaylistMembership(cardId, addToPlaylist, removeFromPlaylist);
+    },
     onMutate: async ({ cardId, addToPlaylist, removeFromPlaylist }) => {
       await queryClient.cancelQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
       const previousQueries = queryClient.getQueriesData<PaginatedRevisionCards>({ queryKey: [REVISION_CARDS_QUERY_KEY] });
@@ -216,35 +234,26 @@ export const useUpdatePlaylistMembership = () => {
       return { previousQueries, prevMembership, membershipKey };
     },
     onError: (err: any, variables, context) => {
-      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
-
-      if (isOffline) {
-        usePlaylistStateStore.getState().enqueueOfflineAction({
-          action: 'TOGGLE_PLAYLIST_ITEM',
-          payload: {
-            playlistId: variables.addToPlaylist || variables.removeFromPlaylist,
-            cardId: variables.cardId,
-            value: !!variables.addToPlaylist
-          },
-          timestamp: Date.now()
-        });
-
-        // Optimistically set the local Zustand state for playlist membership
-        const playlistId = variables.addToPlaylist || variables.removeFromPlaylist;
-        if (playlistId) {
-          usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, variables.cardId, !!variables.addToPlaylist);
-        }
-        return;
-      }
-
+      // REMOVED: No more offline fallback enqueue here.
       if (context?.previousQueries) {
         context.previousQueries.forEach(([key, data]) => queryClient.setQueryData(key, data));
       }
       if (context?.prevMembership) {
         queryClient.setQueryData(context.membershipKey, context.prevMembership);
       }
+
+      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
+      if (!isOffline) {
+        Toast.show({
+          type: 'error',
+          text1: 'Sync Failed',
+          text2: 'Could not update playlist membership.',
+        });
+      }
     },
     onSettled: (data, err, variables) => {
+      if (data && (data as any).offline) return; // Suppression layer
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) return;
       queryClient.invalidateQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
       queryClient.invalidateQueries({ queryKey: ['playlists', 'membership', variables.cardId] });
@@ -256,8 +265,19 @@ export const useUpdateDifficultyState = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ cardId, difficultyState }: { cardId: string; difficultyState: 'easy' | 'medium' | 'hard' | 'skipped' | null }) =>
-      progressService.updateDifficultyState(cardId, difficultyState),
+    mutationFn: ({ cardId, difficultyState }: { cardId: string; difficultyState: 'easy' | 'medium' | 'hard' | 'skipped' | null }) => {
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'CLASSIFY_CARD',
+          payload: { cardId, state: difficultyState },
+          timestamp: Date.now()
+        });
+        const cardObj = usePlaylistStateStore.getState().cardsById[cardId] || {};
+        usePlaylistStateStore.getState().transferCard(cardId, cardObj, difficultyState);
+        return Promise.resolve({ message: 'offline', offline: true });
+      }
+      return progressService.updateDifficultyState(cardId, difficultyState);
+    },
 
     onMutate: async ({ cardId, difficultyState }) => {
       await queryClient.cancelQueries({ queryKey: [REVISION_CARDS_QUERY_KEY] });
@@ -314,24 +334,10 @@ export const useUpdateDifficultyState = () => {
       return { previousRevisionCards, previousPlaylistCards, previousLibrary, activePlaylistId };
     },
 
-    onError: (err: any, variables, context) => {
-      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
-
-      if (isOffline) {
-        usePlaylistStateStore.getState().enqueueOfflineAction({
-          action: 'CLASSIFY_CARD',
-          payload: { cardId: variables.cardId, state: variables.difficultyState },
-          timestamp: Date.now()
-        });
-
-        // Also update local Zustand persistent ratings in store!
-        const cardObj = queryClient.getQueryData<IPopulatedRevisionCard[]>(['playlistDetail', context?.activePlaylistId, 'cards'])?.find(c => c._id === variables.cardId) || {} as any;
-        usePlaylistStateStore.getState().transferCard(variables.cardId, cardObj, variables.difficultyState);
-        return;
-      }
-
+    onError: (err: any, variables, context: any) => {
+      // REMOVED: No more offline fallback enqueue here.
       if (context?.previousRevisionCards) {
-        context.previousRevisionCards.forEach(([key, data]) => queryClient.setQueryData(key, data));
+        context.previousRevisionCards.forEach(([key, data]: [any, any]) => queryClient.setQueryData(key, data));
       }
       if (context?.activePlaylistId && context?.previousPlaylistCards) {
         queryClient.setQueryData(['playlistDetail', context.activePlaylistId, 'cards'], context.previousPlaylistCards);
@@ -339,14 +345,20 @@ export const useUpdateDifficultyState = () => {
       if (context?.previousLibrary) {
         queryClient.setQueryData(['personalLibrary'], context.previousLibrary);
       }
-      Toast.show({
-        type: 'error',
-        text1: 'Sync Failed',
-        text2: 'Could not update difficulty state.',
-      });
+
+      const isOffline = !err.status || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('timeout');
+      if (!isOffline) {
+        Toast.show({
+          type: 'error',
+          text1: 'Sync Failed',
+          text2: 'Could not update difficulty state.',
+        });
+      }
     },
 
-    onSettled: (data, error, variables, context) => {
+    onSettled: (data, error, variables, context: any) => {
+        if (data && (data as any).offline) return; // Suppression layer
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) return;
         // Preserve optimistic UI for difficulty state by invalidating dependent queries reactively
         queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
         queryClient.invalidateQueries({ queryKey: ['personalLibrary'] });

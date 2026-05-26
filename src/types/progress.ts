@@ -23,6 +23,8 @@ export interface LibraryEntry {
 export interface DashboardStats {
   streakCount: number;
   lastCompletedDate?: string;
+  totalSwipes?: number;
+  totalScrolls?: number;
   totalRevisions: number;
   totalTimeSpent: number;
   favoritesCount: number;

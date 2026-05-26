@@ -328,20 +328,25 @@ export const ReelsSettingsOverlay = React.memo(({
   const [prefLoading, setPrefLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && !isGuest) {
-      const fetchPrefs = async () => {
-        try {
+    if (isGuest) return;
+    
+    const fetchPrefs = async () => {
+      try {
+        if (selectedFolderIds.length === 0) {
           setPrefLoading(true);
-          const prefs = await reelsFeedService.getReelPreferences();
-          setSelectedFolderIds(prefs.selectedRootFolderIds);
-        } catch (err) {
-          console.error('[Prefs Fetch Error]', err);
-        } finally {
-          setPrefLoading(false);
         }
-      };
-      fetchPrefs();
-    }
+        const prefs = await reelsFeedService.getReelPreferences();
+        if (prefs?.selectedRootFolderIds) {
+          setSelectedFolderIds(prefs.selectedRootFolderIds);
+        }
+      } catch (err) {
+        console.error('[Prefs Fetch Error]', err);
+      } finally {
+        setPrefLoading(false);
+      }
+    };
+    
+    fetchPrefs();
   }, [isOpen, isGuest]);
 
   const handleToggleFolder = async (folderId: string) => {

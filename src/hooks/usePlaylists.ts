@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as playlistService from '@/services/playlistService';
 import * as revisionService from '@/services/revisionService';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
@@ -142,7 +142,7 @@ export const usePlaylistCards = (playlistId: string | null) => {
     staleTime: 1000 * 30,
   });
 
-  const hasLocal = isSmart ? isHydrated : storeCards.length > 0;
+  const hasLocal = isHydrated || storeCards.length > 0;
 
   return {
     data: hasLocal ? storeCards : queryResult.data || [],
@@ -174,28 +174,61 @@ export const useCreatePlaylist = () => {
         orderedCardIds: [],
       };
 
-      // 1. Optimistic update in Zustand store
+      // 1. Optimistic update in Zustand store (always)
       createPlaylistInStore(tempPlaylist);
 
-      // 2. Enqueue offline sync action with a client-generated unique ID
-      enqueueOfflineAction({
-        action: 'CREATE_PLAYLIST',
-        payload: { tempId, name, color1, color2 },
-        timestamp: Date.now(),
-      });
+      // 2. If sync is paused, enqueue and return immediately
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        enqueueOfflineAction({
+          action: 'CREATE_PLAYLIST',
+          payload: { tempId, name, color1, color2 },
+          timestamp: Date.now(),
+        });
+        if (__DEV__) console.log('[useCreatePlaylist] Local-first mode active. Enqueued for later sync.');
+        return tempPlaylist;
+      }
 
-      // 3. Silent background upload attempt
+      // 3. Try API call — only enqueue on failure
       try {
         const playlist = await playlistService.createPlaylist({ name, color1, color2 });
-        // Reconcile client temporary ID with server MongoDB ID
+        // Reconcile client temporary ID with server MongoDB ID and migrate queue / order map
         usePlaylistStateStore.setState((state) => {
           const nextPlaylists = { ...state.playlistsById };
           delete nextPlaylists[tempId];
           nextPlaylists[playlist._id] = playlist;
-          return { playlistsById: nextPlaylists };
+          
+          // Also migrate temp ID references in the offline queue
+          const nextQueue = state.offlineActionQueue.map((action) => {
+            if (action.payload?.playlistId === tempId) {
+              return { ...action, payload: { ...action.payload, playlistId: playlist._id } };
+            }
+            if (action.payload?.tempId === tempId) {
+              return { ...action, payload: { ...action.payload, tempId: playlist._id } };
+            }
+            return action;
+          });
+
+          // Also migrate in playlistCardOrderMap
+          const nextOrderMap = { ...state.playlistCardOrderMap };
+          if (nextOrderMap[tempId]) {
+            nextOrderMap[playlist._id] = nextOrderMap[tempId];
+            delete nextOrderMap[tempId];
+          }
+
+          return {
+            playlistsById: nextPlaylists,
+            offlineActionQueue: nextQueue,
+            playlistCardOrderMap: nextOrderMap,
+          };
         });
         return playlist;
       } catch (error) {
+        // API failed — NOW enqueue for offline sync
+        enqueueOfflineAction({
+          action: 'CREATE_PLAYLIST',
+          payload: { tempId, name, color1, color2 },
+          timestamp: Date.now(),
+        });
         if (__DEV__) console.warn('[Offline Mode] Playlist created locally. Sync queued.', error);
         return tempPlaylist;
       }
@@ -212,17 +245,27 @@ export const useDeletePlaylist = () => {
       // 1. Optimistic delete in Zustand store
       deletePlaylistInStore(playlistId);
 
-      // 2. Enqueue offline action
-      enqueueOfflineAction({
-        action: 'DELETE_PLAYLIST',
-        payload: { playlistId },
-        timestamp: Date.now(),
-      });
+      // 2. If sync is paused, enqueue and return immediately
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        enqueueOfflineAction({
+          action: 'DELETE_PLAYLIST',
+          payload: { playlistId },
+          timestamp: Date.now(),
+        });
+        if (__DEV__) console.log('[useDeletePlaylist] Local-first mode active. Enqueued for later sync.');
+        return;
+      }
 
-      // 3. Background call
+      // 3. Try API call — only enqueue on failure
       try {
         await playlistService.deletePlaylist(playlistId);
       } catch (error) {
+        // API failed — NOW enqueue for offline sync
+        enqueueOfflineAction({
+          action: 'DELETE_PLAYLIST',
+          payload: { playlistId },
+          timestamp: Date.now(),
+        });
         if (__DEV__) console.warn('[Offline Mode] Deleted playlist locally. Sync queued.', error);
       }
     },
@@ -238,18 +281,28 @@ export const useUpdatePlaylist = () => {
       // 1. Optimistic update in Zustand store
       updatePlaylistInStore(playlistId, name);
 
-      // 2. Enqueue offline action
-      enqueueOfflineAction({
-        action: 'UPDATE_PLAYLIST',
-        payload: { playlistId, name },
-        timestamp: Date.now(),
-      });
+      // 2. If sync is paused, enqueue and return immediately
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        enqueueOfflineAction({
+          action: 'UPDATE_PLAYLIST',
+          payload: { playlistId, name },
+          timestamp: Date.now(),
+        });
+        if (__DEV__) console.log('[useUpdatePlaylist] Local-first mode active. Enqueued for later sync.');
+        return { _id: playlistId, name } as ApiPlaylist;
+      }
 
-      // 3. Background call
+      // 3. Try API call — only enqueue on failure
       try {
         const updated = await playlistService.updatePlaylist(playlistId, { name });
         return updated;
       } catch (error) {
+        // API failed — NOW enqueue for offline sync
+        enqueueOfflineAction({
+          action: 'UPDATE_PLAYLIST',
+          payload: { playlistId, name },
+          timestamp: Date.now(),
+        });
         if (__DEV__) console.warn('[Offline Mode] Updated playlist name locally. Sync queued.', error);
         return { _id: playlistId, name } as ApiPlaylist;
       }
@@ -276,23 +329,57 @@ export const useDuplicatePlaylist = () => {
       // 1. Optimistic update
       createPlaylistInStore(tempPlaylist);
 
-      // 2. Enqueue action
-      enqueueOfflineAction({
-        action: 'CREATE_PLAYLIST',
-        payload: { tempId, name: tempPlaylist.name, color1: tempPlaylist.color1, color2: tempPlaylist.color2, cardIds: tempPlaylist.cardIds },
-        timestamp: Date.now(),
-      });
+      // 2. If sync is paused, enqueue and return immediately
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        enqueueOfflineAction({
+          action: 'CREATE_PLAYLIST',
+          payload: { tempId, name: tempPlaylist.name, color1: tempPlaylist.color1, color2: tempPlaylist.color2, cardIds: tempPlaylist.cardIds },
+          timestamp: Date.now(),
+        });
+        if (__DEV__) console.log('[useDuplicatePlaylist] Local-first mode active. Enqueued for later sync.');
+        return tempPlaylist;
+      }
 
+      // 3. Try API call — only enqueue on failure
       try {
         const playlist = await playlistService.duplicatePlaylist(playlistId);
         usePlaylistStateStore.setState((state) => {
           const nextPlaylists = { ...state.playlistsById };
           delete nextPlaylists[tempId];
           nextPlaylists[playlist._id] = playlist;
-          return { playlistsById: nextPlaylists };
+
+          // Also migrate temp ID references in the offline queue
+          const nextQueue = state.offlineActionQueue.map((action) => {
+            if (action.payload?.playlistId === tempId) {
+              return { ...action, payload: { ...action.payload, playlistId: playlist._id } };
+            }
+            if (action.payload?.tempId === tempId) {
+              return { ...action, payload: { ...action.payload, tempId: playlist._id } };
+            }
+            return action;
+          });
+
+          // Also migrate in playlistCardOrderMap
+          const nextOrderMap = { ...state.playlistCardOrderMap };
+          if (nextOrderMap[tempId]) {
+            nextOrderMap[playlist._id] = nextOrderMap[tempId];
+            delete nextOrderMap[tempId];
+          }
+
+          return {
+            playlistsById: nextPlaylists,
+            offlineActionQueue: nextQueue,
+            playlistCardOrderMap: nextOrderMap,
+          };
         });
         return playlist;
       } catch (error) {
+        // API failed — NOW enqueue for offline sync
+        enqueueOfflineAction({
+          action: 'CREATE_PLAYLIST',
+          payload: { tempId, name: tempPlaylist.name, color1: tempPlaylist.color1, color2: tempPlaylist.color2, cardIds: tempPlaylist.cardIds },
+          timestamp: Date.now(),
+        });
         if (__DEV__) console.warn('[Offline Mode] Duplicated playlist locally. Sync queued.', error);
         return tempPlaylist;
       }
@@ -301,6 +388,7 @@ export const useDuplicatePlaylist = () => {
 };
 
 export const useTogglePlaylistItem = () => {
+  const queryClient = useQueryClient();
   const toggleCustomPlaylistItemInStore = usePlaylistStateStore((s) => s.toggleCustomPlaylistItemInStore);
   const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
 
@@ -319,21 +407,33 @@ export const useTogglePlaylistItem = () => {
       // 1. Optimistic Toggle
       toggleCustomPlaylistItemInStore(playlistId, revisionCardId, nextValue);
 
-      // 2. Enqueue action
-      enqueueOfflineAction({
-        action: 'TOGGLE_PLAYLIST_ITEM',
-        payload: { playlistId, cardId: revisionCardId, value: nextValue },
-        timestamp: Date.now(),
-      });
+      // 2. If sync is paused, enqueue and return immediately
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        enqueueOfflineAction({
+          action: 'TOGGLE_PLAYLIST_ITEM',
+          payload: { playlistId, cardId: revisionCardId, value: nextValue },
+          timestamp: Date.now(),
+        });
+        if (__DEV__) console.log('[useTogglePlaylistItem] Local-first mode active. Enqueued for later sync.');
+        return;
+      }
 
-      // 3. Background call
+      // 3. Try API call — only enqueue on failure
       try {
         if (isInPlaylist) {
           await playlistService.removeFromPlaylist(playlistId, revisionCardId);
         } else {
           await playlistService.addToPlaylist(playlistId, revisionCardId);
         }
+        // Invalidate playlists list to update itemCount cache on successful sync
+        queryClient.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
       } catch (error) {
+        // API failed — NOW enqueue for offline sync
+        enqueueOfflineAction({
+          action: 'TOGGLE_PLAYLIST_ITEM',
+          payload: { playlistId, cardId: revisionCardId, value: nextValue },
+          timestamp: Date.now(),
+        });
         if (__DEV__) console.warn('[Offline Mode] Toggled playlist item locally. Sync queued.', error);
       }
     },
@@ -345,17 +445,28 @@ export const useReorderPlaylist = () => {
 
   return useMutation({
     mutationFn: async ({ playlistId, cardIds }: { playlistId: string; cardIds: string[] }) => {
-      // 1. Enqueue action
-      enqueueOfflineAction({
-        action: 'REORDER_PLAYLIST',
-        payload: { playlistId, cardIds },
-        timestamp: Date.now(),
-      });
+      // 1. If sync is paused, enqueue and return immediately
+      if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+        enqueueOfflineAction({
+          action: 'REORDER_PLAYLIST',
+          payload: { playlistId, cardIds },
+          timestamp: Date.now(),
+        });
+        if (__DEV__) console.log('[useReorderPlaylist] Local-first mode active. Enqueued for later sync.');
+        return { _id: playlistId, cardIds } as ApiPlaylist;
+      }
 
+      // 2. Try API call — only enqueue on failure
       try {
         const playlist = await playlistService.reorderPlaylist(playlistId, cardIds);
         return playlist;
       } catch (error) {
+        // API failed — NOW enqueue for offline sync
+        enqueueOfflineAction({
+          action: 'REORDER_PLAYLIST',
+          payload: { playlistId, cardIds },
+          timestamp: Date.now(),
+        });
         if (__DEV__) console.warn('[Offline Mode] Reordered playlist locally. Sync queued.', error);
         return { _id: playlistId, cardIds } as ApiPlaylist;
       }

@@ -129,13 +129,14 @@ const CreatePlaylistOverlay = ({ onClose, onPlaylistCreated }: CreatePlaylistOve
   );
 };
 
-export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPickerModalProps) => {
+export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps) => {
   const { user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const queryClient = useQueryClient();
 
   const { data: playlists = [] } = usePlaylists();
   const togglePlaylistItem = useTogglePlaylistItem();
+  const playlistCardOrderMap = usePlaylistStateStore((s) => s.playlistCardOrderMap);
 
   // Local state for checking memberships and quick inputs
   const [tempMembership, setTempMembership] = useState<Record<string, boolean>>({});
@@ -289,6 +290,8 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
                     customPlaylists.map((playlist) => {
                       const isSelected = !!tempMembership[playlist.id];
                       const colors = getCustomTheme(playlist.name);
+                      const liveOrder = playlistCardOrderMap[playlist.id];
+                      const displayCount = liveOrder !== undefined ? liveOrder.length : (playlist.itemCount ?? 0);
                       return (
                         <TouchableOpacity
                           key={playlist.id}
@@ -336,7 +339,7 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
                                 { color: isSelected ? '#8B5CF6' : '#94A3B8' }
                               ]}
                             >
-                              {playlist.itemCount ?? 0} {playlist.itemCount === 1 ? 'card' : 'cards'}
+                              {displayCount} {displayCount === 1 ? 'card' : 'cards'}
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -393,9 +396,7 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
       )}
     </Modal>
   );
-}, (prevProps, nextProps) => {
-  return prevProps.card?._id === nextProps.card?._id;
-});
+};
 
 const styles = StyleSheet.create({
   modalBackdrop: {

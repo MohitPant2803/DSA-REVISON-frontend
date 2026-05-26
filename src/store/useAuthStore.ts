@@ -148,13 +148,40 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Check for pending unsynced work before destroying session
+    const pendingCount = (() => {
+      try {
+        const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+        return usePlaylistStateStore.getState().offlineActionQueue.length;
+      } catch { return 0; }
+    })();
+    if (pendingCount > 0) {
+      console.warn(`[AuthStore] Logging out with ${pendingCount} unsynced actions in queue!`);
+      // Attempt emergency flush before logout
+      try {
+        const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+        const queue = usePlaylistStateStore.getState().offlineActionQueue;
+        if (queue.length > 0) {
+          const token = get().token;
+          if (token) {
+            const apiModule = require('@/services/api').default;
+            await Promise.race([
+              apiModule.post('/sync/actions', { actions: queue }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Emergency flush timeout')), 5000)),
+            ]);
+            console.log('[AuthStore] Emergency queue flush succeeded before logout.');
+            usePlaylistStateStore.getState().removeProcessedActions(queue.map((a: any) => a.id));
+          }
+        }
+      } catch (flushErr) {
+        console.warn('[AuthStore] Emergency flush failed. Queue preserved for next login.', flushErr);
+        // Queue survives in AsyncStorage — will be available when user logs back in
+      }
+    }
     await SecureStorage.removeToken();
     await SecureStorage.removeUser();
-    
-    // Clear resume progress
     const { useResumeStore } = require('@/store/useResumeStore');
     useResumeStore.getState().clearAll();
-    
     set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: false, isSessionExpired: false });
   },
 

@@ -148,6 +148,10 @@ export const useCreateFolder = () => {
 
       // 3. Silent background call
       try {
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+          if (__DEV__) console.log('[useCreateFolder] Local-first mode active. Skipping immediate API call.');
+          return tempFolder;
+        }
         const folder = await folderService.createFolder(dto);
         usePlaylistStateStore.setState((state) => {
           const nextFolders = { ...state.foldersById };
@@ -182,6 +186,10 @@ export const useUpdateFolder = () => {
 
       // 3. Silent background call
       try {
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+          if (__DEV__) console.log('[useUpdateFolder] Local-first mode active. Skipping immediate API call.');
+          return { _id: folderId, ...updateData } as IFolder;
+        }
         const updated = await folderService.updateFolder({ folderId, updateData });
         return updated;
       } catch (error) {
@@ -210,6 +218,10 @@ export const useDeleteFolder = () => {
 
       // 3. Silent background call
       try {
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+          if (__DEV__) console.log('[useDeleteFolder] Local-first mode active. Skipping immediate API call.');
+          return;
+        }
         await folderService.deleteFolder(folderId);
       } catch (error) {
         if (__DEV__) console.warn('[Offline Mode] Folder deleted locally. Sync queued.', error);

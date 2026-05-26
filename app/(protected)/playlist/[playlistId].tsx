@@ -12,7 +12,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { ChevronLeft, PlayCircle, Shuffle, Play, FastForward, GripVertical } from 'lucide-react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -26,10 +26,12 @@ import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { SyncPauseGate } from '@/components/SyncPauseGate';
 import { usePlaylistCards as useStorePlaylistCards } from '@/hooks/usePlaylistStoreSelectors';
 import { resolveCardState } from '@/utils/resolveCardState';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withSpring, FadeInUp, FadeOut } from 'react-native-reanimated';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -49,9 +51,9 @@ interface CardItemProps {
 const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemProps) => {
   if (!card || !card._id) return null;
   return (
-    <ScaleDecorator activeScale={1.02}>
+    <ScaleDecorator activeScale={1.0}>
       <TouchableOpacity
-        activeOpacity={isActive ? 1 : 0.8}
+        activeOpacity={isActive ? 1 : 0.85}
         onPress={() => !isActive && startRevising(false, false, card._id)}
         disabled={isActive}
         onLongPress={() => {
@@ -64,35 +66,26 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
           isActive && styles.cardActive
         ]}
       >
-        <View className="flex-row justify-between items-center">
-          <View className="flex-1 mr-3">
-            <Text className="text-violet-600 text-[10px] font-bold uppercase tracking-widest mb-1">
-              {card.topic}
+        <View className="flex-1 justify-center">
+          <Text className="text-violet-600 text-[10px] font-bold uppercase tracking-widest mb-1">
+            {card.topic}
+          </Text>
+          <Text className="text-slate-900 font-semibold text-lg leading-tight" numberOfLines={1}>
+            {card.title}
+          </Text>
+          <View className="flex-row gap-2 mt-2">
+            <Text
+              className={`text-xs font-semibold ${
+                card.difficulty === 'Easy'
+                  ? 'text-emerald-600'
+                  : card.difficulty === 'Medium'
+                  ? 'text-amber-600'
+                  : 'text-rose-600'
+              }`}
+            >
+              {card.difficulty}
             </Text>
-            <Text className="text-slate-900 font-semibold text-lg leading-tight" numberOfLines={1}>
-              {card.title}
-            </Text>
-            <View className="flex-row gap-2 mt-2">
-              <Text
-                className={`text-xs font-semibold ${
-                  card.difficulty === 'Easy'
-                    ? 'text-emerald-600'
-                    : card.difficulty === 'Medium'
-                    ? 'text-amber-600'
-                    : 'text-rose-600'
-                }`}
-              >
-                {card.difficulty}
-              </Text>
-            </View>
           </View>
-          <TouchableOpacity 
-            onPressIn={() => { lightHaptic(); drag(); }}
-            className="p-3"
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <GripVertical color="#CBD5E1" size={24} />
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     </ScaleDecorator>
@@ -110,6 +103,9 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
 
 export default function PlaylistCardsScreen() {
   useAppBackHandler();
+
+  // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
+
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useLocalSearchParams<{
@@ -151,6 +147,28 @@ export default function PlaylistCardsScreen() {
   }, [libraryData, isLikes, playlistId, hydratePlaylistCards]);
 
   const [localCards, setLocalCards] = useState<IPopulatedRevisionCard[]>([]);
+  const [undoVisible, setUndoVisible] = useState(false);
+  const [lastRemoved, setLastRemoved] = useState<{
+    card: IPopulatedRevisionCard;
+    index: number;
+    originalDifficulty?: any;
+  } | null>(null);
+
+  const swipeableRefs = useRef<Map<string, any>>(new Map());
+
+  // Auto-hide Undo banner after 5 seconds
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (undoVisible) {
+      timer = setTimeout(() => {
+        setUndoVisible(false);
+        setLastRemoved(null);
+      }, 5000);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [undoVisible]);
 
   useEffect(() => {
     if (storeCards) {
@@ -161,6 +179,89 @@ export default function PlaylistCardsScreen() {
       }
     }
   }, [storeCards]);
+
+  const handleSwipeRemove = useCallback((card: IPopulatedRevisionCard) => {
+    lightHaptic();
+    const cleanId = card._id.split('-loop-')[0];
+    
+    // Close the Swipeable row
+    const ref = swipeableRefs.current.get(cleanId);
+    if (ref) {
+      ref.close();
+    }
+
+    const currentIndex = localCards.findIndex(c => c._id === card._id);
+    if (currentIndex === -1) return;
+
+    const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+    setLastRemoved({
+      card,
+      index: currentIndex,
+      originalDifficulty: isSmart ? (playlistId as any) : undefined,
+    });
+
+    // Remove locally
+    const nextCards = localCards.filter(c => c._id !== card._id);
+    setLocalCards(nextCards);
+
+    // Apply store changes optimistically
+    if (isSmart) {
+      usePlaylistStateStore.getState().transferCard(cleanId, card as any, null, true);
+      usePlaylistStateStore.getState().enqueueOfflineAction({
+        action: 'CLASSIFY_CARD',
+        payload: { cardId: cleanId, state: null },
+        timestamp: Date.now(),
+      });
+    } else {
+      usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, cleanId, false);
+      usePlaylistStateStore.getState().enqueueOfflineAction({
+        action: 'TOGGLE_PLAYLIST_ITEM',
+        payload: { playlistId, cardId: cleanId, value: false },
+        timestamp: Date.now(),
+      });
+    }
+
+    setUndoVisible(true);
+  }, [localCards, playlistId]);
+
+  const handleUndo = useCallback(() => {
+    if (!lastRemoved) return;
+    lightHaptic();
+
+    const { card, index, originalDifficulty } = lastRemoved;
+    const cleanId = card._id.split('-loop-')[0];
+
+    // Restore locally
+    const nextCards = [...localCards];
+    nextCards.splice(index, 0, card);
+    setLocalCards(nextCards);
+
+    // Restore store
+    const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+    if (isSmart && originalDifficulty) {
+      usePlaylistStateStore.getState().transferCard(cleanId, card as any, originalDifficulty, true);
+      usePlaylistStateStore.getState().enqueueOfflineAction({
+        action: 'CLASSIFY_CARD',
+        payload: { cardId: cleanId, state: originalDifficulty },
+        timestamp: Date.now(),
+      });
+    } else {
+      usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, cleanId, true);
+      usePlaylistStateStore.getState().enqueueOfflineAction({
+        action: 'TOGGLE_PLAYLIST_ITEM',
+        payload: { playlistId, cardId: cleanId, value: true },
+        timestamp: Date.now(),
+      });
+    }
+
+    // Restore custom order if applicable
+    const draggedIds = nextCards.map(c => c._id);
+    usePlaylistStateStore.getState().setPlaylistCardOrder(playlistId, draggedIds);
+
+    // Clean up
+    setLastRemoved(null);
+    setUndoVisible(false);
+  }, [lastRemoved, localCards, playlistId]);
 
   const displayTitle = isLikes ? 'Revised' : (playlist?.name || 'Playlist');
 
@@ -222,15 +323,51 @@ export default function PlaylistCardsScreen() {
   }, [playlistId, setActivePlaylistId, router]);
 
   const renderItem = useCallback(({ item: card, drag, isActive }: RenderItemParams<IPopulatedRevisionCard>) => {
+    if (!card || !card._id) return null;
+    const cleanId = card._id.split('-loop-')[0];
+
     return (
-      <CardItem
-        card={card}
-        drag={drag}
-        isActive={isActive}
-        startRevising={startRevising}
-      />
+      <Swipeable
+        ref={(ref) => {
+          if (ref) {
+            swipeableRefs.current.set(cleanId, ref);
+          }
+        }}
+        renderRightActions={() => (
+          <TouchableOpacity
+            onPress={() => handleSwipeRemove(card)}
+            activeOpacity={0.8}
+            style={{
+              backgroundColor: '#FEE2E2',
+              justifyContent: 'center',
+              alignItems: 'center',
+              width: 70,
+              height: 104,
+              borderRadius: 24,
+              marginBottom: 12,
+              marginLeft: 8,
+              borderWidth: 1,
+              borderColor: '#FCA5A5',
+            }}
+          >
+            <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 12 }}>Remove</Text>
+          </TouchableOpacity>
+        )}
+        onSwipeableOpen={(direction) => {
+          if (direction === 'right') {
+            handleSwipeRemove(card);
+          }
+        }}
+      >
+        <CardItem
+          card={card}
+          drag={drag}
+          isActive={isActive}
+          startRevising={startRevising}
+        />
+      </Swipeable>
     );
-  }, [startRevising]);
+  }, [startRevising, handleSwipeRemove]);
 
   if (!playlistId) {
     return (
@@ -245,6 +382,7 @@ export default function PlaylistCardsScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#F8FAFC]" edges={['top', 'left', 'right']}>
+      <SyncPauseGate />
       <View className="flex-row items-center px-4 pt-2 pb-2">
         <TouchableOpacity
           onPress={() => router.back()}
@@ -313,6 +451,50 @@ export default function PlaylistCardsScreen() {
             index,
           })}
         />
+      )}
+
+      {undoVisible && lastRemoved && (
+        <Animated.View
+          entering={FadeInUp.duration(300)}
+          exiting={FadeOut.duration(200)}
+          style={{
+            position: 'absolute',
+            bottom: 30,
+            left: 20,
+            right: 20,
+            backgroundColor: '#1E293B',
+            borderRadius: 20,
+            paddingVertical: 14,
+            paddingHorizontal: 20,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            shadowColor: '#0F172A',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.15,
+            shadowRadius: 16,
+            elevation: 6,
+            zIndex: 999,
+          }}
+        >
+          <Text style={{ color: '#F1F5F9', fontSize: 13, fontWeight: '600' }}>
+            Card removed from playlist
+          </Text>
+          <TouchableOpacity
+            onPress={handleUndo}
+            activeOpacity={0.8}
+            style={{
+              backgroundColor: '#8B5CF6',
+              paddingVertical: 8,
+              paddingHorizontal: 14,
+              borderRadius: 12,
+            }}
+          >
+            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+              Undo
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
       )}
     </SafeAreaView>
   );

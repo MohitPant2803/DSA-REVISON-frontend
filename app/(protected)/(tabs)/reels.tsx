@@ -20,10 +20,14 @@ import {
   Pressable,
   BackHandler,
   Linking,
+  InteractionManager,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 const FlashListElement = FlashList as any;
-import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as any;
+import { useLocalSearchParams, useRouter, useNavigation, useFocusEffect } from 'expo-router';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { SyncPauseGate } from '@/components/SyncPauseGate';
 import {
   Plus,
   ChevronLeft,
@@ -54,6 +58,7 @@ import { RevisionCard } from './RevisionCard';
 import { useUpdateLastViewedCard, useFolderLoops } from '@/services/useUserProgress';
 import { ReelsSettingsOverlay } from '@/components/SettingsOverlay';
 import { PlaylistPickerModal } from '@/components/PlaylistPickerModal';
+import { useShallow } from 'zustand/react/shallow';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 import { useResumeStore } from '@/store/useResumeStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
@@ -122,9 +127,9 @@ const PAGE_SIZE = 100; // Load 100 cards at once for an endless, zero-latency re
 
 // Premium physical spring snapping parameters (Spotify / Apple physics)
 const SPRING_CONFIG = {
-  damping: 28,
-  stiffness: 160,
-  mass: 0.8,
+  damping: 20,
+  stiffness: 250,
+  mass: 1.0,
   overshootClamping: true,
   restDisplacementThreshold: 0.01,
   restSpeedThreshold: 2,
@@ -144,8 +149,8 @@ const PEACEFUL_SPRING_CONFIG = {
 
 // Tight critically damped snap spring configuration matching standard Apple/TikTok tight snapping
 const TIGHT_SNAP_SPRING = {
-  damping: 28,
-  stiffness: 340,
+  damping: 22,
+  stiffness: 300,
   mass: 0.8,
   overshootClamping: true,
   restDisplacementThreshold: 0.01,
@@ -153,11 +158,13 @@ const TIGHT_SNAP_SPRING = {
 };
 
 const lightHaptic = () => {
-  if (Platform.OS === 'android') {
-    Vibration.vibrate(12);
-  } else {
-    Vibration.vibrate(8);
-  }
+  InteractionManager.runAfterInteractions(() => {
+    if (Platform.OS === 'android') {
+      Vibration.vibrate(12);
+    } else {
+      Vibration.vibrate(8);
+    }
+  });
 };
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -515,17 +522,18 @@ const ReelsActionRail = React.memo(({
 });
 
 interface ReelItemProps {
-  item: IPopulatedRevisionCard;
+  cardId: string;
+  item?: IPopulatedRevisionCard;
   index: number;
   activeIndex: number;
   goToNextCard: () => void;
   goToPrevCard: () => void;
   cardHeight: number;
   width: number;
-  isFavorite: boolean;
+  isFavorite?: boolean;
   activePlaylistId: string | null;
   isGuest: boolean;
-  canEdit: boolean;
+  canEdit?: boolean;
   onToggleWatchLater: (cleanId: string) => void;
   onCardStateUpdate: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
@@ -536,6 +544,10 @@ interface ReelItemProps {
   scrollY?: SharedValue<number>;
   scrollEnabled?: boolean;
   onScrollEnabledChange?: (enabled: boolean) => void;
+}
+
+interface ActiveReelItemProps extends Omit<ReelItemProps, 'item'> {
+  item: IPopulatedRevisionCard;
 }
 
 interface SlideCardWrapperProps {
@@ -551,6 +563,7 @@ interface SlideCardWrapperProps {
   renderSlideContent: (slide: ISlide, index: number) => React.ReactNode;
   shadowProgress: SharedValue<number>;
   isLastSlide?: boolean;
+  flipRotation: SharedValue<number>;
 }
 
 const SlideCardWrapper = React.memo(({
@@ -566,6 +579,7 @@ const SlideCardWrapper = React.memo(({
   renderSlideContent,
   shadowProgress,
   isLastSlide = false,
+  flipRotation,
 }: SlideCardWrapperProps) => {
   // =========================================================================
   // Onboarding-style card stack animation with Dynamic Shadow Dampening
@@ -577,6 +591,8 @@ const SlideCardWrapper = React.memo(({
 
     let elevation = 0;
     let shadowOpacity = 0;
+
+
 
     // Active card: only tracks left drag (forward). Right drag is handled by previous card.
     if (delta === 0) {
@@ -763,9 +779,11 @@ const ActiveReelItem = React.memo(({
   shadowProgress = { value: 1 } as any,
   scrollEnabled = true,
   onScrollEnabledChange,
-}: ReelItemProps) => {
+}: ActiveReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
-  const { preferences } = useUserPreferencesStore();
+  const { preferences } = useUserPreferencesStore(
+    useShallow((s) => ({ preferences: s.preferences }))
+  );
 
   const slideDragX = useSharedValue(0);
   const prevSlideDragX = useSharedValue(OFFSCREEN_X);
@@ -775,6 +793,8 @@ const ActiveReelItem = React.memo(({
   const isTransitioning = useSharedValue(false);
   const gestureLock = useSharedValue<'undecided' | 'vertical' | 'horizontal' | 'failed'>('undecided');
   const isMounted = useRef(true);
+  const flipRotation = useSharedValue(0);
+  const swipeIncrementedForGesture = useRef(false);
 
   const currentPrefsKey = `${preferences.hideCertainBlockTypes?.join(',')}-${preferences.explanationFlowOrder?.join(',')}`;
 
@@ -784,12 +804,14 @@ const ActiveReelItem = React.memo(({
     setActiveSlideIndex(0);
     cancelAnimation(slideDragX);
     cancelAnimation(prevSlideDragX);
+    cancelAnimation(flipRotation);
     slideDragX.value = 0;
     prevSlideDragX.value = OFFSCREEN_X;
     cardTranslateY.value = 0;
     activeSlideIndexSV.value = 0;
     isTransitioning.value = false;
     gestureLock.value = 'undecided';
+    flipRotation.value = 0;
   }, [item._id, currentPrefsKey, width]);
 
   useEffect(() => {
@@ -798,6 +820,7 @@ const ActiveReelItem = React.memo(({
       isMounted.current = false;
       cancelAnimation(slideDragX);
       cancelAnimation(prevSlideDragX);
+      cancelAnimation(flipRotation);
     };
   }, [item._id, currentPrefsKey]);
 
@@ -807,6 +830,7 @@ const ActiveReelItem = React.memo(({
     // This guarantees no race conditions or dead periods between slides.
     slideDragX.value = 0;
     prevSlideDragX.value = OFFSCREEN_X;
+    flipRotation.value = 0;
     isTransitioning.value = false;
   }, [activeSlideIndex]);
 
@@ -857,6 +881,11 @@ const ActiveReelItem = React.memo(({
     
     // 3. Remove micro-lag: Eliminate setTimeout(0), update React state immediately
     setActiveSlideIndex((prev) => prev + 1);
+    
+    if (!swipeIncrementedForGesture.current) {
+      swipeIncrementedForGesture.current = true;
+      useTrackingStore.getState().incrementSwipe();
+    }
   };
 
   const handleSwipePrevComplete = () => {
@@ -871,6 +900,11 @@ const ActiveReelItem = React.memo(({
     
     // 3. Remove micro-lag: Eliminate setTimeout(0), update React state immediately
     setActiveSlideIndex((prev) => prev - 1);
+    
+    if (!swipeIncrementedForGesture.current) {
+      swipeIncrementedForGesture.current = true;
+      useTrackingStore.getState().incrementSwipe();
+    }
   };
 
   // Handle explicit horizontal jump actions (e.g. from menu or explicit buttons)
@@ -962,17 +996,19 @@ const ActiveReelItem = React.memo(({
   const VELOCITY_THRESHOLD = 200;
 
   const horizontalGesture = Gesture.Pan()
-    // 1. Highly calibrated Tinder thresholds: activeOffsetX of [-15, 15] allows ScrollView to capture vertical scroll first,
-    // while failOffsetY of [-40, 40] ensures horizontal swipes fail and hand over instantly to vertical scroll when vertical drag is detected.
-    .activeOffsetX([-15, 15])
+    // Prominent vertical lock: horizontal engagement box and deep failOffsetY window
+    .activeOffsetX([-4, 4])
     .failOffsetY([-40, 40])
     .onStart((event) => {
       // Anti-race conditions: ignore new gesture starts if already transitioning
       if (isTransitioning.value) return;
 
-      // Velocity-gated arbitration: allow horizontal capture only if vertical momentum is decayed
-      // Set to 800 px/s to comfortably allow diagonal thumb-swipes while still blocking high-speed vertical scrolls
-      if (Math.abs(event.velocityY) >= 800) {
+      const absVX = Math.abs(event.velocityX);
+      const absVY = Math.abs(event.velocityY);
+
+      // Prominent angle arbitration: if the swipe is prominently vertical (Y velocity is more than 1.5x of X velocity),
+      // treat it as a vertical reel swipe and fail the horizontal gesture. Otherwise, treat it strictly as a horizontal deck swipe.
+      if (absVY > absVX * 1.5) {
         gestureLock.value = 'failed';
         return;
       }
@@ -983,6 +1019,11 @@ const ActiveReelItem = React.memo(({
       
       // Lock the horizontal axis permanently for this gesture
       gestureLock.value = 'horizontal'; 
+      
+      // Reset swipe completion lock for this new horizontal gesture
+      runOnJS(() => {
+        swipeIncrementedForGesture.current = false;
+      })();
       
       // Disable parent vertical scroll list ONLY after lock is confirmed
       if (onScrollEnabledChange) {
@@ -1030,8 +1071,8 @@ const ActiveReelItem = React.memo(({
       // Velocity-aware animation durations for physically accurate settling
       const commitDuration = Math.max(120, Math.min(220, 240 - Math.abs(velX) * 0.08));
 
-      // Elastic, fast, zero sluggishness snapping spring
-      const cancelSpring = { damping: 16, stiffness: 400, mass: 0.6 };
+      // Elastic, fast, zero sluggishness critically damped snapping spring
+      const cancelSpring = { damping: 20, stiffness: 350, mass: 0.7 };
 
       if (transX < 0) {
         // ---- LEFT SWIPE ----
@@ -1173,6 +1214,7 @@ const ActiveReelItem = React.memo(({
                 renderSlideContent={renderSlideContent}
                 shadowProgress={shadowProgress}
                 isLastSlide={indexInDeck === slides.length - 1}
+                flipRotation={flipRotation}
               />
             );
           })}
@@ -1374,8 +1416,16 @@ const InactiveReelItem = React.memo(({
 });
 
 const ReelItem = React.memo((props: ReelItemProps) => {
+  const { cardId, scrollY } = props;
   const isActiveReel = props.index === props.activeIndex;
-  const { scrollY } = props;
+
+  // Localized subscription: retrieve the latest card detail directly from the store!
+  const item = usePlaylistStateStore(
+    useCallback((s) => s.cardsById[cardId], [cardId])
+  );
+
+  const { user } = useAuthStore();
+  const { role } = useRole();
 
   // Track shadow progress smoothly as a Reanimated derived value bound directly to scroll offset!
   const shadowProgress = useDerivedValue(() => {
@@ -1395,10 +1445,30 @@ const ReelItem = React.memo((props: ReelItemProps) => {
     );
   });
 
+  if (!item) {
+    return (
+      <View 
+        style={{ 
+          height: props.cardHeight, 
+          alignSelf: 'center', 
+          width: props.width * 0.97, 
+          marginBottom: 16,
+          top: 22,
+        }}
+      >
+        <ReelItemSkeleton cardHeight={props.cardHeight} width={props.width} />
+      </View>
+    );
+  }
+
+  const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
+  const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
+  const isFavorite = !!item.isFavorite || (!!props.activePlaylistId && props.activePlaylistId !== 'likes');
+
   if (!isActiveReel) {
     return (
       <InactiveReelItem
-        item={props.item}
+        item={item}
         index={props.index}
         activeIndex={props.activeIndex}
         cardHeight={props.cardHeight}
@@ -1410,18 +1480,117 @@ const ReelItem = React.memo((props: ReelItemProps) => {
     );
   }
 
-  return <ActiveReelItem {...props} shadowProgress={shadowProgress} />;
+  return (
+    <ActiveReelItem 
+      {...props} 
+      item={item}
+      canEdit={canEdit}
+      isFavorite={isFavorite}
+      shadowProgress={shadowProgress} 
+    />
+  );
 }, (prevProps, nextProps) => {
   return (
-    prevProps.item._id === nextProps.item._id &&
-    prevProps.item.difficultyState === nextProps.item.difficultyState &&
+    prevProps.cardId === nextProps.cardId &&
     prevProps.activeIndex === nextProps.activeIndex &&
     prevProps.index === nextProps.index &&
-    prevProps.isFavorite === nextProps.isFavorite &&
     prevProps.cardHeight === nextProps.cardHeight &&
     prevProps.width === nextProps.width &&
     prevProps.isGuest === nextProps.isGuest &&
-    prevProps.canEdit === nextProps.canEdit &&
+    prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.scrollEnabled === nextProps.scrollEnabled &&
+    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
+  );
+});
+
+const ReelsRenderItem = React.memo(({
+  cardId,
+  index,
+  activeIndex,
+  cardHeight,
+  width,
+  activePlaylistId,
+  isGuest,
+  stableGoToNext,
+  stableGoToPrev,
+  handleWatchLaterToggleInReels,
+  handleProgressUpdateInReels,
+  setPlaylistModalCard,
+  handleMoreOptionsTrigger,
+  handleDifficultyStateUpdateInReels,
+  scrollY,
+  scrollEnabled,
+  handleScrollEnabledChange,
+  isActiveCardClassified,
+  feedSessionId,
+}: {
+  cardId: string | null;
+  index: number;
+  activeIndex: number;
+  cardHeight: number;
+  width: number;
+  activePlaylistId: string | null;
+  isGuest: boolean;
+  stableGoToNext: () => void;
+  stableGoToPrev: () => void;
+  handleWatchLaterToggleInReels: (cleanId: string) => void;
+  handleProgressUpdateInReels: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
+  setPlaylistModalCard: (card: IPopulatedRevisionCard | null) => void;
+  handleMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
+  handleDifficultyStateUpdateInReels: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
+  scrollY: SharedValue<number>;
+  scrollEnabled: boolean;
+  handleScrollEnabledChange: (enabled: boolean) => void;
+  isActiveCardClassified: boolean;
+  feedSessionId: string;
+}) => {
+  if (!cardId) {
+    return (
+      <View 
+        style={{ 
+          height: cardHeight, 
+          alignSelf: 'center', 
+          width: width * 0.97, 
+          marginBottom: 16,
+          top: 22,
+        }}
+      >
+        <ReelItemSkeleton cardHeight={cardHeight} width={width} />
+      </View>
+    );
+  }
+
+  return (
+    <ReelItem
+      key={`${cardId}-${feedSessionId}`}
+      cardId={cardId}
+      index={index}
+      activeIndex={activeIndex}
+      isActiveCardClassified={isActiveCardClassified}
+      goToNextCard={stableGoToNext}
+      goToPrevCard={stableGoToPrev}
+      cardHeight={cardHeight}
+      width={width}
+      activePlaylistId={activePlaylistId}
+      isGuest={isGuest}
+      onToggleWatchLater={handleWatchLaterToggleInReels}
+      onCardStateUpdate={handleProgressUpdateInReels}
+      onPlaylistPickerTrigger={setPlaylistModalCard}
+      onMoreOptionsTrigger={handleMoreOptionsTrigger}
+      onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
+      scrollY={scrollY}
+      scrollEnabled={scrollEnabled}
+      onScrollEnabledChange={handleScrollEnabledChange}
+    />
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.cardId === nextProps.cardId &&
+    prevProps.activeIndex === nextProps.activeIndex &&
+    prevProps.index === nextProps.index &&
+    prevProps.cardHeight === nextProps.cardHeight &&
+    prevProps.width === nextProps.width &&
+    prevProps.isGuest === nextProps.isGuest &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
     prevProps.scrollEnabled === nextProps.scrollEnabled &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
@@ -1433,6 +1602,9 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+
+  // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
+
   const [showTutorial, setShowTutorial] = useState(false);
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
   const [scrollEnabled, setScrollEnabled] = useState(true);
@@ -1508,16 +1680,16 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     userDifficultyStates?: string;
   }>();
 
-  const folderIdParam = normalizeParam(params.folderId);
-  const topicParam = normalizeParam(params.topic);
-  const tagsParam = normalizeParam(params.tags);
-  const difficultyParam = normalizeParam(params.difficulty);
-  const searchParam = normalizeParam(params.search);
-  const startCardIdParam = normalizeParam(params.startCardId);
-  const difficultyStatesParam = normalizeParam(params.userDifficultyStates);
+  const folderIdParam = isCustomPlayer ? normalizeParam(params.folderId) : null;
+  const topicParam = isCustomPlayer ? normalizeParam(params.topic) : null;
+  const tagsParam = isCustomPlayer ? normalizeParam(params.tags) : null;
+  const difficultyParam = isCustomPlayer ? normalizeParam(params.difficulty) : null;
+  const searchParam = isCustomPlayer ? normalizeParam(params.search) : null;
+  const startCardIdParam = isCustomPlayer ? normalizeParam(params.startCardId) : null;
+  const difficultyStatesParam = isCustomPlayer ? normalizeParam(params.userDifficultyStates) : null;
 
   const [page, setPage] = useState(1);
-  const [allCards, setAllCards] = useState<IPopulatedRevisionCard[]>([]);
+  const [allCards, setAllCards] = useState<string[]>([]);
   const [navState, setNavState] = useState({ activeIndex: 0, prevIdx: -1 });
   const activeIndex = navState.activeIndex;
   const prevIdx = navState.prevIdx;
@@ -1535,9 +1707,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     } catch (e) {
       console.warn('Native scroll locking was bypassed:', e);
     }
-    setTimeout(() => {
-      setScrollEnabled(false);
-    }, 0);
   }, []);
 
   const enableScrollNatively = useCallback(() => {
@@ -1551,18 +1720,21 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     } catch (e) {
       console.warn('Native scroll unlocking was bypassed:', e);
     }
-    setTimeout(() => {
-      setScrollEnabled(true);
-    }, 0);
   }, []);
 
   const handleScrollEnabledChange = useCallback((enabled: boolean) => {
+    setScrollEnabled(enabled);
     if (enabled) {
       enableScrollNatively();
+      // Snap back to activeIndex to prevent any drift from diagonal swipes
+      flatListRef.current?.scrollToIndex({
+        index: activeIndex,
+        animated: true,
+      });
     } else {
       disableScrollNatively();
     }
-  }, [enableScrollNatively, disableScrollNatively]);
+  }, [enableScrollNatively, disableScrollNatively, activeIndex]);
   const hasScrolledToInitial = useRef(false);
   const sessionStartCardId = useRef<string | null>(null);
   const recentCardIdsRef = useRef<string[]>([]);
@@ -1573,21 +1745,34 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const { data: foldersData } = useGetFolders({ limit: 100 });
 
   // Zustand scalable tracking store
-  const currentMode = useTrackingStore((state) => state.currentMode);
-  const infiniteLoop = useTrackingStore((state) => state.infiniteLoop);
-  const watchLaterCardIds = useTrackingStore((state) => state.watchLaterCardIds);
-  const loopsCompleted = useTrackingStore((state) => state.loopsCompleted);
-  const sessionTotalTime = useTrackingStore((state) => state.sessionTotalTime);
-  const completedCardsCount = useTrackingStore((state) => state.completedCardsCount);
+  const {
+    currentMode,
+    infiniteLoop,
+    watchLaterCardIds,
+    loopsCompleted,
+    sessionTotalTime,
+    completedCardsCount,
+  } = useTrackingStore(
+    useShallow((state) => ({
+      currentMode: state.currentMode,
+      infiniteLoop: state.infiniteLoop,
+      watchLaterCardIds: state.watchLaterCardIds,
+      loopsCompleted: state.loopsCompleted,
+      sessionTotalTime: state.sessionTotalTime,
+      completedCardsCount: state.completedCardsCount,
+    }))
+  );
 
-  const setMode = useTrackingStore((state) => state.setMode);
-  const setInfiniteLoop = useTrackingStore((state) => state.setInfiniteLoop);
-  const toggleWatchLater = useTrackingStore((state) => state.toggleWatchLater);
-  const setWatchLater = useTrackingStore((state) => state.setWatchLater);
-  const startSession = useTrackingStore((state) => state.startSession);
-  const updateSessionTime = useTrackingStore((state) => state.updateSessionTime);
-  const markCardCompleted = useTrackingStore((state) => state.markCardCompleted);
-  const resetSession = useTrackingStore((state) => state.resetSession);
+  const {
+    setMode,
+    setInfiniteLoop,
+    toggleWatchLater,
+    setWatchLater,
+    startSession,
+    updateSessionTime,
+    markCardCompleted,
+    resetSession,
+  } = useTrackingStore();
 
   // NOTE: Stale activePlaylistId is now cleared inside the session init useEffect
   // to prevent race conditions. No separate cleanup useEffect needed.
@@ -1606,7 +1791,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   // SessionQueue playback variables
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sessionCards, setSessionCards] = useState<(IPopulatedRevisionCard | null)[]>([]);
+  const [sessionCards, setSessionCards] = useState<string[]>([]);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionRetryCount, setSessionRetryCount] = useState(0);
@@ -1643,6 +1828,16 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const togglePlaylistItem = useTogglePlaylistItem();
   const { mutate: deleteCard } = useDeleteRevisionCard();
   const viewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingProgressRef = useRef<{
+    type: 'folder' | 'playlist';
+    id: string;
+    resumeCardId: string;
+    resumeIndex: number;
+  } | null>(null);
+  const pendingSessionSyncRef = useRef<{
+    sessionId: string;
+    newIndex: number;
+  } | null>(null);
 
   const bottomTabBarHeight = isCustomPlayer ? (insets.bottom + 16) : (insets.bottom + 72);
   const cardHeight = (height - insets.top - bottomTabBarHeight) * 0.98; 
@@ -1730,7 +1925,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         const originalCount = data.totalResults;
         setAllCards(prev => {
           const baseCards = prev.slice(0, originalCount);
-          const loopedCards = baseCards.map(c => ({ ...c, _id: c._id + `-loop-${prev.length}` }));
+          const loopedCards = baseCards.map(id => id + `-loop-${prev.length}`);
           return [...prev, ...loopedCards];
         });
       }
@@ -1738,7 +1933,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       if (playlistCards.length > 0) {
         handleLoopComplete();
         setAllCards(prev => {
-          const loopedCards = playlistCards.map(c => ({ ...c, _id: c._id + `-loop-${prev.length}` }));
+          const loopedCards = playlistCards.map(c => c._id + `-loop-${prev.length}`);
           return [...prev, ...loopedCards];
         });
       }
@@ -1747,59 +1942,103 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   // User and Guest flags are managed at the top of ReelsScreen
 
-  // Apply continuous filters for the 5 modes
-  const displayedCards = useMemo(() => {
-    let list = [...allCards].filter(Boolean).filter((card: any) => card && card._id);
+  // Unified card list computed dynamically on the store using a highly stable shallow-compared selector
+  const cardsList = usePlaylistStateStore(
+    useShallow((s) => {
+      let listIds = isSessionActive 
+        ? sessionCards 
+        : allCards;
 
-    // Filter duplicates generated by paging loop unless sequential
-    const seenIds = new Set<string>();
-    list = list.filter(card => {
-      if (!card || !card._id) return false;
-      const cleanId = card._id.split('-loop-')[0];
-      if (seenIds.has(cleanId) && currentMode !== 'sequential') {
-        return false;
-      }
-      seenIds.add(cleanId);
-      return true;
-    });
+      // Filter and map based on s.cardsById
+      let list = listIds.map(id => s.cardsById[id.split('-loop-')[0]]).filter(Boolean);
 
-    // Apply difficulty states filters from parameters (from Folder)
-    if (difficultyStatesParam) {
-      const activeStates = difficultyStatesParam.split(',').filter(Boolean);
-      if (activeStates.length > 0) {
-        list = list.filter((c: any) => c.difficultyState && activeStates.includes(c.difficultyState));
-      }
-    }
-
-    if (currentMode === 'difficult') {
-      return list.filter((c) => c.isDifficult);
-    }
-    if (currentMode === 'favorites') {
-      return list.filter((c) => c.isFavorite);
-    }
-    if (currentMode === 'watchLater') {
-      return list.filter((c) => watchLaterCardIds.includes(c._id.split('-loop-')[0]));
-    }
-    if (currentMode === 'shuffle') {
-      const currentListIds = list.map(c => c._id).join(',');
-      const savedIds = shuffledOrderRef.current.join(',');
-      
-      if (shuffledOrderRef.current.length === 0 || currentListIds !== savedIds) {
-        const shuffled = [...list];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      // Apply local-first playlist filters to prevent stale server sessions showing removed cards
+      if (activePlaylistId) {
+        if (['easy', 'medium', 'hard', 'skipped'].includes(activePlaylistId)) {
+          list = list.filter((c) => c.difficultyState === activePlaylistId);
+        } else if (activePlaylistId === 'likes') {
+          list = list.filter((c) => c.isFavorite);
+        } else if (activePlaylistId === 'watch-later') {
+          const watchLaterIds = useTrackingStore.getState().watchLaterCardIds;
+          list = list.filter((c) => watchLaterIds.includes(c._id.split('-loop-')[0]));
+        } else {
+          const validIds = new Set(s.playlistCardOrderMap[activePlaylistId] || []);
+          list = list.filter((c) => validIds.has(c._id.split('-loop-')[0]));
         }
-        shuffledOrderRef.current = shuffled.map(c => c._id);
-        return shuffled;
       }
-      
-      const cardMap = new Map(list.map(c => [c._id, c]));
-      return shuffledOrderRef.current.map(id => cardMap.get(id)).filter(Boolean) as IPopulatedRevisionCard[];
+
+      // Filter duplicates generated by paging loop unless sequential
+      const seenIds = new Set<string>();
+      list = list.filter(card => {
+        const cleanId = card._id.split('-loop-')[0];
+        if (seenIds.has(cleanId) && currentMode !== 'sequential') {
+          return false;
+        }
+        seenIds.add(cleanId);
+        return true;
+      });
+
+      // Apply difficulty states filters from parameters (from Folder)
+      if (difficultyStatesParam) {
+        const activeStates = difficultyStatesParam.split(',').filter(Boolean);
+        if (activeStates.length > 0) {
+          list = list.filter((c: any) => c.difficultyState && activeStates.includes(c.difficultyState));
+        }
+      }
+
+      // Apply mode filters
+      if (currentMode === 'difficult') {
+        list = list.filter((c) => c.isDifficult);
+      } else if (currentMode === 'favorites') {
+        list = list.filter((c) => c.isFavorite);
+      } else if (currentMode === 'watchLater') {
+        list = list.filter((c) => watchLaterCardIds.includes(c._id.split('-loop-')[0]));
+      } else if (currentMode === 'shuffle') {
+        const currentListIds = list.map(c => c._id).join(',');
+        const savedIds = shuffledOrderRef.current.join(',');
+        
+        if (shuffledOrderRef.current.length === 0 || currentListIds !== savedIds) {
+          const shuffled = [...list];
+          for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+          }
+          shuffledOrderRef.current = shuffled.map(c => c._id);
+          list = shuffled;
+        } else {
+          const cardMap = new Map(list.map(c => [c._id, c]));
+          list = shuffledOrderRef.current.map(id => cardMap.get(id)).filter(Boolean) as any;
+        }
+      }
+
+      // Map back to corresponding listIds to preserve loop suffixes
+      const listIdsSet = new Set(list.map(c => c._id));
+      return listIds.filter(id => listIdsSet.has(id.split('-loop-')[0]));
+    })
+  );
+
+
+  // Reset index 0 on mode changes
+  useEffect(() => {
+    shuffledOrderRef.current = [];
+    setNavState({ activeIndex: 0, prevIdx: -1 });
+  }, [currentMode]);
+
+  // Track completed cards per session & mark as viewed
+  useEffect(() => {
+    if (cardsList.length > 0 && cardsList[activeIndex]) {
+      const activeItem = cardsList[activeIndex];
+      if (!activeItem) return;
+      const cleanId = activeItem.split('-loop-')[0];
+      const currentCompletedIds = useTrackingStore.getState().completedCardIds;
+      if (!currentCompletedIds[cleanId]) {
+        markCardCompleted(cleanId);
+      }
+      if (!isGuest) {
+        userCardStateService.markViewed(cleanId).catch(console.error);
+      }
     }
-    
-    return list;
-  }, [allCards, currentMode, watchLaterCardIds, activePlaylistId, difficultyStatesParam]);
+  }, [activeIndex, cardsList, markCardCompleted, isGuest]);
 
   // Hydrate watchLater list from backend on mount
   useEffect(() => {
@@ -1815,52 +2054,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     };
     fetchWatchLater();
   }, [isGuest]);
-
-  // Unified card list rendered by FlashList
-  const cardsList = useMemo(() => {
-    if (isSessionActive) {
-      let list = [...sessionCards];
-      if (currentMode === 'difficult') {
-        list = list.filter((c) => !c || c.isDifficult);
-      } else if (currentMode === 'favorites') {
-        list = list.filter((c) => !c || c.isFavorite);
-      } else if (currentMode === 'watchLater') {
-        list = list.filter((c) => !c || watchLaterCardIds.includes(c._id.split('-loop-')[0]));
-      }
-      // Apply difficulty states filters
-      if (difficultyStatesParam) {
-        const activeStates = difficultyStatesParam.split(',').filter(Boolean);
-        if (activeStates.length > 0) {
-          list = list.filter((c) => !c || (c.difficultyState && activeStates.includes(c.difficultyState)));
-        }
-      }
-      return list;
-    }
-    return displayedCards;
-  }, [isSessionActive, sessionCards, displayedCards, currentMode, watchLaterCardIds, difficultyStatesParam]);
-
-
-  // Reset index 0 on mode changes
-  useEffect(() => {
-    shuffledOrderRef.current = [];
-    setNavState({ activeIndex: 0, prevIdx: -1 });
-  }, [currentMode]);
-
-  // Track completed cards per session & mark as viewed
-  useEffect(() => {
-    if (cardsList.length > 0 && cardsList[activeIndex]) {
-      const activeItem = cardsList[activeIndex];
-      if (!activeItem) return;
-      const cleanId = activeItem._id.split('-loop-')[0];
-      const currentCompletedIds = useTrackingStore.getState().completedCardIds;
-      if (!currentCompletedIds[cleanId]) {
-        markCardCompleted(cleanId);
-      }
-      if (!isGuest) {
-        userCardStateService.markViewed(cleanId).catch(console.error);
-      }
-    }
-  }, [activeIndex, cardsList, markCardCompleted, isGuest]);
 
   // Reset standard queries when parameters change
   useEffect(() => {
@@ -1880,7 +2073,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     
     let cardsToSet = [...playlistCards]
       .filter(Boolean)
-      .filter((card: any) => card && card._id);
+      .map((card: any) => card._id);
     setAllCards(cardsToSet);
   }, [playlistCards]);
 
@@ -1957,15 +2150,11 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         const slice = await sessionQueueService.getSessionCardsSlice(session._id);
         if (!isMounted) return;
 
-        // Populate sessionCards
-        const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.orderedCardIds.length).fill(null);
-        slice.cardsSlice.forEach(c => {
-          const idx = slice.orderedCardIds.indexOf(c._id);
-          if (idx !== -1) {
-            initialCards[idx] = c;
-          }
-        });
-        setSessionCards(initialCards);
+        // Hydrate session cards in store
+        if (slice.cardsSlice) {
+          usePlaylistStateStore.getState().hydratePlaylistCards('all', slice.cardsSlice);
+        }
+        setSessionCards(slice.orderedCardIds);
 
         // Resume session logic:
         const sourceKey = activePlaylistId || folderIdParam!;
@@ -2062,14 +2251,24 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const handleSessionSwipe = useCallback(async (newIndex: number) => {
     if (!sessionId) return;
 
+    // Track as pending session sync
+    pendingSessionSyncRef.current = {
+      sessionId,
+      newIndex,
+    };
+
     // 1. Queue server index sync in background (debounced)
     if (sessionSyncTimeoutRef.current) {
       clearTimeout(sessionSyncTimeoutRef.current);
     }
     sessionSyncTimeoutRef.current = setTimeout(() => {
-      sessionQueueService.updateSessionIndex(sessionId, newIndex).catch((err) => {
-        console.error('[Session Background Sync Error]', err);
-      });
+      sessionQueueService.updateSessionIndex(sessionId, newIndex)
+        .then(() => {
+          pendingSessionSyncRef.current = null;
+        })
+        .catch((err) => {
+          console.error('[Session Background Sync Error]', err);
+        });
     }, 800); // 800ms debounce ensures rapid swipes do not flood the server
 
     // 2. Local-first buffer check:
@@ -2078,44 +2277,29 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     const hasAheadCards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every(offset => {
       const targetIdx = newIndex + offset;
       if (targetIdx < sessionCards.length) {
-        return sessionCards[targetIdx] !== null; // Card is loaded
+        const id = sessionCards[targetIdx];
+        return usePlaylistStateStore.getState().cardsById[id.split('-loop-')[0]] !== undefined;
       }
-      return true; // Out of bounds is okay
+      return true;
     });
 
     const hasBehindCards = [1, 2, 3, 4].every(offset => {
       const targetIdx = newIndex - offset;
       if (targetIdx >= 0) {
-        return sessionCards[targetIdx] !== null; // Card is loaded
+        const id = sessionCards[targetIdx];
+        return usePlaylistStateStore.getState().cardsById[id.split('-loop-')[0]] !== undefined;
       }
-      return true; // Out of bounds is okay
+      return true;
     });
 
     // 3. Trigger API query only if a buffer slot is empty (cold start/scroll boundary)
     if (!hasAheadCards || !hasBehindCards) {
       try {
         const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
-        
-        setSessionCards(prev => {
-          const next = [...prev];
-          if (next.length !== slice.orderedCardIds.length) {
-            next.length = slice.orderedCardIds.length;
-          }
-          
-          const cardMap = new Map<string, IPopulatedRevisionCard>();
-          prev.forEach(c => {
-            if (c) cardMap.set(c._id, c);
-          });
-          slice.cardsSlice.forEach(c => {
-            if (c) cardMap.set(c._id, c);
-          });
-          
-          for (let i = 0; i < slice.orderedCardIds.length; i++) {
-            const id = slice.orderedCardIds[i];
-            next[i] = cardMap.get(id) || null;
-          }
-          return next;
-        });
+        if (slice.cardsSlice) {
+          usePlaylistStateStore.getState().hydratePlaylistCards('all', slice.cardsSlice);
+        }
+        setSessionCards(slice.orderedCardIds);
       } catch (err) {
         console.error('[Session Swipe Buffer Error]', err);
       }
@@ -2129,14 +2313,10 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       const updatedSession = await sessionQueueService.toggleSessionShuffle(sessionId, shuffleValue);
       const slice = await sessionQueueService.getSessionCardsSlice(sessionId);
       
-      const initialCards: (IPopulatedRevisionCard | null)[] = new Array(slice.orderedCardIds.length).fill(null);
-      slice.cardsSlice.forEach(c => {
-        const idx = slice.orderedCardIds.indexOf(c._id);
-        if (idx !== -1) {
-          initialCards[idx] = c;
-        }
-      });
-      setSessionCards(initialCards);
+      if (slice.cardsSlice) {
+        usePlaylistStateStore.getState().hydratePlaylistCards('all', slice.cardsSlice);
+      }
+      setSessionCards(slice.orderedCardIds);
       
       setNavState({ activeIndex: slice.currentIndex, prevIdx: -1 });
     } catch (err) {
@@ -2147,14 +2327,14 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   // Prompt resume state correctly on loaded cards (for non-session / guest playback)
   useEffect(() => {
     if (isSessionActive) return;
-    if (displayedCards.length === 0) {
+    if (cardsList.length === 0) {
       if (activeIndex !== 0) setNavState({ activeIndex: 0, prevIdx: -1 });
       return;
     }
     
     if (!hasPromptedResume.current) {
       if (startCardIdParam) {
-        const targetIndex = displayedCards.findIndex(c => c._id === startCardIdParam);
+        const targetIndex = cardsList.findIndex(id => id.split('-loop-')[0] === startCardIdParam);
         if (targetIndex !== -1) {
           hasPromptedResume.current = true;
           setNavState({ activeIndex: targetIndex, prevIdx: -1 });
@@ -2176,8 +2356,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
           const resumeCardId = (progress as any).lastCardId || progress.resumeCardId;
 
           let targetIndex = resumeIdx;
-          if (targetIndex >= displayedCards.length || displayedCards[targetIndex]._id !== resumeCardId) {
-            const foundIdx = displayedCards.findIndex(c => c._id === resumeCardId);
+          if (targetIndex >= cardsList.length || cardsList[targetIndex].split('-loop-')[0] !== resumeCardId) {
+            const foundIdx = cardsList.findIndex(id => id.split('-loop-')[0] === resumeCardId);
             if (foundIdx !== -1) {
               targetIndex = foundIdx;
             } else {
@@ -2220,43 +2400,28 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       }
     }
 
-    if (activeIndex >= displayedCards.length && displayedCards.length > 0) {
-      setNavState({ activeIndex: displayedCards.length - 1, prevIdx: -1 });
+    if (activeIndex >= cardsList.length && cardsList.length > 0) {
+      setNavState({ activeIndex: cardsList.length - 1, prevIdx: -1 });
     }
-  }, [displayedCards, activePlaylistId, folderIdParam, isSessionActive]);
+  }, [cardsList, activePlaylistId, folderIdParam, isSessionActive]);
 
   // Stable parent callback to handle instant, non-flickering, optimistic state updates
   const handleCardStateUpdate = useCallback((cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => {
-    const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
+    const currentActivePlaylistId = activePlaylistId;
     setAllCards((prevCards) => {
       if (currentActivePlaylistId === 'likes' && action === 'favorite' && !value) {
-        return prevCards.filter((card) => card._id.split('-loop-')[0] !== cardId);
+        return prevCards.filter((id) => id.split('-loop-')[0] !== cardId);
       }
-      return prevCards.map((card) => {
-        const baseId = card._id.split('-loop-')[0];
-        if (baseId === cardId) {
-          const key = action === 'favorite' ? 'isFavorite' : action === 'difficult' ? 'isDifficult' : 'isArchived';
-          return { ...card, [key]: value };
-        }
-        return card;
-      });
+      return prevCards;
     });
 
     setSessionCards((prevCards) => {
       if (currentActivePlaylistId === 'likes' && action === 'favorite' && !value) {
-        return prevCards.filter((card) => !card || card._id.split('-loop-')[0] !== cardId);
+        return prevCards.filter((id) => id.split('-loop-')[0] !== cardId);
       }
-      return prevCards.map((card) => {
-        if (!card) return card;
-        const baseId = card._id.split('-loop-')[0];
-        if (baseId === cardId) {
-          const key = action === 'favorite' ? 'isFavorite' : action === 'difficult' ? 'isDifficult' : 'isArchived';
-          return { ...card, [key]: value };
-        }
-        return card;
-      });
+      return prevCards;
     });
-  }, []);
+  }, [activePlaylistId]);
 
   // Synchronize and merge new/updated API pages to the continuous deck
   useEffect(() => {
@@ -2267,43 +2432,10 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       setNavState({ activeIndex: 0, prevIdx: -1 });
     } else {
       setAllCards((prevCards) => {
-        // Map updated results for direct lookup
-        const updatedCardsMap = new Map(data.results.map((c: any) => [c._id, c]));
-
-        // Merge progress fields of existing loaded cards
-        const mergedCards = prevCards.map((card) => {
-          const baseId = card._id.split('-loop-')[0];
-          const fresh = updatedCardsMap.get(baseId) || updatedCardsMap.get(card._id);
-          if (fresh) {
-            return {
-              ...card,
-              isFavorite: fresh.isFavorite,
-              isDifficult: fresh.isDifficult,
-              isArchived: fresh.isArchived,
-              difficultyState: fresh.difficultyState,
-              currentUserQuestionProgress: fresh.currentUserQuestionProgress,
-              // Sync other base data too if changed
-              title: fresh.title,
-              explanation: fresh.explanation,
-              topic: fresh.topic,
-              difficulty: fresh.difficulty,
-              complexity: fresh.complexity,
-              code: fresh.code,
-              examples: fresh.examples,
-              slides: fresh.slides,
-            };
-          }
-          return card;
-        });
-
-        // Find cards in the fresh results that are not in mergedCards yet (by base ID)
-        const existingIds = new Set(mergedCards.map((c) => c._id.split('-loop-')[0]));
-        const newCards = data.results.filter((c: any) => !existingIds.has(c._id));
-
-        if (newCards.length === 0) {
-          return mergedCards;
-        }
-        return [...mergedCards, ...newCards];
+        const existingSet = new Set(prevCards.map(id => id.split('-loop-')[0]));
+        const newIds = data.results.filter((id: string) => !existingSet.has(id.split('-loop-')[0]));
+        if (newIds.length === 0) return prevCards;
+        return [...prevCards, ...newIds];
       });
     }
   }, [activePlaylistId, data?.results]);
@@ -2326,32 +2458,54 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const transitionToCard = (nextIdx: number) => {
     if (viewTimeoutRef.current) clearTimeout(viewTimeoutRef.current);
     
-    const currentList = isSessionActive ? cardsList : displayedCards;
+    const currentList = cardsList;
     if (currentList[nextIdx] && !isGuest) {
-      viewTimeoutRef.current = setTimeout(() => {
-        const activeItem = currentList[nextIdx];
-        if (!activeItem) return;
-        const cleanCardId = activeItem._id.split('-loop-')[0];
-        const id = activePlaylistId || folderIdParam;
-        
-        if (id) {
-          syncResumeState(
-            activePlaylistId ? 'playlist' : 'folder',
-            id,
-            {
-              resumeCardId: cleanCardId,
-              resumeIndex: nextIdx,
-              resumeScrollOffset: 0,
-            }
-          );
-        }
-      }, 600);
+      const activeItem = currentList[nextIdx];
+      const cleanCardId = activeItem.split('-loop-')[0];
+      const id = activePlaylistId || folderIdParam;
+      const type: 'folder' | 'playlist' = activePlaylistId ? 'playlist' : 'folder';
+      
+      if (id) {
+        pendingProgressRef.current = {
+          type,
+          id,
+          resumeCardId: cleanCardId,
+          resumeIndex: nextIdx,
+        };
+
+        viewTimeoutRef.current = setTimeout(() => {
+          syncResumeState(type, id, {
+            resumeCardId: cleanCardId,
+            resumeIndex: nextIdx,
+            resumeScrollOffset: 0,
+          });
+          pendingProgressRef.current = null;
+        }, 600);
+      }
     }
     setNavState({ activeIndex: nextIdx, prevIdx: -1 });
   };
 
   useEffect(() => {
     return () => {
+      // Flush pending local progress save synchronously on unmount
+      if (pendingProgressRef.current) {
+        const { type, id, resumeCardId, resumeIndex } = pendingProgressRef.current;
+        syncResumeState(type, id, {
+          resumeCardId,
+          resumeIndex,
+          resumeScrollOffset: 0,
+        });
+      }
+
+      // Flush pending session index sync on unmount
+      if (pendingSessionSyncRef.current) {
+        const { sessionId, newIndex } = pendingSessionSyncRef.current;
+        sessionQueueService.updateSessionIndex(sessionId, newIndex).catch((err) => {
+          console.error('[Session Background Sync Flush Error]', err);
+        });
+      }
+
       if (viewTimeoutRef.current) clearTimeout(viewTimeoutRef.current);
       if (sessionSyncTimeoutRef.current) clearTimeout(sessionSyncTimeoutRef.current);
       if (isCustomPlayer) {
@@ -2379,8 +2533,27 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       return;
     }
 
-    // 1. Optimistic state update
+    // 1. Optimistic state update in local arrays
     handleCardStateUpdate(cleanId, action, value);
+
+    // Optimistic update directly in Zustand store!
+    if (action === 'favorite') {
+      usePlaylistStateStore.getState().toggleFavoriteInStore(cleanId, value);
+    } else if (action === 'difficult') {
+      const cardObj = usePlaylistStateStore.getState().cardsById[cleanId] || {};
+      usePlaylistStateStore.getState().transferCard(cleanId, cardObj, value ? 'hard' : null);
+    } else if (action === 'archived') {
+      usePlaylistStateStore.setState((state) => {
+        const existing = state.cardsById[cleanId];
+        if (!existing) return {};
+        return {
+          cardsById: {
+            ...state.cardsById,
+            [cleanId]: { ...existing, isArchived: value },
+          },
+        };
+      });
+    }
 
     // 2. Sync to DB
     updateProgressMutation.mutate(
@@ -2389,13 +2562,30 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         onError: (err) => {
           console.error(`[MUTATION ERROR]`, err);
           handleCardStateUpdate(cleanId, action, !value);
+          if (action === 'favorite') {
+            usePlaylistStateStore.getState().toggleFavoriteInStore(cleanId, !value);
+          } else if (action === 'difficult') {
+            const cardObj = usePlaylistStateStore.getState().cardsById[cleanId] || {};
+            usePlaylistStateStore.getState().transferCard(cleanId, cardObj, !value ? 'hard' : null);
+          } else if (action === 'archived') {
+            usePlaylistStateStore.setState((state) => {
+              const existing = state.cardsById[cleanId];
+              if (!existing) return {};
+              return {
+                cardsById: {
+                  ...state.cardsById,
+                  [cleanId]: { ...existing, isArchived: !value },
+                },
+              };
+            });
+          }
         }
       }
     );
 
     if (action === 'favorite') {
       userCardStateService.toggleLike(cleanId).catch(console.error);
-      const currentActivePlaylistId = useBookmarkStore.getState().activePlaylistId;
+      const currentActivePlaylistId = activePlaylistId;
       if (currentActivePlaylistId && currentActivePlaylistId !== 'likes' && currentActivePlaylistId !== 'watch-later') {
         togglePlaylistItem.mutate({
           playlistId: currentActivePlaylistId,
@@ -2404,7 +2594,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         });
       }
     }
-  }, [isGuest, handleCardStateUpdate]);
+  }, [isGuest, handleCardStateUpdate, activePlaylistId, togglePlaylistItem]);
 
   const handleWatchLaterToggleInReels = useCallback((cardId: string) => {
     const cleanId = cardId.split('-loop-')[0];
@@ -2420,49 +2610,19 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const handleDifficultyStateUpdateInReels = useCallback((cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => {
     lightHaptic();
     
-    const targetCard = cardsList.find((c) => c && c._id.split('-loop-')[0] === cardId);
+    const targetCard = usePlaylistStateStore.getState().cardsById[cardId];
     const activeCurrently = targetCard?.difficultyState === state;
     const resolvedNewState = activeCurrently ? null : state;
 
-    // 1. Optimistic update of local React state instantly to unlock vertical swipe locks
-    setAllCards((prevCards) =>
-      prevCards.map((card) => {
-        const baseId = card._id.split('-loop-')[0];
-        if (baseId === cardId) {
-          const qp = resolvedNewState
-            ? {
-                attemptStatus: resolvedNewState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
-                perceivedDifficultyByUser: resolvedNewState === 'skipped' ? null : (resolvedNewState as any),
-              }
-            : null;
-          return { ...card, difficultyState: resolvedNewState, currentUserQuestionProgress: qp };
-        }
-        return card;
-      })
-    );
-
-    setSessionCards((prevCards) =>
-      prevCards.map((card) => {
-        if (!card) return card;
-        const baseId = card._id.split('-loop-')[0];
-        if (baseId === cardId) {
-          const qp = resolvedNewState
-            ? {
-                attemptStatus: resolvedNewState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
-                perceivedDifficultyByUser: resolvedNewState === 'skipped' ? null : (resolvedNewState as any),
-              }
-            : null;
-          return { ...card, difficultyState: resolvedNewState, currentUserQuestionProgress: qp };
-        }
-        return card;
-      })
-    );
+    // 1. Optimistic update of local Zustand store instantly to unlock vertical swipe locks & trigger cell rerender
+    const cardObj = usePlaylistStateStore.getState().cardsById[cardId] || {};
+    usePlaylistStateStore.getState().transferCard(cardId, cardObj, resolvedNewState);
 
     // 2. Persist to database instantly
     if (!isGuest) {
       updateDifficultyStateMutation.mutate({ cardId, difficultyState: resolvedNewState });
     }
-  }, [isGuest, updateDifficultyStateMutation, cardsList, allCards, sessionCards]);
+  }, [isGuest, updateDifficultyStateMutation]);
 
   const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
     const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
@@ -2527,9 +2687,9 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   // Set sessionStartCardId when cardsList changes or activeIndex is first set
   useEffect(() => {
     if (cardsList.length > 0 && !sessionStartCardId.current) {
-      const activeCard = cardsList[activeIndex];
-      if (activeCard) {
-        sessionStartCardId.current = activeCard._id;
+      const activeCardId = cardsList[activeIndex];
+      if (activeCardId) {
+        sessionStartCardId.current = activeCardId;
       }
     }
   }, [cardsList, activeIndex]);
@@ -2542,8 +2702,11 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     const listLength = cardsList.length;
     if (listLength === 0) return;
 
-    const currentCard = cardsList[activeIndex];
+    const currentCardId = cardsList[activeIndex];
+    if (!currentCardId) return;
+    const currentCard = usePlaylistStateStore.getState().cardsById[currentCardId.split('-loop-')[0]];
     if (!currentCard) return;
+
     if (currentCard.difficultyState === null || currentCard.difficultyState === undefined) {
       Toast.show({
         type: 'info',
@@ -2585,6 +2748,15 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const stableGoToNext = useCallback(() => goToNextCardRef.current(), []);
   const stableGoToPrev = useCallback(() => goToPrevCardRef.current(), []);
 
+  const handleScrollEnd = useCallback((event: any) => {
+    const yOffset = event.nativeEvent.contentOffset.y;
+    const index = Math.round(yOffset / Math.round(cardHeight + 16));
+    if (index !== activeIndex && index >= 0 && index < cardsList.length) {
+      setNavState({ activeIndex: index, prevIdx: activeIndex });
+      transitionToCard(index);
+    }
+  }, [activeIndex, cardsList.length, cardHeight, transitionToCard]);
+
   // Hydration Mount Scrolling
   useEffect(() => {
     if (cardsList.length > 0 && !hasScrolledToInitial.current) {
@@ -2617,13 +2789,23 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     return unsubscribe;
   }, [navigation, isCustomPlayer]);
 
+  // Analytics: Track dynamic vertical scrolls
+  const isFirstScrollMount = useRef(true);
+  useEffect(() => {
+    if (isFirstScrollMount.current) {
+      isFirstScrollMount.current = false;
+      return;
+    }
+    useTrackingStore.getState().incrementScroll();
+  }, [activeIndex]);
+
   // Listen to activeIndex changes to sync session, prefetch images, and handle infinite pagination load
   useEffect(() => {
     if (cardsList.length > 0 && activeIndex >= 0 && activeIndex < cardsList.length) {
       const idx = activeIndex;
 
       // Keep track of the last 3 visited card IDs
-      const currentCardId = cardsList[idx]?._id;
+      const currentCardId = cardsList[idx];
       if (currentCardId) {
         recentCardIdsRef.current = [
           currentCardId,
@@ -2640,9 +2822,12 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       try {
         const prefetchCount = Math.min(idx + 3, cardsList.length);
         for (let i = idx + 1; i < prefetchCount; i++) {
-          const nextCard = cardsList[i];
-          if (nextCard && nextCard.image) {
-            ExpoImage.prefetch(nextCard.image).catch(() => {});
+          const nextCardId = cardsList[i];
+          if (nextCardId) {
+            const nextCard = usePlaylistStateStore.getState().cardsById[nextCardId.split('-loop-')[0]];
+            if (nextCard && nextCard.image) {
+              ExpoImage.prefetch(nextCard.image).catch(() => {});
+            }
           }
         }
       } catch (e) {
@@ -2704,6 +2889,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#F5F5F7' }} className="bg-[#F5F5F7]">
+      <SyncPauseGate />
       
       {showTutorial && (
         <FirstFeedTutorial onDismiss={() => setShowTutorial(false)} />
@@ -2782,7 +2968,9 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
         <TouchableOpacity
           onPress={async () => {
-            const activeCardItem = cardsList[activeIndex];
+            const activeCardId = cardsList[activeIndex];
+            if (!activeCardId) return;
+            const activeCardItem = usePlaylistStateStore.getState().cardsById[activeCardId.split('-loop-')[0]];
             if (!activeCardItem) return;
 
             const slides = getSlidesForCard(activeCardItem);
@@ -2839,57 +3027,36 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
             ref={flatListRef}
             data={cardsList}
             scrollEnabled={scrollEnabled}
-            renderItem={({ item, index }: { item: IPopulatedRevisionCard | null; index: number }) => {
-              if (!item) {
-                return (
-                  <View 
-                    style={{ 
-                      height: cardHeight, 
-                      alignSelf: 'center', 
-                      width: width * 0.97, 
-                      marginBottom: 16,
-                      top: 22,
-                    }}
-                  >
-                    <ReelItemSkeleton cardHeight={cardHeight} width={width} />
-                  </View>
-                );
-              }
-
-              const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
-              const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
-              const isFavorite = !!item.isFavorite || (!!activePlaylistId && activePlaylistId !== 'likes');
-              
-              const activeCardItem = cardsList[activeIndex];
+            renderItem={({ item, index }: { item: any; index: number }) => {
+              const activeCardId = cardsList[activeIndex];
+              const activeCardItem = activeCardId ? usePlaylistStateStore.getState().cardsById[activeCardId.split('-loop-')[0]] : null;
               const isActiveCardClassified = activeCardItem ? (activeCardItem.difficultyState !== null && activeCardItem.difficultyState !== undefined) : true;
 
               return (
-                <ReelItem
-                  key={`${item._id}-${feedSessionIdRef.current}`}
-                  item={item}
+                <ReelsRenderItem
+                  cardId={item}
                   index={index}
                   activeIndex={activeIndex}
-                  isActiveCardClassified={isActiveCardClassified}
-                  goToNextCard={stableGoToNext}
-                  goToPrevCard={stableGoToPrev}
                   cardHeight={cardHeight}
                   width={width}
-                  isFavorite={isFavorite}
                   activePlaylistId={activePlaylistId}
                   isGuest={isGuest}
-                  canEdit={canEdit}
-                  onToggleWatchLater={handleWatchLaterToggleInReels}
-                  onCardStateUpdate={handleProgressUpdateInReels}
-                  onPlaylistPickerTrigger={setPlaylistModalCard}
-                  onMoreOptionsTrigger={handleMoreOptionsTrigger}
-                  onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
+                  stableGoToNext={stableGoToNext}
+                  stableGoToPrev={stableGoToPrev}
+                  handleWatchLaterToggleInReels={handleWatchLaterToggleInReels}
+                  handleProgressUpdateInReels={handleProgressUpdateInReels}
+                  setPlaylistModalCard={setPlaylistModalCard}
+                  handleMoreOptionsTrigger={handleMoreOptionsTrigger}
+                  handleDifficultyStateUpdateInReels={handleDifficultyStateUpdateInReels}
                   scrollY={scrollY}
                   scrollEnabled={scrollEnabled}
-                  onScrollEnabledChange={handleScrollEnabledChange}
+                  handleScrollEnabledChange={handleScrollEnabledChange}
+                  isActiveCardClassified={isActiveCardClassified}
+                  feedSessionId={feedSessionIdRef.current}
                 />
               );
             }}
-            keyExtractor={(item: IPopulatedRevisionCard | null, index: number) => item?._id || `loading-slot-${index}`}
+            keyExtractor={(item: any, index: number) => item || `loading-slot-${index}`}
             snapToInterval={Math.round(cardHeight + 16)} // Subpixel Snapping coordinate rounding
             snapToAlignment="start"
             decelerationRate="fast"
@@ -2898,17 +3065,15 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
             estimatedItemSize={Math.round(cardHeight + 16)}
             drawDistance={Math.round(cardHeight * 1.5)} // Scoped viewport precomputation window
             removeClippedSubviews={Platform.OS === 'android'} // Android memory containment, off-screen optimization
-            getItemType={(item: IPopulatedRevisionCard | null) => item ? (item.code ? 'CODE_SLIDE' : 'TEXT_SLIDE') : 'LOADING'} // Custom cell templates recycling separation
+            getItemType={(item: any) => {
+              if (!item) return 'LOADING';
+              const card = usePlaylistStateStore.getState().cardsById[item.split('-loop-')[0]];
+              return card && card.code ? 'CODE_SLIDE' : 'TEXT_SLIDE';
+            }}
             onScroll={handleScroll}
             scrollEventThrottle={16}
-            onMomentumScrollEnd={(event: any) => {
-              const yOffset = event.nativeEvent.contentOffset.y;
-              const index = Math.round(yOffset / Math.round(cardHeight + 16));
-              if (index !== activeIndex && index >= 0 && index < cardsList.length) {
-                setNavState({ activeIndex: index, prevIdx: activeIndex });
-                transitionToCard(index);
-              }
-            }}
+            onMomentumScrollEnd={handleScrollEnd}
+            onScrollEndDrag={handleScrollEnd}
             style={{ width: '100%', height: '100%', backgroundColor: '#F5F5F7' }}
             contentContainerStyle={{ alignItems: 'center' }}
           />

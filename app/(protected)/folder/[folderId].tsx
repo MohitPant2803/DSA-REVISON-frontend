@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { ChevronLeft, Plus, PlayCircle, Pencil } from 'lucide-react-native';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useRole } from '@/hooks/useRole';
@@ -23,12 +23,16 @@ import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { SyncPauseGate } from '@/components/SyncPauseGate';
 import { useCardDifficultyMap, useCardsById } from '@/hooks/usePlaylistStoreSelectors';
-import { useSyncEngine } from '@/hooks/useSyncEngine';
+// useSyncEngine removed: sync is mounted at root layout level. This screen uses pauseSyncGate instead.
 import { resolveCardState } from '@/utils/resolveCardState';
 
 export default function FolderCardsScreen() {
   useAppBackHandler();
+
+  // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
+  const resumeSyncGate = usePlaylistStateStore((s) => s.resumeSyncGate);
   const router = useRouter();
   const params = useLocalSearchParams<{
     folderId: string;
@@ -72,10 +76,10 @@ export default function FolderCardsScreen() {
   const hasCardsToRevise = subfolders.length === 0 && cards.length > 0;
   const isAnyRefetching = isRefetching || isRefetchingSubfolders;
 
-  const { triggerBackgroundSync } = useSyncEngine();
   const handleRefresh = async () => {
     try {
-      await triggerBackgroundSync();
+      // Use resumeSyncGate to trigger a forced sync flush for pull-to-refresh
+      resumeSyncGate?.();
     } catch (e) {}
   };
 
@@ -190,6 +194,7 @@ export default function FolderCardsScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
+      <SyncPauseGate />
       <View className="flex-row items-center px-4 pt-2 pb-2">
         <TouchableOpacity
           onPress={() => router.back()}

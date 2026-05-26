@@ -10,6 +10,7 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   withTiming,
+  withDelay,
   Easing,
 } from 'react-native-reanimated';
 import { useUIStore } from '@/store/useUIStore';
@@ -106,7 +107,7 @@ function TabLayoutInner() {
       translateY.value = 120;
     } else {
       // Standard tabs: slide floating bottom tab bar back up into focus with absolute zero bounce
-      translateY.value = withTiming(0, { duration: 450, easing: easeOut });
+      translateY.value = withDelay(400, withTiming(0, { duration: 450, easing: easeOut }));
     }
   }, [isReels, isReelsPlayer, isLearn, hasAppBeenAnimated]);
 
@@ -128,7 +129,7 @@ function TabLayoutInner() {
       )}
       screenOptions={{
         headerShown: false,
-        freezeOnBlur: true,
+        freezeOnBlur: false,
         tabBarShowLabel: false, // Cleaner visual appearance like VisionOS
         tabBarStyle: {
           position: 'absolute',

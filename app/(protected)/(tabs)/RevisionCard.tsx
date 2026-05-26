@@ -247,6 +247,8 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
             {/* Optional Cover Image */}
             {card.image && slide.type === 'intro' && (
               <StyledImage
+                recycleKey={card._id}
+                decodeHeight={120}
                 source={{ uri: card.image }}
                 className="w-full h-44 rounded-2xl bg-slate-100"
                 contentFit="cover"

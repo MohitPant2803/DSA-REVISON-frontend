@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useCallback, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import * as revisionService from '@/services/revisionService';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -18,26 +19,26 @@ export type { QueryRevisionCardsInput } from '@/services/revisionService';
 
 // 1. Local-First Hybrid Read hooks for Revision Cards
 export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
-  const cardsById = usePlaylistStateStore((s) => s.cardsById);
+  const cardIds = usePlaylistStateStore(
+    useShallow((s) => {
+      let list = Object.values(s.cardsById);
 
-  const cardList = useMemo(() => {
-    let list = Object.values(cardsById);
+      if (query?.folderId) {
+        list = list.filter((c) => {
+          if (!c) return false;
+          const fid = typeof c.folderId === 'object' && c.folderId !== null ? c.folderId._id : c.folderId;
+          return fid === query.folderId || c.rootFolderId === query.folderId || c.subfolderIds?.includes(query.folderId!);
+        });
+      }
 
-    if (query?.folderId) {
-      list = list.filter((c) => {
-        if (!c) return false;
-        const fid = typeof c.folderId === 'object' && c.folderId !== null ? c.folderId._id : c.folderId;
-        return fid === query.folderId || c.rootFolderId === query.folderId || c.subfolderIds?.includes(query.folderId!);
-      });
-    }
+      if (query?.search) {
+        const sVal = query.search.toLowerCase();
+        list = list.filter((c) => c && (c.title.toLowerCase().includes(sVal) || c.topic.toLowerCase().includes(sVal)));
+      }
 
-    if (query?.search) {
-      const s = query.search.toLowerCase();
-      list = list.filter((c) => c && (c.title.toLowerCase().includes(s) || c.topic.toLowerCase().includes(s)));
-    }
-
-    return list.sort((a, b) => (a.order || 0) - (b.order || 0));
-  }, [cardsById, query?.folderId, query?.search]);
+      return list.sort((a, b) => (a.order || 0) - (b.order || 0)).map((c) => c._id);
+    })
+  );
 
   const queryResult = useQuery({
     queryKey: ['revisionCards', query],
@@ -47,30 +48,36 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
         if (paginated && paginated.results) {
           usePlaylistStateStore.getState().hydratePlaylistCards('all', paginated.results);
         }
-        return paginated;
+        return {
+          ...paginated,
+          results: paginated.results?.map(c => c._id) || [],
+        };
       } catch (err) {
         return {
-          results: cardList,
+          results: cardIds,
           page: 1,
           limit: 100,
           totalPages: 1,
-          totalResults: cardList.length,
-        } as PaginatedRevisionCards;
+          totalResults: cardIds.length,
+        } as any;
       }
     },
     staleTime: 1000 * 60,
   });
 
-  const hasLocal = cardList.length > 0;
+  const hasLocal = cardIds.length > 0;
 
   return {
     data: hasLocal ? {
-      results: cardList,
+      results: cardIds,
       page: 1,
       limit: 100,
       totalPages: 1,
-      totalResults: cardList.length,
-    } as PaginatedRevisionCards : queryResult.data,
+      totalResults: cardIds.length,
+    } as any : {
+      ...queryResult.data,
+      results: queryResult.data?.results?.map((c: any) => typeof c === 'string' ? c : c._id) || [],
+    },
     isLoading: queryResult.isLoading && !hasLocal,
     isError: queryResult.isError && !hasLocal,
     isFetching: queryResult.isFetching,
@@ -215,6 +222,10 @@ export const useCreateRevisionCard = () => {
       });
 
       try {
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+          if (__DEV__) console.log('[useCreateRevisionCard] Local-first mode active. Skipping immediate API call.');
+          return tempCard;
+        }
         const card = await revisionService.createRevisionCard(dto);
         usePlaylistStateStore.setState((state) => {
           const nextCards = { ...state.cardsById };
@@ -256,6 +267,10 @@ export const useUpdateRevisionCard = () => {
       });
 
       try {
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+          if (__DEV__) console.log('[useUpdateRevisionCard] Local-first mode active. Skipping immediate API call.');
+          return { _id: cardId, ...updateData } as any;
+        }
         const card = await revisionService.updateRevisionCard({ cardId, updateData });
         return card;
       } catch (error) {
@@ -268,15 +283,12 @@ export const useUpdateRevisionCard = () => {
 
 export const useDeleteRevisionCard = () => {
   const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+  const deleteCardInStore = usePlaylistStateStore((s) => s.deleteCardInStore);
 
   return useMutation({
     mutationFn: async (cardId: string) => {
-      // 1. Optimistic Delete local cache
-      usePlaylistStateStore.setState((state) => {
-        const nextCards = { ...state.cardsById };
-        delete nextCards[cardId];
-        return { cardsById: nextCards };
-      });
+      // 1. Centralized deletion and relationship cleanup in store
+      deleteCardInStore(cardId);
 
       // 2. Enqueue action
       enqueueOfflineAction({
@@ -286,6 +298,10 @@ export const useDeleteRevisionCard = () => {
       });
 
       try {
+        if (usePlaylistStateStore.getState().isLiveSyncPaused) {
+          if (__DEV__) console.log('[useDeleteRevisionCard] Local-first mode active. Skipping immediate API call.');
+          return;
+        }
         await revisionService.deleteRevisionCard(cardId);
       } catch (error) {
         if (__DEV__) console.warn('[Offline Mode] Card deleted locally. Sync queued.', error);

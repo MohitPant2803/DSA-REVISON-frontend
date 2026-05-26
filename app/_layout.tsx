@@ -154,18 +154,21 @@ export default function RootLayout() {
       if (expired && token) {
         const online = await isNetworkConnected();
         if (online) {
-          if (__DEV__) console.log('[Auth Layout] Token expired while online. Logging out...');
+          // Check if there's unsynced work before force-logout
+          const pendingCount = usePlaylistStateStore.getState().offlineActionQueue.length;
+          if (pendingCount > 0) {
+            if (__DEV__) console.log(`[Auth Layout] Token expired but ${pendingCount} actions pending. Attempting silent refresh first.`);
+            const refreshed = await useAuthStore.getState().silentTokenRefresh();
+            if (refreshed) {
+              if (__DEV__) console.log('[Auth Layout] Token refreshed. Pending work preserved.');
+              return; // Don't logout — token was refreshed
+            }
+          }
+          // No pending work or refresh failed — proceed with logout
           await logout();
           router.replace("/(auth)/login");
         } else {
           if (__DEV__) console.log('[Auth Layout] Token expired while offline. Study studies allowed...');
-          Toast.show({
-            type: 'info',
-            text1: 'Sync Temporarily Suspended',
-            text2: "Please sign in next time you are online to backup your progress.",
-            position: 'top',
-            autoHide: false,
-          });
         }
       }
     };

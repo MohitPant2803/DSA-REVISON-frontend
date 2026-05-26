@@ -21,6 +21,12 @@ interface TrackingState {
   // Persistent loops completed per folder/playlist
   loopsCompleted: Record<string, number>;
   
+  // Analytics
+  totalSwipes: number;
+  totalScrolls: number;
+  unsyncedSwipes: number;
+  unsyncedScrolls: number;
+  
   // Actions
   setMode: (mode: PlaybackMode) => void;
   setInfiniteLoop: (enabled: boolean) => void;
@@ -33,6 +39,10 @@ interface TrackingState {
   toggleCardCompleted: (cardId: string) => void;
   registerLoopCompletion: (id: string) => void;
   resetSession: () => void;
+
+  incrementSwipe: () => void;
+  incrementScroll: () => void;
+  clearUnsyncedAnalytics: () => void;
 }
 
 export const useTrackingStore = create<TrackingState>()(
@@ -49,6 +59,11 @@ export const useTrackingStore = create<TrackingState>()(
       completedCardIds: {},
       
       loopsCompleted: {},
+      
+      totalSwipes: 0,
+      totalScrolls: 0,
+      unsyncedSwipes: 0,
+      unsyncedScrolls: 0,
       
       setMode: (mode) => set({ currentMode: mode }),
       
@@ -121,6 +136,21 @@ export const useTrackingStore = create<TrackingState>()(
         completedCardsCount: 0,
         completedCardIds: {},
       }),
+      
+      incrementSwipe: () => set((state) => ({
+        totalSwipes: state.totalSwipes + 1,
+        unsyncedSwipes: state.unsyncedSwipes + 1,
+      })),
+      
+      incrementScroll: () => set((state) => ({
+        totalScrolls: state.totalScrolls + 1,
+        unsyncedScrolls: state.unsyncedScrolls + 1,
+      })),
+      
+      clearUnsyncedAnalytics: () => set({
+        unsyncedSwipes: 0,
+        unsyncedScrolls: 0,
+      }),
     }),
     {
       name: 'dsa-tracking-storage',
@@ -130,6 +160,10 @@ export const useTrackingStore = create<TrackingState>()(
         infiniteLoop: state.infiniteLoop,
         watchLaterCardIds: state.watchLaterCardIds,
         loopsCompleted: state.loopsCompleted,
+        totalSwipes: state.totalSwipes,
+        totalScrolls: state.totalScrolls,
+        unsyncedSwipes: state.unsyncedSwipes,
+        unsyncedScrolls: state.unsyncedScrolls,
       }),
     }
   )
