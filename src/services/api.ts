@@ -1,5 +1,4 @@
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
-import { useAuthStore } from '@/store/useAuthStore';
 
 const decodeBase64 = (input: string): string => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -65,10 +64,12 @@ const api = axios.create({
 // Abstracting this allows you to swap out SecureStore (Mobile) for localStorage/Cookies (Web) later without touching the interceptor.
 export const tokenManager = {
   getToken: async (): Promise<string | null> => {
-    // Get token synchronously from Zustand (which stays in sync with SecureStore)
+    // Dynamic import to prevent circular require cycles
+    const { useAuthStore } = require('@/store/useAuthStore');
     return useAuthStore.getState().token;
   },
   clearToken: async (): Promise<void> => {
+    const { useAuthStore } = require('@/store/useAuthStore');
     await useAuthStore.getState().logout();
   }
 };
@@ -83,6 +84,7 @@ api.interceptors.request.use(
       if (isTokenExpiringSoon(token)) {
         console.log('[API Interceptor] Token expiring soon. Triggering proactive silent refresh...');
         try {
+          const { useAuthStore } = require('@/store/useAuthStore');
           const success = await useAuthStore.getState().silentTokenRefresh();
           if (success) {
             token = await tokenManager.getToken(); // Retrieve refreshed token
@@ -135,6 +137,7 @@ api.interceptors.response.use(
     const normalizedError = normalizeError(error);
 
     if (error.response?.status === 401) {
+      const { useAuthStore } = require('@/store/useAuthStore');
       const { isAuthenticated, setSessionExpired } = useAuthStore.getState();
       if (isAuthenticated) {
         console.log('[API Response Interceptor] 401 Unauthorized detected. Transitioning to soft-session-expired...');
