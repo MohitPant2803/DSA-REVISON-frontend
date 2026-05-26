@@ -11,7 +11,7 @@ import Toast from 'react-native-toast-message';
 import '../global.css';  // ← only here
 import { ExitConfirmationModal } from "@/components/ExitConfirmationModal";
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import NetInfo from '@react-native-community/netinfo';
+import { isNetworkConnected } from '@/utils/network';
 import * as Linking from 'expo-linking';
 
 import { useOnboardingStore } from "@/store/useOnboardingStore";
@@ -152,8 +152,7 @@ export default function RootLayout() {
     const checkTokenExpiryGracefully = async () => {
       const expired = isTokenExpired(token);
       if (expired && token) {
-        const netState = await NetInfo.fetch();
-        const online = netState.isConnected === true;
+        const online = await isNetworkConnected();
         if (online) {
           if (__DEV__) console.log('[Auth Layout] Token expired while online. Logging out...');
           await logout();

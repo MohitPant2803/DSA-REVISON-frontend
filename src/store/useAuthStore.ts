@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import NetInfo from '@react-native-community/netinfo';
+import { isNetworkConnected } from '@/utils/network';
 import api from '@/services/api';
 
 export interface User {
@@ -160,9 +160,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   restoreSession: async () => {
     try {
-      // Synchronously retrieve cached network state via NetInfo
-      const netState = await NetInfo.fetch();
-      const isOffline = netState.isConnected === false;
+      // Retrieve cached network state via isNetworkConnected utility
+      const isConnected = await isNetworkConnected();
+      const isOffline = !isConnected;
 
       // Parallelize storage retrievals to resolve startup waterfalls
       const [user, token] = await Promise.all([

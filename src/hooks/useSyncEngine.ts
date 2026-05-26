@@ -4,7 +4,7 @@ import api from '@/services/api';
 import { usePlaylistStateStore, OfflineAction } from '@/store/usePlaylistStateStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { AppState, AppStateStatus } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
+import { isNetworkConnected } from '@/utils/network';
 import { syncTelemetry } from '@/utils/syncTelemetry';
 import type { IFolder } from '@/types/folder';
 import type { ApiPlaylist } from '@/services/playlistService';
@@ -152,9 +152,9 @@ export function useSyncEngine() {
     isSyncInFlight.current = true;
     syncTelemetry.logSyncStart(offlineActionQueue.length);
 
-    // Immediate Connectivity Check via NetInfo cached connectivity
-    const netState = await NetInfo.fetch();
-    if (netState.isConnected === false) {
+    // Immediate Connectivity Check via isNetworkConnected utility
+    const isConnected = await isNetworkConnected();
+    if (!isConnected) {
       setSyncStatus('offline');
       isSyncInFlight.current = false;
       return;
