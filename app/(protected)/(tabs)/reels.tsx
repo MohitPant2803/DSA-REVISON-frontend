@@ -869,6 +869,10 @@ const ActiveReelItem = React.memo(({
     return result;
   }, [item, preferences.hideCertainBlockTypes, preferences.explanationFlowOrder]);
 
+  const resetSwipeLock = useCallback(() => {
+    swipeIncrementedForGesture.current = false;
+  }, []);
+
   const handleSwipeComplete = () => {
     if (!isMounted.current) return;
     
@@ -1021,9 +1025,7 @@ const ActiveReelItem = React.memo(({
       gestureLock.value = 'horizontal'; 
       
       // Reset swipe completion lock for this new horizontal gesture
-      runOnJS(() => {
-        swipeIncrementedForGesture.current = false;
-      })();
+      runOnJS(resetSwipeLock)();
       
       // Disable parent vertical scroll list ONLY after lock is confirmed
       if (onScrollEnabledChange) {
