@@ -674,31 +674,9 @@ export default function PersonalScreen() {
         <View className="px-6 pb-6 pt-2">
           <View className="flex-row items-center justify-between">
             <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
-                  My Space
-                </Text>
-                
-                {/* Elegant inline sync status indicator dot */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(148, 163, 184, 0.05)', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 10, marginTop: 4 }}>
-                  <View 
-                    style={{ 
-                      width: 6, 
-                      height: 6, 
-                      borderRadius: 3, 
-                      backgroundColor: 
-                        syncStatus === 'synced' ? theme.colors.status.success : 
-                        syncStatus === 'syncing' ? theme.colors.status.info : 
-                        theme.colors.status.warning, 
-                    }} 
-                  />
-                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#64748B' }}>
-                    {syncStatus === 'synced' ? 'Synced' :
-                     syncStatus === 'syncing' ? 'Syncing...' :
-                     'Offline'}
-                  </Text>
-                </View>
-              </View>
+              <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
+                My Space
+              </Text>
               <Text className="text-[#7F8A9E] text-[13px] font-semibold mt-1.5 leading-none">
                 Your personal revision deck
               </Text>

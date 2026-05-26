@@ -327,9 +327,7 @@ export function useSyncEngine() {
           clearTimeout(retryTimeoutRef.current);
           retryTimeoutRef.current = null;
         }
-        console.log('[Sync Engine] App backgrounded. Paused background retry backoffs.');
       } else if (appStateRef.current !== 'active' && nextAppState === 'active') {
-        console.log('[Sync Engine] App activated. Triggering sync.');
         triggerBackgroundSync();
       }
       appStateRef.current = nextAppState;

@@ -22,15 +22,7 @@ export const syncTelemetry = {
       logBuffer.pop();
     }
 
-    if (__DEV__) {
-      const icon = {
-        info: 'ℹ️',
-        success: '✅',
-        failure: '❌',
-        expiry: '🔑',
-      }[type];
-      console.log(`[Sync Telemetry] ${icon} ${message}`, metadata ? JSON.stringify(metadata) : '');
-    }
+    // Silent in-memory buffer tracking active for premium observability
   },
 
   logSyncStart: (queueDepth: number) => {

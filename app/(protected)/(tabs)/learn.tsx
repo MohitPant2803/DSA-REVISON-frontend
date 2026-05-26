@@ -589,31 +589,9 @@ export default function LearnScreen() {
       >
         {/* Top welcome line and centered quote anchor */}
         <View style={styles.headerBlock}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: 8 }}>
-            <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
-              Welcome back, {firstName}
-            </Animated.Text>
-            
-            {/* Elegant inline sync status indicator dot */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(148, 163, 184, 0.05)', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12 }}>
-              <View 
-                style={{ 
-                  width: 8, 
-                  height: 8, 
-                  borderRadius: 4, 
-                  backgroundColor: 
-                    syncStatus === 'synced' ? theme.colors.status.success :
-                    syncStatus === 'syncing' ? theme.colors.status.info :
-                    theme.colors.status.warning,
-                }} 
-              />
-              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>
-                {syncStatus === 'synced' ? 'Synced' :
-                 syncStatus === 'syncing' ? 'Syncing...' :
-                 'Offline'}
-              </Text>
-            </View>
-          </View>
+          <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
+            Welcome back, {firstName}
+          </Animated.Text>
           
           {/* ONE Persistent, continuous Quote block that slides upward with 100% object permanence */}
           <Animated.View style={[styles.headerQuoteContainer, quoteAnimatedStyle]}>

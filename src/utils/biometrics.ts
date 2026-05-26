@@ -5,7 +5,6 @@ export async function checkBiometricsSupported(): Promise<boolean> {
     const isEnrolled = await LocalAuthentication.isEnrolledAsync();
     return hasHardware && isEnrolled;
   } catch (err) {
-    console.warn('[Biometrics] LocalAuthentication native module is missing or not built yet.', err);
     return false;
   }
 }
@@ -23,7 +22,6 @@ export async function authenticateWithBiometrics(reason = 'Verify your session t
     });
     return result.success;
   } catch (err) {
-    console.warn('[Biometrics] Authentication failed:', err);
     return false;
   }
 }

@@ -17,11 +17,7 @@ export async function isNetworkConnected(): Promise<boolean> {
         return state.isConnected;
       }
     } catch (err) {
-      console.warn('[Network Util] NetInfo native module call failed. Falling back to fast fetch ping...', err);
-    }
-  } else {
-    if (__DEV__) {
-      console.warn('[Network Util] RNCNetInfo native module is null/unlinked. Bypassing require to prevent crash.');
+      // Safe fallback
     }
   }
 
