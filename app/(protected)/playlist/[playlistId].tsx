@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Platform,
   Vibration,
   StyleSheet,
+  Pressable,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -36,6 +38,75 @@ const lightHaptic = () => {
     Vibration.vibrate(5);
   }
 };
+
+interface CardItemProps {
+  card: IPopulatedRevisionCard;
+  drag: () => void;
+  isActive: boolean;
+  startRevising: (shuffle?: boolean, resume?: boolean, startCardId?: string) => void;
+}
+
+const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemProps) => {
+  if (!card || !card._id) return null;
+  return (
+    <ScaleDecorator activeScale={1.02}>
+      <TouchableOpacity
+        activeOpacity={isActive ? 1 : 0.8}
+        onPress={() => !isActive && startRevising(false, false, card._id)}
+        disabled={isActive}
+        onLongPress={() => {
+          lightHaptic();
+          drag();
+        }}
+        delayLongPress={150}
+        style={[
+          styles.cardWrapper,
+          isActive && styles.cardActive
+        ]}
+      >
+        <View className="flex-row justify-between items-center">
+          <View className="flex-1 mr-3">
+            <Text className="text-violet-600 text-[10px] font-bold uppercase tracking-widest mb-1">
+              {card.topic}
+            </Text>
+            <Text className="text-slate-900 font-semibold text-lg leading-tight" numberOfLines={1}>
+              {card.title}
+            </Text>
+            <View className="flex-row gap-2 mt-2">
+              <Text
+                className={`text-xs font-semibold ${
+                  card.difficulty === 'Easy'
+                    ? 'text-emerald-600'
+                    : card.difficulty === 'Medium'
+                    ? 'text-amber-600'
+                    : 'text-rose-600'
+                }`}
+              >
+                {card.difficulty}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity 
+            onPressIn={() => { lightHaptic(); drag(); }}
+            className="p-3"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <GripVertical color="#CBD5E1" size={24} />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </ScaleDecorator>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.card._id === nextProps.card._id &&
+    prevProps.card.title === nextProps.card.title &&
+    prevProps.card.topic === nextProps.card.topic &&
+    prevProps.card.difficulty === nextProps.card.difficulty &&
+    prevProps.startRevising === nextProps.startRevising
+  );
+});
 
 export default function PlaylistCardsScreen() {
   useAppBackHandler();
@@ -76,31 +147,69 @@ export default function PlaylistCardsScreen() {
         .filter(f => f != null && f.card != null && typeof f.card === 'object' && '_id' in f.card)
         .map(f => f.card) as IPopulatedRevisionCard[];
       hydratePlaylistCards(playlistId, favCards.filter(Boolean).filter(c => c && c._id));
-    } else if (!isLikes && cardsData) {
-      hydratePlaylistCards(playlistId, cardsData.filter(Boolean).filter((c: any) => c && c._id));
     }
-  }, [cardsData, libraryData, isLikes, playlistId, hydratePlaylistCards]);
+  }, [libraryData, isLikes, playlistId, hydratePlaylistCards]);
 
-  const localCards = useMemo(() => {
-    return storeCards || [];
+  const [localCards, setLocalCards] = useState<IPopulatedRevisionCard[]>([]);
+
+  useEffect(() => {
+    if (storeCards) {
+      const currentIds = localCards.map(c => c?._id).join(',');
+      const nextIds = storeCards.map(c => c?._id).join(',');
+      if (currentIds !== nextIds) {
+        setLocalCards(storeCards);
+      }
+    }
   }, [storeCards]);
 
   const displayTitle = isLikes ? 'Revised' : (playlist?.name || 'Playlist');
 
-  const handleDragEnd = ({ data }: { data: IPopulatedRevisionCard[] }) => {
-    const cardIds = data.map(c => c._id);
-    setPlaylistCardOrder(playlistId, cardIds);
-    if (isLikes) {
-      reorderLikes.mutate(cardIds);
-    } else if (playlistId === 'watch-later') {
-      useTrackingStore.getState().setWatchLater(cardIds);
-      queryClient.invalidateQueries({ queryKey: ['playlistDetail', playlistId] });
-    } else {
-      reorderPlaylist.mutate({ playlistId, cardIds });
-    }
-  };
+  const pendingOrderRef = useRef<IPopulatedRevisionCard[]>([]);
 
-  const startRevising = (shuffle = false, resume = false, startCardId?: string) => {
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      pendingOrderRef.current = [];
+    };
+  }, []);
+
+  const commitOrder = useCallback((data: IPopulatedRevisionCard[]) => {
+    // 1. Commit immediately to local state so visual positions settle
+    setLocalCards(data);
+
+    // 2. Map and update store/backend
+    const draggedIds = data.map(c => c._id);
+    const originalIds = usePlaylistStateStore.getState().playlistCardOrderMap[playlistId] || [];
+    const draggedSet = new Set(draggedIds);
+    const missingIds = originalIds.filter(id => !draggedSet.has(id));
+    const finalIds = [...draggedIds, ...missingIds];
+
+    setPlaylistCardOrder(playlistId, finalIds);
+
+    if (isLikes) {
+      reorderLikes.mutate(finalIds);
+    } else if (playlistId === 'watch-later') {
+      useTrackingStore.getState().setWatchLater(finalIds);
+      queryClient.invalidateQueries({ queryKey: ['playlistDetail', playlistId] });
+    } else if (['easy', 'medium', 'hard', 'skipped'].includes(playlistId)) {
+      // Smart focus areas are manual-ordered local-first! No backend mutation.
+    } else {
+      reorderPlaylist.mutate({ playlistId, cardIds: finalIds });
+    }
+  }, [playlistId, isLikes, setPlaylistCardOrder, reorderLikes, reorderPlaylist, queryClient]);
+
+  const handleDragEnd = useCallback(({ data }: { data: IPopulatedRevisionCard[] }) => {
+    pendingOrderRef.current = data;
+
+    // Use InteractionManager to defer state updates until React Native layout interactions complete
+    InteractionManager.runAfterInteractions(() => {
+      if (!pendingOrderRef.current.length) return;
+      commitOrder(pendingOrderRef.current);
+      pendingOrderRef.current = [];
+    });
+  }, [commitOrder]);
+
+  const startRevising = useCallback((shuffle = false, resume = false, startCardId?: string) => {
     if (!playlistId) return;
     setActivePlaylistId(playlistId);
     router.push({
@@ -108,59 +217,20 @@ export default function PlaylistCardsScreen() {
       params: {
         shuffle: shuffle ? 'true' : 'false',
         startCardId: startCardId || '',
-        // 'resume' isn't explicitly passed, reels.tsx checks resume progress by default
       },
     });
-  };
+  }, [playlistId, setActivePlaylistId, router]);
 
-  const renderItem = ({ item: card, drag, isActive }: RenderItemParams<IPopulatedRevisionCard>) => {
-    if (!card || !card._id) return null;
+  const renderItem = useCallback(({ item: card, drag, isActive }: RenderItemParams<IPopulatedRevisionCard>) => {
     return (
-      <ScaleDecorator>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => startRevising(false, false, card._id)}
-          onLongPress={() => {
-            lightHaptic();
-            drag();
-          }}
-          disabled={isActive}
-          style={[
-            styles.cardWrapper,
-            isActive && styles.cardActive
-          ]}
-        >
-          <View className="flex-row justify-between items-center">
-            <View className="flex-1 mr-3">
-              <Text className="text-violet-600 text-[10px] font-bold uppercase tracking-widest mb-1">
-                {card.topic}
-              </Text>
-              <Text className="text-slate-900 font-semibold text-lg leading-tight">{card.title}</Text>
-              <View className="flex-row gap-2 mt-2">
-                <Text
-                  className={`text-xs font-semibold ${
-                    card.difficulty === 'Easy'
-                      ? 'text-emerald-600'
-                      : card.difficulty === 'Medium'
-                      ? 'text-amber-600'
-                      : 'text-rose-600'
-                  }`}
-                >
-                  {card.difficulty}
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              onPressIn={() => { lightHaptic(); drag(); }}
-              className="p-3"
-            >
-              <GripVertical color="#CBD5E1" size={24} />
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </ScaleDecorator>
+      <CardItem
+        card={card}
+        drag={drag}
+        isActive={isActive}
+        startRevising={startRevising}
+      />
     );
-  };
+  }, [startRevising]);
 
   if (!playlistId) {
     return (
@@ -209,9 +279,9 @@ export default function PlaylistCardsScreen() {
         </TouchableOpacity>
       </View>
 
-      {isLoading ? (
+      {isLoading && localCards.length === 0 ? (
         <ActivityIndicator size="large" color="#7c3aed" className="mt-12" />
-      ) : isError ? (
+      ) : isError && localCards.length === 0 ? (
         <View className="bg-white rounded-2xl p-6 mb-6 mx-4">
           <Text className="text-red-600 font-medium">{error?.message}</Text>
           <TouchableOpacity onPress={() => refetch()} className="mt-4">
@@ -230,12 +300,18 @@ export default function PlaylistCardsScreen() {
           data={localCards}
           extraData={localCards}
           onDragEnd={handleDragEnd}
-          keyExtractor={(item) => item?._id ?? Math.random().toString()}
+          keyExtractor={(item) => item?._id ? item._id.split('-loop-')[0] : `playlist-item-${Math.random()}`}
           renderItem={renderItem}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
-          activationDistance={10}
-          dragHitSlop={{ top: -10, left: -10, bottom: -10, right: -10 }}
+          activationDistance={20}
+          dragItemOverflow={false}
+          removeClippedSubviews={false}
+          getItemLayout={(_, index) => ({
+            length: 116,
+            offset: 116 * index,
+            index,
+          })}
         />
       )}
     </SafeAreaView>
@@ -244,7 +320,7 @@ export default function PlaylistCardsScreen() {
 
 const styles = StyleSheet.create({
   cardWrapper: {
-    backgroundColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 20,
     marginBottom: 12,
@@ -255,6 +331,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 1,
+    height: 104,
   },
   cardActive: {
     backgroundColor: '#fff',
@@ -264,6 +341,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 16,
     elevation: 8,
-    transform: [{ scale: 1.02 }],
   }
 });

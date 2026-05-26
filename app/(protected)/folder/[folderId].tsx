@@ -24,6 +24,7 @@ import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { useCardDifficultyMap, useCardsById } from '@/hooks/usePlaylistStoreSelectors';
+import { useSyncEngine } from '@/hooks/useSyncEngine';
 import { resolveCardState } from '@/utils/resolveCardState';
 
 export default function FolderCardsScreen() {
@@ -71,8 +72,11 @@ export default function FolderCardsScreen() {
   const hasCardsToRevise = subfolders.length === 0 && cards.length > 0;
   const isAnyRefetching = isRefetching || isRefetchingSubfolders;
 
+  const { triggerBackgroundSync } = useSyncEngine();
   const handleRefresh = async () => {
-    await Promise.all([refetch(), refetchSubfolders()]);
+    try {
+      await triggerBackgroundSync();
+    } catch (e) {}
   };
 
   const [activeFilters, setActiveFilters] = useState<string[]>([]);

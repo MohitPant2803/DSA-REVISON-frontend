@@ -44,6 +44,8 @@ export interface IRevisionCard {
   complexity?: Complexity;
   examples: string[];
   folderId: string | FolderRef;
+  rootFolderId?: string;
+  subfolderIds?: string[];
   createdBy: string;
   visibility: CardVisibility;
   order: number;

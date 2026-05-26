@@ -32,11 +32,6 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import api from '@/services/api';
 import Toast from 'react-native-toast-message';
 
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-  offlineAccess: true,
-});
-
 
 const { width, height } = Dimensions.get('window');
 
@@ -63,7 +58,7 @@ export function SegmentedControl({ options, activeId, onChange }: SegmentedContr
 
   useEffect(() => {
     if (activeIndex >= 0) {
-      slideValue.value = withSpring(activeIndex, { damping: 20, stiffness: 220 });
+      slideValue.value = activeIndex;
     }
   }, [activeIndex]);
 
@@ -165,19 +160,14 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   useEffect(() => {
     if (isOpen) {
       setShouldRender(true);
-      setTimeout(() => {
-        backdropOpacity.value = withTiming(0.3, { duration: 200 });
-        sheetScale.value = withSpring(1, { damping: 20, stiffness: 220 });
-        sheetOpacity.value = withTiming(1, { duration: 180 });
-      }, 15);
+      backdropOpacity.value = 0.3;
+      sheetScale.value = 1;
+      sheetOpacity.value = 1;
     } else {
-      backdropOpacity.value = withTiming(0, { duration: 160 });
-      sheetScale.value = withTiming(0.96, { duration: 150 });
-      sheetOpacity.value = withTiming(0, { duration: 150 }, (finished) => {
-        if (finished) {
-          runOnJS(setShouldRender)(false);
-        }
-      });
+      backdropOpacity.value = 0;
+      sheetScale.value = 0.96;
+      sheetOpacity.value = 0;
+      setShouldRender(false);
     }
   }, [isOpen]);
 
@@ -417,19 +407,14 @@ export const ReelsSettingsOverlay = React.memo(({
   useEffect(() => {
     if (isOpen) {
       setShouldRender(true);
-      setTimeout(() => {
-        backdropOpacity.value = withTiming(0.3, { duration: 200 });
-        sheetScale.value = withSpring(1, { damping: 20, stiffness: 220 });
-        sheetOpacity.value = withTiming(1, { duration: 180 });
-      }, 15);
+      backdropOpacity.value = 0.3;
+      sheetScale.value = 1;
+      sheetOpacity.value = 1;
     } else {
-      backdropOpacity.value = withTiming(0, { duration: 160 });
-      sheetScale.value = withTiming(0.96, { duration: 150 });
-      sheetOpacity.value = withTiming(0, { duration: 150 }, (finished) => {
-        if (finished) {
-          runOnJS(setShouldRender)(false);
-        }
-      });
+      backdropOpacity.value = 0;
+      sheetScale.value = 0.96;
+      sheetOpacity.value = 0;
+      setShouldRender(false);
     }
   }, [isOpen]);
 
@@ -527,33 +512,39 @@ export const ReelsSettingsOverlay = React.memo(({
             </View>
 
             {/* Select Reel Content Folder Checklist */}
-            {showReelContentSelect && !isGuest && rootFolders.length > 0 && (
+            {showReelContentSelect && (
               <View style={[styles.settingGroup, { marginTop: 18 }]}>
                 <Text style={styles.groupLabel}>Select Reel Content</Text>
                 <View style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(226, 232, 240, 0.6)', padding: 12, gap: 10 }}>
-                  {rootFolders.map((folder: any) => {
-                    const isChecked = selectedFolderIds.includes(folder._id);
-                    return (
-                      <TouchableOpacity
-                        key={folder._id}
-                        onPress={() => handleToggleFolder(folder._id)}
-                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}
-                        activeOpacity={0.7}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                          <FolderIcon size={16} color={folder.color || '#7c3aed'} />
-                          <Text style={{ fontSize: 13, fontWeight: '600', color: '#0F172A' }}>
-                            {folder.title} ({folder.cardCount ?? 0})
-                          </Text>
-                        </View>
-                        {isChecked ? (
-                          <CheckSquare size={18} color="#8B5CF6" strokeWidth={2.5} />
-                        ) : (
-                          <Square size={18} color="#94A3B8" strokeWidth={2} />
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
+                  {isGuest ? (
+                    <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginVertical: 8 }}>Sign in to filter reels by folder</Text>
+                  ) : rootFolders.length === 0 ? (
+                    <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginVertical: 8 }}>No folders created yet. Create folders to filter your reels.</Text>
+                  ) : (
+                    rootFolders.map((folder: any) => {
+                      const isChecked = selectedFolderIds.includes(folder._id);
+                      return (
+                        <TouchableOpacity
+                          key={folder._id}
+                          onPress={() => handleToggleFolder(folder._id)}
+                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <FolderIcon size={16} color={folder.color || '#7c3aed'} />
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0F172A' }}>
+                              {folder.title} ({folder.cardCount ?? 0})
+                            </Text>
+                          </View>
+                          {isChecked ? (
+                            <CheckSquare size={18} color="#8B5CF6" strokeWidth={2.5} />
+                          ) : (
+                            <Square size={18} color="#94A3B8" strokeWidth={2} />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
                 </View>
               </View>
             )}

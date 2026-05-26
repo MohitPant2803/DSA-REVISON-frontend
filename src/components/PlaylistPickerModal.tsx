@@ -194,13 +194,6 @@ export const PlaylistPickerModal = React.memo(({ card, onClose }: PlaylistPicker
         Promise.all(promises)
           .then(() => {
             // Background commits remain completely silent and invisible without heavy list refreshes
-            Toast.show({
-              type: 'success',
-              text1: 'Playlists Saved',
-              text2: 'Playlists membership updated successfully.',
-              position: 'top',
-              visibilityTime: 2000,
-            });
           })
           .catch((err) => {
             console.error('[Playlist Async Sync Error]', err);

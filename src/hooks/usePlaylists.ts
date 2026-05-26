@@ -1,14 +1,13 @@
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import * as playlistService from '@/services/playlistService';
 import * as revisionService from '@/services/revisionService';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import { useAuthStore } from '@/store/useAuthStore';
-import { getPersonalLibrary } from '@/services/progressService';
 import { useTrackingStore } from '@/store/useTrackingStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { usePlaylistCards as useStorePlaylistCards } from '@/hooks/usePlaylistStoreSelectors';
+import type { ApiPlaylist } from '@/services/playlistService';
 
 export const PLAYLISTS_KEY = 'playlists';
 export const PLAYLIST_DETAIL_KEY = 'playlistDetail';
@@ -31,7 +30,7 @@ export interface UIPlaylist {
   orderedCardIds?: string[];
 }
 
-export function mapApiPlaylist(p: playlistService.ApiPlaylist, index = 0): UIPlaylist {
+export function mapApiPlaylist(p: ApiPlaylist, index = 0): UIPlaylist {
   const [fallback1, fallback2] = PRESET_COLORS[index % PRESET_COLORS.length];
   return {
     id: p._id,
@@ -44,118 +43,267 @@ export function mapApiPlaylist(p: playlistService.ApiPlaylist, index = 0): UIPla
   };
 }
 
+// 1. Authoritative Local-First Hybrid Reads for Playlists
 export const usePlaylists = () => {
+  const playlistsById = usePlaylistStateStore((s) => s.playlistsById);
+  const hydratePlaylists = usePlaylistStateStore((s) => s.hydratePlaylists);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return useQuery({
+
+  const uiPlaylists = useMemo(() => {
+    if (!isAuthenticated) {
+      return [
+        { id: 'easy', name: 'Easy', color1: '#10B981', color2: '#059669', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['easy'] ?? 0, orderedCardIds: [] },
+        { id: 'medium', name: 'Medium', color1: '#F59E0B', color2: '#D97706', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['medium'] ?? 0, orderedCardIds: [] },
+        { id: 'hard', name: 'Hard', color1: '#EF4444', color2: '#DC2626', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['hard'] ?? 0, orderedCardIds: [] },
+        { id: 'skipped', name: 'Skipped', color1: '#64748B', color2: '#475569', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['skipped'] ?? 0, orderedCardIds: [] },
+      ];
+    }
+    return Object.values(playlistsById).map((p, i) => mapApiPlaylist(p, i));
+  }, [playlistsById, isAuthenticated]);
+
+  const queryResult = useQuery({
     queryKey: [PLAYLISTS_KEY, isAuthenticated],
     queryFn: async () => {
-      let uiPlaylists: UIPlaylist[] = [];
-
-      if (isAuthenticated) {
-        // Get custom and smart playlists from backend
-        const list = await playlistService.getPlaylists().catch((err) => {
-          console.warn('[usePlaylists] Failed to fetch custom playlists', err);
-          return [];
-        });
-        uiPlaylists = list.map((p, i) => mapApiPlaylist(p, i));
-      } else {
-        // Guest mode offline-safe smart playlists
-        uiPlaylists = [
-          { id: 'easy', name: 'Easy', color1: '#10B981', color2: '#059669', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['easy'] ?? 0, orderedCardIds: [] },
-          { id: 'medium', name: 'Medium', color1: '#F59E0B', color2: '#D97706', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['medium'] ?? 0, orderedCardIds: [] },
-          { id: 'hard', name: 'Hard', color1: '#EF4444', color2: '#DC2626', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['hard'] ?? 0, orderedCardIds: [] },
-          { id: 'skipped', name: 'Skipped', color1: '#64748B', color2: '#475569', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['skipped'] ?? 0, orderedCardIds: [] },
-        ];
+      if (!isAuthenticated) return uiPlaylists;
+      try {
+        const list = await playlistService.getPlaylists();
+        if (list) {
+          hydratePlaylists(list);
+        }
+        return list.map((p, i) => mapApiPlaylist(p, i));
+      } catch (err) {
+        return uiPlaylists;
       }
-
-      return uiPlaylists;
     },
     staleTime: 1000 * 60,
-    retry: 2,
   });
+
+  const hasLocal = isAuthenticated ? Object.keys(playlistsById).length > 0 : true;
+
+  return {
+    data: hasLocal ? uiPlaylists : queryResult.data || [],
+    isLoading: queryResult.isLoading && !hasLocal,
+    isError: queryResult.isError && !hasLocal,
+    error: queryResult.error,
+    refetch: queryResult.refetch,
+  };
 };
 
 export const usePlaylistCardIds = (playlistId: string | null, enabled = true) => {
-  return useQuery({
-    queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'ids'],
-    queryFn: async () => {
-      const detail = await playlistService.getPlaylistById(playlistId!);
-      return detail?.cardIds ?? [];
-    },
-    enabled: !!playlistId && enabled,
-    staleTime: 1000 * 30,
-  });
+  const orderMap = usePlaylistStateStore((s) => s.playlistCardOrderMap);
+  const playlistsById = usePlaylistStateStore((s) => s.playlistsById);
+
+  const cardIds = useMemo(() => {
+    if (!playlistId || !enabled) return [];
+    if (orderMap[playlistId]) return orderMap[playlistId];
+    return playlistsById[playlistId]?.cardIds ?? playlistsById[playlistId]?.orderedCardIds ?? [];
+  }, [playlistId, enabled, orderMap, playlistsById]);
+
+  return {
+    data: cardIds,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: async () => {},
+  };
 };
 
 export const usePlaylistCards = (playlistId: string | null) => {
-  return useQuery({
+  const storeCards = useStorePlaylistCards(playlistId || '');
+  const hydratePlaylistCards = usePlaylistStateStore((s) => s.hydratePlaylistCards);
+  const hydratedPlaylists = usePlaylistStateStore((s) => s.hydratedPlaylists);
+
+  const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId || '');
+  const isHydrated = playlistId ? !!hydratedPlaylists[playlistId] : false;
+
+  const queryResult = useQuery({
     queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'cards'],
     queryFn: async (): Promise<IPopulatedRevisionCard[]> => {
       if (!playlistId) return [];
-      const detail = await playlistService.getPlaylistById(playlistId!);
-      if (!detail) return [];
-      
-      // Dynamic populated items loading for smart playlists
-      if (detail.items && detail.items.length && typeof detail.items[0] === 'object') {
-        return detail.items as IPopulatedRevisionCard[];
+      try {
+        const detail = await playlistService.getPlaylistById(playlistId);
+        if (!detail) return [];
+
+        let cards: IPopulatedRevisionCard[] = [];
+        if (detail.items && detail.items.length && typeof detail.items[0] === 'object') {
+          cards = detail.items as IPopulatedRevisionCard[];
+        } else if (detail.cardIds && detail.cardIds.length) {
+          cards = await revisionService.getRevisionCardsByIds(detail.cardIds);
+        }
+
+        // Always hydrate in local-first cache, even if count is 0, to set hydratedPlaylists flag
+        hydratePlaylistCards(playlistId, cards);
+        return cards;
+      } catch (err) {
+        return storeCards;
       }
-      
-      if (!detail.cardIds || !detail.cardIds.length) return [];
-      return revisionService.getRevisionCardsByIds(detail.cardIds);
     },
     enabled: !!playlistId,
     staleTime: 1000 * 30,
   });
+
+  const hasLocal = isSmart ? isHydrated : storeCards.length > 0;
+
+  return {
+    data: hasLocal ? storeCards : queryResult.data || [],
+    isLoading: queryResult.isLoading && !hasLocal,
+    isError: queryResult.isError && !hasLocal,
+    error: queryResult.error,
+    refetch: queryResult.refetch,
+  };
 };
 
+// 2. Optimistic mutations enqueuing offline mutations
 export const useCreatePlaylist = () => {
-  const qc = useQueryClient();
+  const createPlaylistInStore = usePlaylistStateStore((s) => s.createPlaylistInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
-    mutationFn: (name: string) => {
-      const count = (qc.getQueryData<UIPlaylist[]>([PLAYLISTS_KEY]) ?? []).length;
+    mutationFn: async (name: string) => {
+      const count = Object.keys(usePlaylistStateStore.getState().playlistsById).length;
       const [color1, color2] = PRESET_COLORS[count % PRESET_COLORS.length];
-      return playlistService.createPlaylist({ name, color1, color2 });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+      const tempId = `temp-playlist-${Date.now()}`;
+      
+      const tempPlaylist: ApiPlaylist = {
+        _id: tempId,
+        name,
+        color1,
+        color2,
+        itemCount: 0,
+        cardIds: [],
+        orderedCardIds: [],
+      };
+
+      // 1. Optimistic update in Zustand store
+      createPlaylistInStore(tempPlaylist);
+
+      // 2. Enqueue offline sync action with a client-generated unique ID
+      enqueueOfflineAction({
+        action: 'CREATE_PLAYLIST',
+        payload: { tempId, name, color1, color2 },
+        timestamp: Date.now(),
+      });
+
+      // 3. Silent background upload attempt
+      try {
+        const playlist = await playlistService.createPlaylist({ name, color1, color2 });
+        // Reconcile client temporary ID with server MongoDB ID
+        usePlaylistStateStore.setState((state) => {
+          const nextPlaylists = { ...state.playlistsById };
+          delete nextPlaylists[tempId];
+          nextPlaylists[playlist._id] = playlist;
+          return { playlistsById: nextPlaylists };
+        });
+        return playlist;
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Playlist created locally. Sync queued.', error);
+        return tempPlaylist;
+      }
     },
   });
 };
 
 export const useDeletePlaylist = () => {
-  const qc = useQueryClient();
+  const deletePlaylistInStore = usePlaylistStateStore((s) => s.deletePlaylistInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
-    mutationFn: playlistService.deletePlaylist,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+    mutationFn: async (playlistId: string) => {
+      // 1. Optimistic delete in Zustand store
+      deletePlaylistInStore(playlistId);
+
+      // 2. Enqueue offline action
+      enqueueOfflineAction({
+        action: 'DELETE_PLAYLIST',
+        payload: { playlistId },
+        timestamp: Date.now(),
+      });
+
+      // 3. Background call
+      try {
+        await playlistService.deletePlaylist(playlistId);
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Deleted playlist locally. Sync queued.', error);
+      }
     },
   });
 };
 
 export const useUpdatePlaylist = () => {
-  const qc = useQueryClient();
+  const updatePlaylistInStore = usePlaylistStateStore((s) => s.updatePlaylistInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
-    mutationFn: ({ playlistId, name }: { playlistId: string; name: string }) =>
-      playlistService.updatePlaylist(playlistId, { name }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+    mutationFn: async ({ playlistId, name }: { playlistId: string; name: string }) => {
+      // 1. Optimistic update in Zustand store
+      updatePlaylistInStore(playlistId, name);
+
+      // 2. Enqueue offline action
+      enqueueOfflineAction({
+        action: 'UPDATE_PLAYLIST',
+        payload: { playlistId, name },
+        timestamp: Date.now(),
+      });
+
+      // 3. Background call
+      try {
+        const updated = await playlistService.updatePlaylist(playlistId, { name });
+        return updated;
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Updated playlist name locally. Sync queued.', error);
+        return { _id: playlistId, name } as ApiPlaylist;
+      }
     },
   });
 };
 
 export const useDuplicatePlaylist = () => {
-  const qc = useQueryClient();
+  const createPlaylistInStore = usePlaylistStateStore((s) => s.createPlaylistInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
-    mutationFn: (playlistId: string) => playlistService.duplicatePlaylist(playlistId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY] });
+    mutationFn: async (playlistId: string) => {
+      const source = usePlaylistStateStore.getState().playlistsById[playlistId];
+      if (!source) throw new Error('Playlist not found in local cache');
+
+      const tempId = `temp-playlist-dup-${Date.now()}`;
+      const tempPlaylist: ApiPlaylist = {
+        ...source,
+        _id: tempId,
+        name: `${source.name} (Copy)`,
+      };
+
+      // 1. Optimistic update
+      createPlaylistInStore(tempPlaylist);
+
+      // 2. Enqueue action
+      enqueueOfflineAction({
+        action: 'CREATE_PLAYLIST',
+        payload: { tempId, name: tempPlaylist.name, color1: tempPlaylist.color1, color2: tempPlaylist.color2, cardIds: tempPlaylist.cardIds },
+        timestamp: Date.now(),
+      });
+
+      try {
+        const playlist = await playlistService.duplicatePlaylist(playlistId);
+        usePlaylistStateStore.setState((state) => {
+          const nextPlaylists = { ...state.playlistsById };
+          delete nextPlaylists[tempId];
+          nextPlaylists[playlist._id] = playlist;
+          return { playlistsById: nextPlaylists };
+        });
+        return playlist;
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Duplicated playlist locally. Sync queued.', error);
+        return tempPlaylist;
+      }
     },
   });
 };
 
-
 export const useTogglePlaylistItem = () => {
-  const qc = useQueryClient();
+  const toggleCustomPlaylistItemInStore = usePlaylistStateStore((s) => s.toggleCustomPlaylistItemInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
     mutationFn: async ({
       playlistId,
@@ -166,116 +314,58 @@ export const useTogglePlaylistItem = () => {
       revisionCardId: string;
       isInPlaylist: boolean;
     }) => {
-      if (isInPlaylist) {
-        await playlistService.removeFromPlaylist(playlistId, revisionCardId);
-      } else {
-        await playlistService.addToPlaylist(playlistId, revisionCardId);
-      }
-    },
-    onMutate: async ({ playlistId, revisionCardId, isInPlaylist }) => {
-      const isAuthenticated = useAuthStore.getState().isAuthenticated;
-      const playlistsKey = [PLAYLISTS_KEY, isAuthenticated];
+      const nextValue = !isInPlaylist;
+      
+      // 1. Optimistic Toggle
+      toggleCustomPlaylistItemInStore(playlistId, revisionCardId, nextValue);
 
-      await qc.cancelQueries({ queryKey: playlistsKey });
-      await qc.cancelQueries({ queryKey: [PLAYLISTS_KEY, 'membership', revisionCardId] });
-      await qc.cancelQueries({ queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'cards'] });
+      // 2. Enqueue action
+      enqueueOfflineAction({
+        action: 'TOGGLE_PLAYLIST_ITEM',
+        payload: { playlistId, cardId: revisionCardId, value: nextValue },
+        timestamp: Date.now(),
+      });
 
-      const previousPlaylists = qc.getQueryData<UIPlaylist[]>(playlistsKey);
-      const previousMembership = qc.getQueryData<Record<string, boolean>>([PLAYLISTS_KEY, 'membership', revisionCardId]);
-      const previousCards = qc.getQueryData<IPopulatedRevisionCard[]>([PLAYLIST_DETAIL_KEY, playlistId, 'cards']);
-
-      // Optimistically update the playlists key
-      if (previousPlaylists) {
-        qc.setQueryData(
-          playlistsKey,
-          previousPlaylists.map((pl) => {
-            if (pl.id === playlistId) {
-              const currentIds = pl.orderedCardIds ?? [];
-              const newIds = isInPlaylist
-                ? currentIds.filter((id) => id !== revisionCardId)
-                : [...currentIds, revisionCardId];
-              return {
-                ...pl,
-                itemCount: Math.max(0, isInPlaylist ? pl.itemCount - 1 : pl.itemCount + 1),
-                orderedCardIds: newIds,
-              };
-            }
-            return pl;
-          })
-        );
+      // 3. Background call
+      try {
+        if (isInPlaylist) {
+          await playlistService.removeFromPlaylist(playlistId, revisionCardId);
+        } else {
+          await playlistService.addToPlaylist(playlistId, revisionCardId);
+        }
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Toggled playlist item locally. Sync queued.', error);
       }
-
-      // Optimistically update the membership key
-      if (previousMembership) {
-        qc.setQueryData([PLAYLISTS_KEY, 'membership', revisionCardId], {
-          ...previousMembership,
-          [playlistId]: !isInPlaylist,
-        });
-      } else {
-        qc.setQueryData([PLAYLISTS_KEY, 'membership', revisionCardId], {
-          [playlistId]: !isInPlaylist,
-        });
-      }
-
-      // Optimistically update the playlist cards list if removing
-      if (previousCards && isInPlaylist) {
-        qc.setQueryData(
-          [PLAYLIST_DETAIL_KEY, playlistId, 'cards'],
-          previousCards.filter((c) => c._id !== revisionCardId)
-        );
-      }
-
-      return { previousPlaylists, previousMembership, previousCards, playlistsKey };
-    },
-    onError: (err, variables, context) => {
-      if (context?.previousPlaylists && context.playlistsKey) {
-        qc.setQueryData(context.playlistsKey, context.previousPlaylists);
-      }
-      if (context?.previousMembership) {
-        qc.setQueryData([PLAYLISTS_KEY, 'membership', variables.revisionCardId], context.previousMembership);
-      }
-      if (context?.previousCards) {
-        qc.setQueryData([PLAYLIST_DETAIL_KEY, variables.playlistId, 'cards'], context.previousCards);
-      }
-    },
-    onSettled: (_data, _error, variables) => {
-      const isAuthenticated = useAuthStore.getState().isAuthenticated;
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY, isAuthenticated] });
-      qc.invalidateQueries({ queryKey: [PLAYLIST_DETAIL_KEY, variables.playlistId] });
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY, 'membership', variables.revisionCardId] });
     },
   });
 };
 
 export const useReorderPlaylist = () => {
-  const qc = useQueryClient();
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
     mutationFn: async ({ playlistId, cardIds }: { playlistId: string; cardIds: string[] }) => {
-      return playlistService.reorderPlaylist(playlistId, cardIds);
-    },
-    onMutate: async ({ playlistId, cardIds }) => {
-      // Optimistically update the UI
-      await qc.cancelQueries({ queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'cards'] });
-      
-      const previousCards = qc.getQueryData<IPopulatedRevisionCard[]>([PLAYLIST_DETAIL_KEY, playlistId, 'cards']);
-      
-      if (previousCards) {
-        // Reorder previous cards based on new cardIds
-        const newCards = cardIds.map(id => previousCards.find(c => c._id === id)).filter(Boolean) as IPopulatedRevisionCard[];
-        qc.setQueryData([PLAYLIST_DETAIL_KEY, playlistId, 'cards'], newCards);
-      }
-      
-      return { previousCards };
-    },
-    onError: (err, { playlistId }, context) => {
-      if (context?.previousCards) {
-        qc.setQueryData([PLAYLIST_DETAIL_KEY, playlistId, 'cards'], context.previousCards);
+      // 1. Enqueue action
+      enqueueOfflineAction({
+        action: 'REORDER_PLAYLIST',
+        payload: { playlistId, cardIds },
+        timestamp: Date.now(),
+      });
+
+      try {
+        const playlist = await playlistService.reorderPlaylist(playlistId, cardIds);
+        return playlist;
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Reordered playlist locally. Sync queued.', error);
+        return { _id: playlistId, cardIds } as ApiPlaylist;
       }
     },
-    onSettled: (data, err, { playlistId }) => {
-      const isAuthenticated = useAuthStore.getState().isAuthenticated;
-      qc.invalidateQueries({ queryKey: [PLAYLIST_DETAIL_KEY, playlistId] });
-      qc.invalidateQueries({ queryKey: [PLAYLISTS_KEY, isAuthenticated] });
+    onError: (_, { playlistId }) => {
+      // Rollback to previous state on failure
+      const previousIds = usePlaylistStateStore.getState().playlistCardOrderMap[playlistId];
+      if (previousIds) {
+        usePlaylistStateStore.getState().setPlaylistCardOrder(playlistId, previousIds);
+      }
     },
   });
 };

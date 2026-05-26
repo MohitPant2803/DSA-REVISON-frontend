@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "dsa-revision-app",
+    "name": "ReeWise",
     "slug": "dsa-revision-app",
     "version": "1.0.0",
     "scheme": "dsareels",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/icon213.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -18,6 +18,10 @@
     },
     "android": {
       "package": "com.mohit.dsareels",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon213.png",
+        "backgroundColor": "#FAF9F7"
+      },
       "intentFilters": [
         {
           "action": "VIEW",

@@ -12,6 +12,7 @@ import {
   Pressable,
   TouchableOpacity,
 } from 'react-native';
+import Animated, { FadeInUp, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -20,7 +21,6 @@ import {
   ListMusic,
   BookOpen,
   Check,
-  Flame,
   Zap,
   SkipForward,
   Brain,
@@ -41,11 +41,8 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { usePlaylistCount } from '@/hooks/usePlaylistStoreSelectors';
-
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-  offlineAccess: true,
-});
+import { useBiometricReauth } from '@/hooks/useBiometricReauth';
+import { theme } from '@/theme';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -466,7 +463,9 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
 export default function PersonalScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user, logout } = useAuthStore();
+  const { user, logout, isSessionExpired } = useAuthStore();
+  const { triggerBiometricReauth } = useBiometricReauth();
+  const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
 
   const { data: playlists = [], isLoading: playlistsLoading, isError: playlistsError, refetch } = usePlaylists();
   const { data: stats, isLoading: statsLoading } = useDashboard();
@@ -632,15 +631,6 @@ export default function PersonalScreen() {
     setIsSignInPromptOpen(true);
   };
 
-  const handleStreakTap = () => {
-    lightHaptic();
-    Toast.show({
-      type: 'info',
-      text1: 'Streak Tracker Active',
-      text2: 'Do at least 1 revision card daily to protect your memory streak!',
-      position: 'top',
-    });
-  };
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
@@ -684,36 +674,38 @@ export default function PersonalScreen() {
         <View className="px-6 pb-6 pt-2">
           <View className="flex-row items-center justify-between">
             <View>
-              <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
-                My Space
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
+                  My Space
+                </Text>
+                
+                {/* Elegant inline sync status indicator dot */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(148, 163, 184, 0.05)', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 10, marginTop: 4 }}>
+                  <View 
+                    style={{ 
+                      width: 6, 
+                      height: 6, 
+                      borderRadius: 3, 
+                      backgroundColor: 
+                        syncStatus === 'synced' ? theme.colors.status.success : 
+                        syncStatus === 'syncing' ? theme.colors.status.info : 
+                        theme.colors.status.warning, 
+                    }} 
+                  />
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#64748B' }}>
+                    {syncStatus === 'synced' ? 'Synced' :
+                     syncStatus === 'syncing' ? 'Syncing...' :
+                     'Offline'}
+                  </Text>
+                </View>
+              </View>
               <Text className="text-[#7F8A9E] text-[13px] font-semibold mt-1.5 leading-none">
                 Your personal revision deck
               </Text>
             </View>
-
+ 
             {/* Streak & Floating Capsule Navigation */}
             <View className="flex-row items-center gap-2">
-              {/* Flame Streak Pill */}
-              <TouchableOpacity
-                onPress={handleStreakTap}
-                activeOpacity={0.8}
-                className="flex-row items-center gap-1 px-3 py-1.5 rounded-full bg-white border"
-                style={{
-                  borderColor: 'rgba(245, 158, 11, 0.1)',
-                  shadowColor: '#0F172A',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.02,
-                  shadowRadius: 10,
-                  elevation: 1,
-                }}
-              >
-                <Flame color="#F59E0B" size={14} strokeWidth={2.2} />
-                <Text className="text-[#B45309] font-bold text-[11px] tracking-tight">
-                  {stats?.streakCount ?? 0} Days
-                </Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 onPress={handlePressSettings}
                 activeOpacity={0.8}
@@ -731,6 +723,61 @@ export default function PersonalScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Soft Session Expired warning banner */}
+          {isSessionExpired && (
+            <Animated.View 
+              entering={FadeInUp.duration(400)}
+              exiting={FadeOut.duration(300)}
+              style={{
+                backgroundColor: '#FEF3C7',
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: '#FCD34D',
+                padding: 16,
+                marginTop: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+              }}
+            >
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#78350F' }}>
+                  Sync Suspended
+                </Text>
+                <Text style={{ fontSize: 11, fontWeight: '500', color: '#92400E', marginTop: 2 }}>
+                  Your session expired. Verify your identity to resume progress backup.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={async () => {
+                  const success = await triggerBiometricReauth();
+                  if (!success) {
+                    Alert.alert('Authentication Required', 'Please sign in to continue.', [
+                      { text: 'Sign In', onPress: async () => {
+                          const { logout } = useAuthStore.getState();
+                          await logout();
+                          router.replace('/(auth)/login');
+                        }
+                      },
+                      { text: 'Cancel', style: 'cancel' }
+                    ]);
+                  }
+                }}
+                style={{
+                  backgroundColor: '#78350F',
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 12,
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
+                  Unlock
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
         </View>
 
         {/* ==========================================

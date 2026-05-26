@@ -145,14 +145,6 @@ export const useUpdateCardProgress = () => {
 
         // Optimistically set the local Zustand state for likes
         usePlaylistStateStore.getState().toggleFavoriteInStore(variables.cardId, variables.value);
-
-        Toast.show({
-          type: 'success',
-          text1: 'Progress Saved Offline',
-          text2: 'Will sync to server when connection stabilizes.',
-          position: 'top',
-          visibilityTime: 2000,
-        });
         return;
       }
 
@@ -242,14 +234,6 @@ export const useUpdatePlaylistMembership = () => {
         if (playlistId) {
           usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlistId, variables.cardId, !!variables.addToPlaylist);
         }
-
-        Toast.show({
-          type: 'success',
-          text1: 'Playlist Saved Offline',
-          text2: 'Will sync to server when connection stabilizes.',
-          position: 'top',
-          visibilityTime: 2000,
-        });
         return;
       }
 
@@ -343,14 +327,6 @@ export const useUpdateDifficultyState = () => {
         // Also update local Zustand persistent ratings in store!
         const cardObj = queryClient.getQueryData<IPopulatedRevisionCard[]>(['playlistDetail', context?.activePlaylistId, 'cards'])?.find(c => c._id === variables.cardId) || {} as any;
         usePlaylistStateStore.getState().transferCard(variables.cardId, cardObj, variables.difficultyState);
-
-        Toast.show({
-          type: 'success',
-          text1: 'Rating Saved Offline',
-          text2: 'Will sync to server when connection stabilizes.',
-          position: 'top',
-          visibilityTime: 2000,
-        });
         return;
       }
 

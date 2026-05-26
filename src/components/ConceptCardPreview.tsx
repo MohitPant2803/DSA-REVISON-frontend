@@ -118,9 +118,10 @@ interface ConceptCardPreviewProps {
   onToggleWatchLater?: () => void;
   onCardStateUpdate?: (cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => void;
   activePlaylistId?: string | null;
+  scrollEnabled?: boolean;
 }
 
-export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatchLater, onToggleWatchLater, onCardStateUpdate, activePlaylistId }: ConceptCardPreviewProps) => {
+export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatchLater, onToggleWatchLater, onCardStateUpdate, activePlaylistId, scrollEnabled = true }: ConceptCardPreviewProps) => {
   const router = useRouter();
   const ctaScale = useSharedValue(1);
 
@@ -216,13 +217,6 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
           }
         );
       }
-
-      Toast.show({
-        type: 'success',
-        text1: currentlyRed ? 'Removed from Likes & Playlist' : 'Marked as Favorite',
-        position: 'top',
-        visibilityTime: 1500,
-      });
       return;
     }
 
@@ -242,13 +236,6 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
         }
       }
     );
-    
-    Toast.show({
-      type: 'success',
-      text1: currentValue ? `Removed from ${action}` : `Marked as ${action}`,
-      position: 'top',
-      visibilityTime: 1500,
-    });
   };
 
   const handleDelete = () => {
@@ -346,6 +333,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
         <ScrollView 
           showsVerticalScrollIndicator={false} 
           className="max-h-[50%] mb-4"
+          scrollEnabled={scrollEnabled}
         >
           <Text className="text-slate-600 text-[15px] leading-relaxed">
             {card.explanation}
@@ -354,7 +342,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
       </View>
 
       {/* Redesigned Pulsing Interactive Walkthrough CTA */}
-      <Animated.View style={ctaAnimatedStyle} className="mt-auto w-full">
+      <Animated.View style={ctaAnimatedStyle} className="mt-auto self-center">
         <Pressable
           onPressIn={() => {
             ctaScale.value = withSpring(0.96, { damping: 10, stiffness: 350 });
@@ -368,15 +356,11 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
               onViewExplanation(1);
             }
           }}
-          className="flex-row items-center gap-2.5 py-3.5 bg-violet-50/60 rounded-2xl px-5 border border-violet-100/50 shadow-sm shadow-violet-100/10"
+          className="flex-row items-center justify-center py-1.5 bg-violet-50/60 rounded-full px-4.5 border border-violet-100/50 shadow-sm shadow-violet-100/10"
         >
-          <View className="w-2.5 h-2.5 rounded-full bg-violet-500 items-center justify-center">
-            <View className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-ping absolute" />
-          </View>
-          <Text className="text-violet-700 text-xs font-black tracking-wider uppercase">
-            Swipe left for Walkthrough · {slideCount} slides
+          <Text className="text-violet-700 text-[10px] font-black tracking-wider uppercase text-center">
+            {slideCount} slides &gt;
           </Text>
-          <ChevronRight color="#8B5CF6" size={15} strokeWidth={3} style={{ marginLeft: 'auto' }} />
         </Pressable>
       </Animated.View>
     </View>
@@ -388,6 +372,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
     prevProps.card.isDifficult === nextProps.card.isDifficult &&
     prevProps.card.isArchived === nextProps.card.isArchived &&
     prevProps.isWatchLater === nextProps.isWatchLater &&
-    prevProps.activePlaylistId === nextProps.activePlaylistId
+    prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.scrollEnabled === nextProps.scrollEnabled
   );
 });

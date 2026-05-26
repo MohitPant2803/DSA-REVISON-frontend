@@ -14,4 +14,10 @@ export const colors = {
     light: '#F1F5F9',
     medium: '#E2E8F0',
   },
+  status: {
+    success: '#10B981',
+    warning: '#F59E0B',
+    error: '#EF4444',
+    info: '#8B5CF6',
+  },
 };

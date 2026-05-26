@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+"use no compiler";
+import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import {
   View,
   ActivityIndicator,
@@ -17,6 +18,8 @@ import {
   Animated as RNAnimated,
   FlatList,
   Pressable,
+  BackHandler,
+  Linking,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 const FlashListElement = FlashList as any;
@@ -72,6 +75,9 @@ import Animated, {
   runOnJS,
   SharedValue,
   cancelAnimation,
+  useDerivedValue,
+  useAnimatedScrollHandler,
+  Easing,
 } from 'react-native-reanimated';
 import Toast from 'react-native-toast-message';
 import { useUpdateCardProgress, useUpdateDifficultyState } from '@/services/useProgress';
@@ -88,15 +94,58 @@ import * as userCardStateService from '@/services/userCardStateService';
 import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
 import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
+
+// Global slides cache to store pre-compiled and pre-sorted slide arrays by card ID
+const slidesCache = new Map<string, any[]>();
+const MAX_SLIDES_CACHE_SIZE = 50;
+
+const setCachedSlides = (key: string, value: any[]) => {
+  if (slidesCache.size >= MAX_SLIDES_CACHE_SIZE) {
+    let oldestKey: string | undefined;
+    // Bulletproof ES5 loop to avoid ES6 Map iterator compilation helper bugs
+    slidesCache.forEach((_, k) => {
+      if (oldestKey === undefined) {
+        oldestKey = k;
+      }
+    });
+    if (oldestKey !== undefined) {
+      slidesCache.delete(oldestKey);
+    }
+  }
+  slidesCache.set(key, value);
+};
 
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.97;
-const PAGE_SIZE = 15; // Increased page size for smoother continuous reel buffering
+const PAGE_SIZE = 100; // Load 100 cards at once for an endless, zero-latency reels feed
 
 // Premium physical spring snapping parameters (Spotify / Apple physics)
 const SPRING_CONFIG = {
   damping: 28,
   stiffness: 160,
+  mass: 0.8,
+  overshootClamping: true,
+  restDisplacementThreshold: 0.01,
+  restSpeedThreshold: 2,
+};
+
+const OFFSCREEN_X = -width - 120;
+
+// Premium study-focused highly damped snap spring config
+const PEACEFUL_SPRING_CONFIG = {
+  damping: 34,
+  stiffness: 140,
+  mass: 1.0,
+  overshootClamping: false,
+  restDisplacementThreshold: 0.01,
+  restSpeedThreshold: 2,
+};
+
+// Tight critically damped snap spring configuration matching standard Apple/TikTok tight snapping
+const TIGHT_SNAP_SPRING = {
+  damping: 28,
+  stiffness: 340,
   mass: 0.8,
   overshootClamping: true,
   restDisplacementThreshold: 0.01,
@@ -298,6 +347,7 @@ interface ReelsActionRailProps {
   onDifficultyStateUpdate: (state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   onPlaylistPickerTrigger: (card: IPopulatedRevisionCard) => void;
   isGuest: boolean;
+  isDisabled?: boolean; // Controls whether touch captures are disabled during vertical swipes
 }
 
 interface ClassificationButtonProps {
@@ -375,6 +425,7 @@ const ReelsActionRail = React.memo(({
   onDifficultyStateUpdate,
   onPlaylistPickerTrigger,
   isGuest,
+  isDisabled = false, // Set default to false
 }: ReelsActionRailProps) => {
   const currentDifficulty = item.difficultyState;
   const shouldPulse = !currentDifficulty;
@@ -389,6 +440,7 @@ const ReelsActionRail = React.memo(({
 
   return (
     <View 
+      pointerEvents={isDisabled ? 'none' : 'auto'} // Disable touch captures for inactive cards during scroll
       style={{
         position: 'absolute',
         right: 16,
@@ -457,7 +509,8 @@ const ReelsActionRail = React.memo(({
     prevProps.cleanId === nextProps.cleanId &&
     prevProps.item.difficultyState === nextProps.item.difficultyState &&
     prevProps.item._id === nextProps.item._id &&
-    prevProps.isGuest === nextProps.isGuest
+    prevProps.isGuest === nextProps.isGuest &&
+    prevProps.isDisabled === nextProps.isDisabled // Added comparator check
   );
 });
 
@@ -479,6 +532,10 @@ interface ReelItemProps {
   onMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
   onDifficultyStateUpdate: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   isActiveCardClassified?: boolean;
+  shadowProgress?: SharedValue<number>;
+  scrollY?: SharedValue<number>;
+  scrollEnabled?: boolean;
+  onScrollEnabledChange?: (enabled: boolean) => void;
 }
 
 interface SlideCardWrapperProps {
@@ -487,10 +544,13 @@ interface SlideCardWrapperProps {
   activeSlideIndexSV: SharedValue<number>;
   slideDragX: SharedValue<number>;
   prevSlideDragX: SharedValue<number>;
+  cardTranslateY: SharedValue<number>; // Dynamic shadow dampening trigger
   cardHeight: number;
   width: number;
   zIndex: number;
   renderSlideContent: (slide: ISlide, index: number) => React.ReactNode;
+  shadowProgress: SharedValue<number>;
+  isLastSlide?: boolean;
 }
 
 const SlideCardWrapper = React.memo(({
@@ -499,28 +559,42 @@ const SlideCardWrapper = React.memo(({
   activeSlideIndexSV,
   slideDragX,
   prevSlideDragX,
+  cardTranslateY,
   cardHeight,
   width,
   zIndex,
   renderSlideContent,
+  shadowProgress,
+  isLastSlide = false,
 }: SlideCardWrapperProps) => {
   // =========================================================================
-  // Onboarding-style card stack animation:
-  // - Active card (delta=0): Drags left only (forward swipe). No right drag.
-  // - Next card (delta=1): Sits underneath, scales up as active card is swiped away.
-  // - Previous card (delta=-1): Slides OVER active card from the left on back swipe.
-  //   It starts offscreen at -width and translates to 0. zIndex is higher than active.
-  // - First card cannot swipe right, last card cannot swipe left.
+  // Onboarding-style card stack animation with Dynamic Shadow Dampening
+  // and Compositor-First solid opacities.
   // =========================================================================
   const animatedStyle = useAnimatedStyle(() => {
     const activeIdx = activeSlideIndexSV.value;
     const delta = indexInDeck - activeIdx;
+
+    let elevation = 0;
+    let shadowOpacity = 0;
 
     // Active card: only tracks left drag (forward). Right drag is handled by previous card.
     if (delta === 0) {
       // Only allow negative (left) translation for the active card during drag
       const tx = Math.min(0, slideDragX.value);
       const rotateVal = interpolate(tx, [-width, 0, width], [-5, 0, 5], 'clamp');
+      
+      // Dynamic Shadow Dampening: Scale down shadow intensity dynamically as card translates
+      const dragDistance = Math.max(
+        Math.abs(slideDragX.value),
+        Math.abs(cardTranslateY.value)
+      );
+      const baseElevation = interpolate(dragDistance, [0, 8], [3, 0], 'clamp');
+      const baseShadowOpacity = interpolate(dragDistance, [0, 8], [0.04, 0], 'clamp');
+
+      elevation = baseElevation * shadowProgress.value;
+      shadowOpacity = baseShadowOpacity * shadowProgress.value;
+
       return {
         transform: [
           { translateX: tx },
@@ -530,17 +604,19 @@ const SlideCardWrapper = React.memo(({
         ],
         opacity: 1,
         zIndex: 10,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity,
+        shadowRadius: 20,
+        elevation,
       };
     }
 
-    // Next card: scales up and fades in as the active card is swiped left
+    // Next card: scales up sits underneath, promoted to 100% opaque to bypass offscreen composite penalty
     if (delta === 1) {
-      const activeTx = slideDragX.value;
-      // 6. Prediction-based scaling: since activeTx incorporates predictive velocity,
-      // this scale eagerly anticipates the transition, making it feel incredibly responsive.
-      const progress = Math.min(Math.abs(Math.min(0, activeTx)) / (width * 0.6), 1.0);
+      const progress = interpolate(slideDragX.value, [0, OFFSCREEN_X], [0, 1], 'clamp');
       const scale = 0.965 + (0.035 * progress);
-      const cardOpacity = 0.5 + (0.5 * progress);
+      
       return {
         transform: [
           { translateX: 0 },
@@ -548,16 +624,33 @@ const SlideCardWrapper = React.memo(({
           { scale: scale },
           { rotate: '0deg' },
         ],
-        opacity: cardOpacity,
+        opacity: 1.0, // Promoted to fully solid!
         zIndex: 9,
+        shadowOpacity: 0,
+        elevation: 0,
       };
     }
 
     // Previous card: slides OVER the active card from the left
     if (delta === -1) {
-      // prevSlideDragX carries the previous card's translation during back navigation
       const tx = prevSlideDragX.value;
       const rotateVal = interpolate(tx, [-width, 0, width], [-5, 0, 5], 'clamp');
+
+      // Dynamic Compositor Optimization: opacity 0 when sitting offscreen, fades to 1 immediately on drag start
+      const opacity = interpolate(
+        tx,
+        [OFFSCREEN_X, OFFSCREEN_X + 20],
+        [0, 1],
+        'clamp'
+      );
+      
+      const distFromSettle = Math.abs(tx);
+      const baseElevation = interpolate(distFromSettle, [0, 8], [3, 0], 'clamp');
+      const baseShadowOpacity = interpolate(distFromSettle, [0, 8], [0.04, 0], 'clamp');
+
+      elevation = baseElevation * shadowProgress.value;
+      shadowOpacity = baseShadowOpacity * shadowProgress.value;
+
       return {
         transform: [
           { translateX: tx },
@@ -565,8 +658,13 @@ const SlideCardWrapper = React.memo(({
           { scale: 1 },
           { rotate: `${rotateVal}deg` },
         ],
-        opacity: 1,
+        opacity,
         zIndex: 20, // Above active card so it slides OVER
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity,
+        shadowRadius: 20,
+        elevation,
       };
     }
 
@@ -574,13 +672,15 @@ const SlideCardWrapper = React.memo(({
     if (delta < -1) {
       return {
         transform: [
-          { translateX: slideDragX.value },
+          { translateX: OFFSCREEN_X },
           { translateY: 0 },
           { scale: 1 },
           { rotate: '0deg' },
         ],
         opacity: 0,
         zIndex: 0,
+        shadowOpacity: 0,
+        elevation: 0,
       };
     }
 
@@ -594,7 +694,20 @@ const SlideCardWrapper = React.memo(({
       ],
       opacity: 0,
       zIndex: 0,
+      shadowOpacity: 0,
+      elevation: 0,
     };
+  });
+
+  const overlayAnimatedStyle = useAnimatedStyle(() => {
+    const activeIdx = activeSlideIndexSV.value;
+    const delta = indexInDeck - activeIdx;
+    if (delta === 1) {
+      return {
+        opacity: interpolate(slideDragX.value, [0, OFFSCREEN_X], [0.15, 0], 'clamp'),
+      };
+    }
+    return { opacity: 0 };
   });
 
   return (
@@ -605,15 +718,27 @@ const SlideCardWrapper = React.memo(({
           width: width * 0.97,
           height: cardHeight,
           position: 'absolute',
-          paddingHorizontal: 24,
-          paddingTop: 64,
-          paddingBottom: 24,
-          overflow: 'hidden',
+          overflow: 'visible', // Ensure outer shadow renders fully without clipping cuts
+          backgroundColor: isLastSlide ? '#F0F9FF' : '#ffffff', // Very light ice blue background
+          borderColor: isLastSlide ? 'rgba(234, 179, 8, 0.15)' : 'rgba(226, 232, 240, 0.8)', // Warm cohesive gold border
         },
         animatedStyle,
       ]}
     >
-      {renderSlideContent(slide, indexInDeck)}
+      {/* Compositor-First Layer separation: Clip ONLY inside the nested content shell */}
+      <View style={{ flex: 1, borderRadius: 24, overflow: 'hidden' }}>
+        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 64, paddingBottom: 24 }}>
+          {renderSlideContent(slide, indexInDeck)}
+        </View>
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFillObject,
+            { backgroundColor: '#000000', borderRadius: 24, zIndex: 15 },
+            overlayAnimatedStyle,
+          ]}
+          pointerEvents="none"
+        />
+      </View>
     </Animated.View>
   );
 });
@@ -635,32 +760,36 @@ const ActiveReelItem = React.memo(({
   onPlaylistPickerTrigger,
   onMoreOptionsTrigger,
   onDifficultyStateUpdate,
+  shadowProgress = { value: 1 } as any,
+  scrollEnabled = true,
+  onScrollEnabledChange,
 }: ReelItemProps) => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const { preferences } = useUserPreferencesStore();
 
   const slideDragX = useSharedValue(0);
-  const prevSlideDragX = useSharedValue(-width - 100); // Previous card starts offscreen left
+  const prevSlideDragX = useSharedValue(OFFSCREEN_X);
   const cardTranslateY = useSharedValue(0);
   const lockPillColor = useSharedValue(0);
   const activeSlideIndexSV = useSharedValue(0);
   const isTransitioning = useSharedValue(false);
+  const gestureLock = useSharedValue<'undecided' | 'vertical' | 'horizontal' | 'failed'>('undecided');
   const isMounted = useRef(true);
 
   const currentPrefsKey = `${preferences.hideCertainBlockTypes?.join(',')}-${preferences.explanationFlowOrder?.join(',')}`;
 
   // Reset translation and active slide index when the card item changes or preferences change.
-  // This MUST be inside a useEffect to prevent Reanimated "Reading from value during render" 
-  // warnings and React "Expected static flag was missing" internal crashes.
-  useEffect(() => {
+  // This is handled in useLayoutEffect to run safely in the layout lifecycle before rendering commits.
+  useLayoutEffect(() => {
     setActiveSlideIndex(0);
     cancelAnimation(slideDragX);
     cancelAnimation(prevSlideDragX);
     slideDragX.value = 0;
-    prevSlideDragX.value = -width - 100;
+    prevSlideDragX.value = OFFSCREEN_X;
     cardTranslateY.value = 0;
     activeSlideIndexSV.value = 0;
     isTransitioning.value = false;
+    gestureLock.value = 'undecided';
   }, [item._id, currentPrefsKey, width]);
 
   useEffect(() => {
@@ -677,7 +806,7 @@ const ActiveReelItem = React.memo(({
     // 8. Internal verification: Reset translation and transition locks AFTER React state commits.
     // This guarantees no race conditions or dead periods between slides.
     slideDragX.value = 0;
-    prevSlideDragX.value = -width - 100; // Previous card resets offscreen left
+    prevSlideDragX.value = OFFSCREEN_X;
     isTransitioning.value = false;
   }, [activeSlideIndex]);
 
@@ -687,6 +816,11 @@ const ActiveReelItem = React.memo(({
   const isWatchLater = watchLaterCardIds.includes(cleanId);
 
   const slides = useMemo(() => {
+    const cacheKey = `${item._id}-${currentPrefsKey}`;
+    if (slidesCache.has(cacheKey)) {
+      return slidesCache.get(cacheKey)!;
+    }
+
     const baseSlides = getSlidesForCard(item);
     const introSlide = baseSlides.find(s => s.type === 'intro');
     let otherSlides = baseSlides.filter(s => s.type !== 'intro');
@@ -706,7 +840,9 @@ const ActiveReelItem = React.memo(({
       return sortA - sortB;
     });
     
-    return introSlide ? [introSlide, ...otherSlides] : otherSlides;
+    const result = introSlide ? [introSlide, ...otherSlides] : otherSlides;
+    setCachedSlides(cacheKey, result);
+    return result;
   }, [item, preferences.hideCertainBlockTypes, preferences.explanationFlowOrder]);
 
   const handleSwipeComplete = () => {
@@ -721,7 +857,6 @@ const ActiveReelItem = React.memo(({
     
     // 3. Remove micro-lag: Eliminate setTimeout(0), update React state immediately
     setActiveSlideIndex((prev) => prev + 1);
-    lightHaptic();
   };
 
   const handleSwipePrevComplete = () => {
@@ -736,7 +871,6 @@ const ActiveReelItem = React.memo(({
     
     // 3. Remove micro-lag: Eliminate setTimeout(0), update React state immediately
     setActiveSlideIndex((prev) => prev - 1);
-    lightHaptic();
   };
 
   // Handle explicit horizontal jump actions (e.g. from menu or explicit buttons)
@@ -747,7 +881,6 @@ const ActiveReelItem = React.memo(({
       isTransitioning.value = true;
       slideDragX.value = 0;
       setActiveSlideIndex(targetIdx);
-      lightHaptic();
     }
   }, [slides.length, activeSlideIndex]);
 
@@ -797,7 +930,7 @@ const ActiveReelItem = React.memo(({
   const verticalGesture = Gesture.Pan()
     .activeOffsetY([-10, 100000]) // Only capture upward swipes (translationY < -10) to block scrolling down
     .failOffsetX([-10, 10])
-    .enabled(!isClassified)
+    .enabled(false)
     .onUpdate((event) => {
       // Elastic resistance cap at -40px on swipe up, 40px on swipe down
       if (event.translationY < 0) {
@@ -813,7 +946,6 @@ const ActiveReelItem = React.memo(({
         stiffness: 400,
         mass: 0.6
       });
-      runOnJS(lightHaptic)();
     });
 
   const animatedActiveCardStyle = useAnimatedStyle(() => ({
@@ -826,40 +958,68 @@ const ActiveReelItem = React.memo(({
   // - Right swipe (dx > 0): Does NOT drag active card. Instead, the PREVIOUS card
   //   starts at -width and slides RIGHT over the active card to position 0.
   // - First slide blocks right swipe. Last slide blocks left swipe.
-  // =========================================================================
   const SWIPE_THRESHOLD_X = CARD_WIDTH * 0.08;
   const VELOCITY_THRESHOLD = 200;
 
   const horizontalGesture = Gesture.Pan()
-    // 1. Early direction locking: lock confidently on horizontal intent while ignoring slight vertical jitter
-    .activeOffsetX([-8, 8])
-    .failOffsetY([-24, 24])
-    .onStart(() => {
+    // 1. Highly calibrated Tinder thresholds: activeOffsetX of [-15, 15] allows ScrollView to capture vertical scroll first,
+    // while failOffsetY of [-40, 40] ensures horizontal swipes fail and hand over instantly to vertical scroll when vertical drag is detected.
+    .activeOffsetX([-15, 15])
+    .failOffsetY([-40, 40])
+    .onStart((event) => {
+      // Anti-race conditions: ignore new gesture starts if already transitioning
       if (isTransitioning.value) return;
+
+      // Velocity-gated arbitration: allow horizontal capture only if vertical momentum is decayed
+      // Set to 800 px/s to comfortably allow diagonal thumb-swipes while still blocking high-speed vertical scrolls
+      if (Math.abs(event.velocityY) >= 800) {
+        gestureLock.value = 'failed';
+        return;
+      }
+
+      cancelAnimation(slideDragX);
+      cancelAnimation(prevSlideDragX);
+      cancelAnimation(cardTranslateY);
+      
+      // Lock the horizontal axis permanently for this gesture
+      gestureLock.value = 'horizontal'; 
+      
+      // Disable parent vertical scroll list ONLY after lock is confirmed
+      if (onScrollEnabledChange) {
+        runOnJS(onScrollEnabledChange)(false);
+      }
     })
     .onUpdate((event) => {
       if (isTransitioning.value) return;
+      if (gestureLock.value !== 'horizontal') return;
+
       const dx = event.translationX;
       const vx = event.velocityX;
-
-      // 6. Prediction-based anticipation: blend raw translation with velocity
-      // so the UI feels like it "knows" where the finger is going.
+      
+      // Blend raw translation with velocity (momentum physics term) so that the active drag tracks fingertip with a fluid, paper-like lightness
       const predictiveDx = dx + (vx * 0.02);
 
       if (dx < 0) {
-        // Dragging Left -> Move Forward: drag the active card left
+        // Dragging Left -> Move Forward
         if (activeSlideIndex < slides.length - 1) {
           slideDragX.value = predictiveDx;
+        } else {
+          // Elastic boundary stretch (last slide dragging left)
+          slideDragX.value = dx * 0.25;
         }
       } else if (dx > 0) {
-        // Dragging Right -> Move Backward: pull previous card over
+        // Dragging Right -> Move Backward
         if (activeSlideIndex > 0) {
           prevSlideDragX.value = -width + predictiveDx;
+        } else {
+          // Elastic boundary stretch (first slide dragging right)
+          slideDragX.value = dx * 0.25;
         }
       }
     })
     .onEnd((event) => {
       if (isTransitioning.value) return;
+      if (gestureLock.value !== 'horizontal') return;
       
       const transX = event.translationX;
       const velX = event.velocityX;
@@ -867,17 +1027,15 @@ const ActiveReelItem = React.memo(({
       // Velocity projection: evaluate where the card will end up based on physical momentum
       const projectedX = transX + velX * 0.18;
 
-      // 5. Gesture continuity: Velocity-aware animation durations for physically accurate settling
+      // Velocity-aware animation durations for physically accurate settling
       const commitDuration = Math.max(120, Math.min(220, 240 - Math.abs(velX) * 0.08));
 
-      // 4. Cancel animations: elastic, fast, zero sluggishness
+      // Elastic, fast, zero sluggishness snapping spring
       const cancelSpring = { damping: 16, stiffness: 400, mass: 0.6 };
 
       if (transX < 0) {
-        // ---- LEFT SWIPE: Push active card off-screen to the left ----
-        // Check projectedX against threshold to accurately interpret fast tiny flicks
+        // ---- LEFT SWIPE ----
         if (activeSlideIndex < slides.length - 1 && (projectedX < -SWIPE_THRESHOLD_X || velX < -VELOCITY_THRESHOLD)) {
-          // 2. Interruption responsiveness: lock during the transition, but keep it brief
           isTransitioning.value = true;
           // Velocity-based exit distance: fast flicks travel further offscreen
           const exitDistance = Math.max(-width - 350, -width - Math.abs(velX) * 0.15);
@@ -895,7 +1053,7 @@ const ActiveReelItem = React.memo(({
           slideDragX.value = withSpring(0, cancelSpring);
         }
       } else if (transX > 0) {
-        // ---- RIGHT SWIPE: Pull previous card OVER current card from the left ----
+        // ---- RIGHT SWIPE ----
         if (activeSlideIndex > 0 && (projectedX > SWIPE_THRESHOLD_X || velX > VELOCITY_THRESHOLD)) {
           isTransitioning.value = true;
           // Animate it sliding right over the current card to position 0
@@ -907,11 +1065,19 @@ const ActiveReelItem = React.memo(({
         } else {
           // Cancel: snap previous card back offscreen
           prevSlideDragX.value = withSpring(-width - 100, cancelSpring);
+          // Also reset active slide elastic right-drag spring if any
+          slideDragX.value = withSpring(0, cancelSpring);
         }
       } else {
-        // No movement — reset
+        // Reset both
         slideDragX.value = withSpring(0, cancelSpring);
         prevSlideDragX.value = withSpring(-width - 100, cancelSpring);
+      }
+    })
+    .onFinalize(() => {
+      gestureLock.value = 'undecided';
+      if (onScrollEnabledChange) {
+        runOnJS(onScrollEnabledChange)(true);
       }
     });
 
@@ -922,6 +1088,7 @@ const ActiveReelItem = React.memo(({
           card={item}
           activePlaylistId={activePlaylistId}
           onViewExplanation={scrollHorizontal}
+          scrollEnabled={scrollEnabled}
         />
       );
     }
@@ -938,6 +1105,7 @@ const ActiveReelItem = React.memo(({
         }}
         currentIndex={indexInDeck}
         totalCount={slides.length}
+        scrollEnabled={scrollEnabled}
       />
     );
   };
@@ -983,12 +1151,12 @@ const ActiveReelItem = React.memo(({
         >
           {slides.map((slide, indexInDeck) => {
             const delta = indexInDeck - activeSlideIndex;
-            if (Math.abs(delta) > 1) return null;
 
             let zIndex = 0;
             if (delta === 0) zIndex = 2;
             else if (delta === 1) zIndex = 1;
             else if (delta === -1) zIndex = 3;
+            else zIndex = 0;
 
             return (
               <SlideCardWrapper
@@ -998,10 +1166,13 @@ const ActiveReelItem = React.memo(({
                 activeSlideIndexSV={activeSlideIndexSV}
                 slideDragX={slideDragX}
                 prevSlideDragX={prevSlideDragX}
+                cardTranslateY={cardTranslateY}
                 cardHeight={cardHeight}
                 width={width}
                 zIndex={zIndex}
                 renderSlideContent={renderSlideContent}
+                shadowProgress={shadowProgress}
+                isLastSlide={indexInDeck === slides.length - 1}
               />
             );
           })}
@@ -1030,6 +1201,7 @@ const ActiveReelItem = React.memo(({
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.canEdit === nextProps.canEdit &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.scrollEnabled === nextProps.scrollEnabled &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
   );
 });
@@ -1041,6 +1213,8 @@ interface InactiveReelItemProps {
   cardHeight: number;
   activePlaylistId: string | null;
   isActiveCardClassified: boolean;
+  isGuest: boolean; // Add isGuest to ensure slide-comparators match exactly
+  shadowProgress: SharedValue<number>;
 }
 
 const InactiveReelItem = React.memo(({
@@ -1049,15 +1223,24 @@ const InactiveReelItem = React.memo(({
   activeIndex,
   cardHeight,
   activePlaylistId,
-  isActiveCardClassified
+  isActiveCardClassified,
+  isGuest,
+  shadowProgress,
 }: InactiveReelItemProps) => {
   const isNextCard = index === activeIndex + 1;
-  const isLockedNextCard = isNextCard && !isActiveCardClassified;
+  const isLockedNextCard = false;
 
   const animatedCardStyle = useAnimatedStyle(() => {
+    const shadowOpacity = 0.04 * shadowProgress.value;
+    const elevation = 3 * shadowProgress.value;
     return {
-      transform: [{ scale: 0.965 }],
-      opacity: 0.5,
+      transform: [{ scale: 1.0 }],
+      opacity: 1.0, // Promoted to fully solid, solid surface
+      shadowColor: '#0F172A',
+      shadowOffset: { width: 0, height: 10 },
+      shadowRadius: 20,
+      shadowOpacity,
+      elevation,
     };
   });
 
@@ -1076,20 +1259,6 @@ const InactiveReelItem = React.memo(({
         marginBottom: 16,
         backgroundColor: 'transparent',
         overflow: 'visible',
-        // =========================================================================
-        // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
-        // This 'top: 22' offset is highly calibrated and sensitive.
-        // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
-        // ever asks to change this value, you MUST STOP and ask the user for explicit
-        // confirmation first! Never change this top offset automatically.
-        // It achieves the perfect:
-        // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
-        // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
-        //    seamlessly inside the top-right corner padding of the white problem cards.
-        // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
-        // If you make any changes to screens, safe areas, heights, or margins, please
-        // verify if your changes bring unexpected shifts to this configuration!
-        // =========================================================================
         top: 22,
       }}
     >
@@ -1099,102 +1268,132 @@ const InactiveReelItem = React.memo(({
           {
             width: CARD_WIDTH,
             height: cardHeight,
-            paddingHorizontal: 24,
-            paddingTop: 64,
-            paddingBottom: 24,
-            overflow: 'hidden',
           },
           animatedCardStyle,
         ]}
       >
-        {/* Card Content Backdrop */}
-        <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
-          <ConceptCardPreview
-            card={item}
-            activePlaylistId={activePlaylistId}
-            onViewExplanation={() => {}}
-          />
-        </Animated.View>
+        {/* Compositor-First Separation: Corner rounding and clipping nested securely inside */}
+        <View style={{ flex: 1, borderRadius: 24, overflow: 'hidden' }}>
+          <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 64, paddingBottom: 24 }}>
+            {/* Card Content Backdrop */}
+            <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
+              <ConceptCardPreview
+                card={item}
+                activePlaylistId={activePlaylistId}
+                onViewExplanation={() => {}}
+              />
+            </Animated.View>
 
-        {/* Lock Blur Overlay */}
-        <Animated.View
-          style={[StyleSheet.absoluteFillObject, overlayStyle]}
-          pointerEvents={isLockedNextCard ? 'auto' : 'none'}
-        >
-          {Platform.OS === 'ios' ? (
-            (() => {
-              try {
-                const { BlurView } = require('expo-blur');
-                return (
-                  <BlurView
-                    intensity={25}
-                    tint="dark"
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                );
-              } catch {
-                return (
-                  <View 
-                    style={[
-                      StyleSheet.absoluteFillObject, 
-                      { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-                    ]} 
-                  />
-                );
-              }
-            })()
-          ) : (
-            <View 
-              style={[
-                StyleSheet.absoluteFillObject, 
-                { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-              ]} 
-            />
-          )}
+            {/* Lock Blur Overlay */}
+            <Animated.View
+              style={[StyleSheet.absoluteFillObject, overlayStyle]}
+              pointerEvents={isLockedNextCard ? 'auto' : 'none'}
+            >
+              {Platform.OS === 'ios' ? (
+                (() => {
+                  try {
+                    const { BlurView } = require('expo-blur');
+                    return (
+                      <BlurView
+                        intensity={25}
+                        tint="dark"
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                    );
+                  } catch {
+                    return (
+                      <View 
+                        style={[
+                          StyleSheet.absoluteFillObject, 
+                          { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+                        ]} 
+                      />
+                    );
+                  }
+                })()
+              ) : (
+                <View 
+                  style={[
+                    StyleSheet.absoluteFillObject, 
+                    { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
+                  ]} 
+                />
+              )}
 
-          {/* Lock Indicator in center */}
-          <View 
-            style={{
-              ...StyleSheet.absoluteFillObject,
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: 12,
-            }}
-          >
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: 'rgba(255, 255, 255, 0.12)',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderWidth: 1,
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-              }}
-            >
-              <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
-            </View>
-            <Text
-              style={{
-                color: '#94A3B8',
-                fontSize: 12,
-                fontWeight: '800',
-                textTransform: 'uppercase',
-                letterSpacing: 1.5,
-              }}
-            >
-              Locked Next Problem
-            </Text>
+              {/* Lock Indicator in center */}
+              <View 
+                style={{
+                  ...StyleSheet.absoluteFillObject,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: 12,
+                }}
+              >
+                <View
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 28,
+                    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.2)',
+                  }}
+                >
+                  <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
+                </View>
+                <Text
+                  style={{
+                    color: '#94A3B8',
+                    fontSize: 12,
+                    fontWeight: '800',
+                    textTransform: 'uppercase',
+                    letterSpacing: 1.5,
+                  }}
+                >
+                  Locked Next Problem
+                </Text>
+              </View>
+            </Animated.View>
           </View>
-        </Animated.View>
+        </View>
       </Animated.View>
+
+      {/* Render persistent Action Rail on inactive card viewport slots to ensure zero visual pop-in */}
+      <ReelsActionRail
+        cleanId={item._id.split('-loop-')[0]}
+        item={item}
+        onDifficultyStateUpdate={() => {}}
+        onPlaylistPickerTrigger={() => {}}
+        isGuest={isGuest}
+        isDisabled={true} // Lock clicks on inactive items during scroll
+      />
     </View>
   );
 });
 
 const ReelItem = React.memo((props: ReelItemProps) => {
   const isActiveReel = props.index === props.activeIndex;
+  const { scrollY } = props;
+
+  // Track shadow progress smoothly as a Reanimated derived value bound directly to scroll offset!
+  const shadowProgress = useDerivedValue(() => {
+    if (!scrollY) {
+      return isActiveReel ? 1 : 0;
+    }
+    const itemHeight = Math.round(props.cardHeight + 16);
+    const cardPosition = props.index * itemHeight;
+    const distance = Math.abs(scrollY.value - cardPosition);
+    
+    // Smoothly fade out shadow within 80% of item Height scroll distance
+    return interpolate(
+      distance,
+      [0, itemHeight * 0.8],
+      [1, 0],
+      'clamp'
+    );
+  });
 
   if (!isActiveReel) {
     return (
@@ -1205,11 +1404,13 @@ const ReelItem = React.memo((props: ReelItemProps) => {
         cardHeight={props.cardHeight}
         activePlaylistId={props.activePlaylistId}
         isActiveCardClassified={props.isActiveCardClassified ?? true}
+        isGuest={props.isGuest} // Pass isGuest to allow membership query stabilization
+        shadowProgress={shadowProgress}
       />
     );
   }
 
-  return <ActiveReelItem {...props} />;
+  return <ActiveReelItem {...props} shadowProgress={shadowProgress} />;
 }, (prevProps, nextProps) => {
   return (
     prevProps.item._id === nextProps.item._id &&
@@ -1222,6 +1423,7 @@ const ReelItem = React.memo((props: ReelItemProps) => {
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.canEdit === nextProps.canEdit &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
+    prevProps.scrollEnabled === nextProps.scrollEnabled &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
   );
 });
@@ -1232,6 +1434,50 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [showTutorial, setShowTutorial] = useState(false);
+  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const hasConfirmedExit = useRef(false);
+  const feedSessionIdRef = useRef(Date.now().toString());
+
+  // High-fidelity UI-thread scroll offset tracking
+  const scrollY = useSharedValue(0);
+
+  const handleScroll = useCallback((event: any) => {
+    scrollY.value = event.nativeEvent.contentOffset.y;
+  }, []);
+
+  // Immersive Navigation Lock: Intercept swipe back, hardware back, and navigation removals
+  useEffect(() => {
+    if (!isCustomPlayer) return;
+
+    // Disable swipe-back gesture on iOS so users are kept in immersive revision mode
+    navigation.setOptions({
+      gestureEnabled: false,
+    });
+
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (hasConfirmedExit.current) {
+        return;
+      }
+
+      // Intercept exit and trigger premium confirmation modal
+      e.preventDefault();
+      setIsExitModalOpen(true);
+    });
+
+    // Intercept Android hardware back press directly to keep Reels screen 100% visible
+    const handleHardwareBack = () => {
+      setIsExitModalOpen(true);
+      return true; // Handle event (stops navigation pop)
+    };
+
+    const backSubscription = BackHandler.addEventListener('hardwareBackPress', handleHardwareBack);
+
+    return () => {
+      unsubscribe();
+      backSubscription.remove();
+    };
+  }, [navigation, isCustomPlayer]);
 
   useEffect(() => {
     const checkTutorialStatus = async () => {
@@ -1277,11 +1523,52 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const prevIdx = navState.prevIdx;
   const shuffledOrderRef = useRef<string[]>([]);
   const flatListRef = useRef<any>(null);
+
+  const disableScrollNatively = useCallback(() => {
+    try {
+      const scrollableNode = flatListRef.current?.getScrollableNode();
+      if (scrollableNode && typeof scrollableNode.setNativeProps === 'function') {
+        scrollableNode.setNativeProps({ scrollEnabled: false });
+      } else if (flatListRef.current && typeof flatListRef.current.setNativeProps === 'function') {
+        flatListRef.current.setNativeProps({ scrollEnabled: false });
+      }
+    } catch (e) {
+      console.warn('Native scroll locking was bypassed:', e);
+    }
+    setTimeout(() => {
+      setScrollEnabled(false);
+    }, 0);
+  }, []);
+
+  const enableScrollNatively = useCallback(() => {
+    try {
+      const scrollableNode = flatListRef.current?.getScrollableNode();
+      if (scrollableNode && typeof scrollableNode.setNativeProps === 'function') {
+        scrollableNode.setNativeProps({ scrollEnabled: true });
+      } else if (flatListRef.current && typeof flatListRef.current.setNativeProps === 'function') {
+        flatListRef.current.setNativeProps({ scrollEnabled: true });
+      }
+    } catch (e) {
+      console.warn('Native scroll unlocking was bypassed:', e);
+    }
+    setTimeout(() => {
+      setScrollEnabled(true);
+    }, 0);
+  }, []);
+
+  const handleScrollEnabledChange = useCallback((enabled: boolean) => {
+    if (enabled) {
+      enableScrollNatively();
+    } else {
+      disableScrollNatively();
+    }
+  }, [enableScrollNatively, disableScrollNatively]);
   const hasScrolledToInitial = useRef(false);
   const sessionStartCardId = useRef<string | null>(null);
   const recentCardIdsRef = useRef<string[]>([]);
 
-  const { activePlaylistId, setActivePlaylistId } = useBookmarkStore();
+  const { activePlaylistId: storedPlaylistId, setActivePlaylistId } = useBookmarkStore();
+  const activePlaylistId = isCustomPlayer ? storedPlaylistId : null;
   const { data: playlists = [] } = usePlaylists();
   const { data: foldersData } = useGetFolders({ limit: 100 });
 
@@ -1787,7 +2074,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
     // 2. Local-first buffer check:
     // Verify if upcoming adjacent cards are already hydrated in memory.
-    const hasAheadCards = [1, 2].every(offset => {
+    // Check 10 cards ahead and 4 cards behind for seamless non-buffering continuity.
+    const hasAheadCards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every(offset => {
       const targetIdx = newIndex + offset;
       if (targetIdx < sessionCards.length) {
         return sessionCards[targetIdx] !== null; // Card is loaded
@@ -1795,7 +2083,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       return true; // Out of bounds is okay
     });
 
-    const hasBehindCards = [1, 2].every(offset => {
+    const hasBehindCards = [1, 2, 3, 4].every(offset => {
       const targetIdx = newIndex - offset;
       if (targetIdx >= 0) {
         return sessionCards[targetIdx] !== null; // Card is loaded
@@ -2059,7 +2347,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         }
       }, 600);
     }
-    lightHaptic();
     setNavState({ activeIndex: nextIdx, prevIdx: -1 });
   };
 
@@ -2067,8 +2354,11 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     return () => {
       if (viewTimeoutRef.current) clearTimeout(viewTimeoutRef.current);
       if (sessionSyncTimeoutRef.current) clearTimeout(sessionSyncTimeoutRef.current);
+      if (isCustomPlayer) {
+        setActivePlaylistId(null);
+      }
     };
-  }, [folderIdParam, activePlaylistId]);
+  }, [folderIdParam, activePlaylistId, isCustomPlayer]);
 
   const handleProgressUpdateInReels = useCallback((cardId: string, action: 'favorite' | 'difficult' | 'archived', value: boolean) => {
     const cleanId = cardId.split('-loop-')[0];
@@ -2114,13 +2404,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         });
       }
     }
-
-    Toast.show({
-      type: 'success',
-      text1: value ? `Marked as ${action}` : `Removed from ${action}`,
-      position: 'top',
-      visibilityTime: 1200,
-    });
   }, [isGuest, handleCardStateUpdate]);
 
   const handleWatchLaterToggleInReels = useCallback((cardId: string) => {
@@ -2179,14 +2462,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     if (!isGuest) {
       updateDifficultyStateMutation.mutate({ cardId, difficultyState: resolvedNewState });
     }
-
-    Toast.show({
-      type: 'success',
-      text1: resolvedNewState ? `Classified as ${resolvedNewState.toUpperCase()}! 🔥` : 'Classification cleared! 🧹',
-      text2: 'Revision state synchronized.',
-      position: 'top',
-      visibilityTime: 1200,
-    });
   }, [isGuest, updateDifficultyStateMutation, cardsList, allCards, sessionCards]);
 
   const handleMoreOptionsTrigger = useCallback((card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => {
@@ -2428,7 +2703,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const activeCard = cardsList[activeIndex];
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }} className="bg-[#F5F5F7]">
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#F5F5F7' }} className="bg-[#F5F5F7]">
       
       {showTutorial && (
         <FirstFeedTutorial onDismiss={() => setShowTutorial(false)} />
@@ -2446,10 +2721,10 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         />
       )}
 
-      {/* Premium Back button for custom stack reels sessions */}
+      {/* Premium minimal exit button for focused immersive revision sessions */}
       {isCustomPlayer && (
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => setIsExitModalOpen(true)} // Open modal directly to ensure Reels screen remains fully active in the background
           activeOpacity={0.7}
           style={{
             position: 'absolute',
@@ -2457,12 +2732,19 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
             left: 16,
             zIndex: 95,
             padding: 8,
-            backgroundColor: 'rgba(255, 255, 255, 0.8)',
-            borderRadius: 20,
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            borderRadius: 22,
             borderWidth: 1,
-            borderColor: 'rgba(226, 232, 240, 0.8)',
+            borderColor: 'rgba(226, 232, 240, 0.6)',
+            width: 38,
+            height: 38,
             justifyContent: 'center',
             alignItems: 'center',
+            shadowColor: '#0F172A',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.04,
+            shadowRadius: 10,
+            elevation: 2,
           }}
         >
           <ChevronLeft color="#8B5CF6" size={20} strokeWidth={2.5} />
@@ -2483,27 +2765,48 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
           flexDirection: 'row',
         }}
       >
-        {/* RIGHT SIDE: Transparent Settings Cog Icon - Hidden in custom sessions */}
-        {!isCustomPlayer && (
-          <TouchableOpacity
-            onPress={toggleMenu}
-            activeOpacity={0.7}
-            style={{
-              padding: 8,
-              backgroundColor: 'transparent',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-          >
-            <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
-          </TouchableOpacity>
-        )}
+        {/* RIGHT SIDE: Transparent Settings Cog Icon - Visible in all sessions */}
+        <TouchableOpacity
+          onPress={toggleMenu}
+          activeOpacity={0.7}
+          style={{
+            padding: 8,
+            backgroundColor: 'transparent',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
+        </TouchableOpacity>
 
         {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
         <TouchableOpacity
-          onPress={() => {
-            // TODO: Add your chat toggle logic here
-            console.log('ChatGPT Clicked');
+          onPress={async () => {
+            const activeCardItem = cardsList[activeIndex];
+            if (!activeCardItem) return;
+
+            const slides = getSlidesForCard(activeCardItem);
+            const slidesContent = slides.map((slide, i) => {
+              const bodyStr = slide.body ? `\nBody: ${slide.body}` : '';
+              const codeStr = slide.code ? `\nCode: ${slide.code}` : '';
+              const blocksStr = slide.blocks ? `\nData: ${JSON.stringify(slide.blocks)}` : '';
+              return `[Slide ${i+1} - ${slide.type || 'content'}]\nHeadline: ${slide.headline}${bodyStr}${codeStr}${blocksStr}`;
+            }).join('\n\n');
+
+            const prompt = `Please explain this DSA problem to me:\n\nTitle: ${activeCardItem.title}\nTopic: ${activeCardItem.topic}\nDifficulty: ${activeCardItem.difficulty}\n\nExplanation:\n${activeCardItem.explanation}\n\nCode:\n${activeCardItem.code || 'N/A'}\n\n--- SLIDES DATA ---\n${slidesContent}\n------------------\n\nPlease analyze this fully.`;
+            
+            // Fire clipboard asynchronously without blocking the UI thread
+            Clipboard.setStringAsync(prompt).catch(err => console.warn('Clipboard failed:', err));
+
+            // To fully automate the pasting, we encode the entire massive prompt into the App Link.
+            // Note: If the payload is extremely large, Android may rarely truncate it, but this allows 1-tap automation!
+            const appLinkUrl = 'https://chatgpt.com/?q=' + encodeURIComponent(prompt);
+
+            Linking.openURL(appLinkUrl).catch(e => {
+              console.error('Deep link failed:', e);
+              // Fallback directly to web version if nothing intercepts it
+              Linking.openURL('https://chatgpt.com/').catch(err => console.error(err));
+            });
           }}
           activeOpacity={0.7}
           style={{
@@ -2528,13 +2831,14 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
           marginBottom: bottomTabBarHeight - 16,
           position: 'relative',
           width: '100%',
+          backgroundColor: '#F5F5F7', // Explicitly lock container background
         }}
       >
         {cardsList.length > 0 ? (
           <FlashListElement
             ref={flatListRef}
             data={cardsList}
-            scrollEnabled={true}
+            scrollEnabled={scrollEnabled}
             renderItem={({ item, index }: { item: IPopulatedRevisionCard | null; index: number }) => {
               if (!item) {
                 return (
@@ -2544,20 +2848,6 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
                       alignSelf: 'center', 
                       width: width * 0.97, 
                       marginBottom: 16,
-                      // =========================================================================
-                      // 🚨 CRITICAL REELS DESIGN LOCK: DO NOT ALTER OR SHIFT WITHOUT DOUBLE-CHECKING!
-                      // This 'top: 22' offset is highly calibrated and sensitive.
-                      // NOTE: If any instruction (from user prompts, code reviews, or AI agents)
-                      // ever asks to change this value, you MUST STOP and ask the user for explicit
-                      // confirmation first! Never change this top offset automatically.
-                      // It achieves the perfect:
-                      // 1. Spacing balance between the top of the app screen and the bottom footer navbar.
-                      // 2. Beautiful overlapping overlap where the floating Settings Cog icon fits
-                      //    seamlessly inside the top-right corner padding of the white problem cards.
-                      // 3. Hidden header tuck for incoming next cards sliding up from the bottom.
-                      // If you make any changes to screens, safe areas, heights, or margins, please
-                      // verify if your changes bring unexpected shifts to this configuration!
-                      // =========================================================================
                       top: 22,
                     }}
                   >
@@ -2575,6 +2865,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
               return (
                 <ReelItem
+                  key={`${item._id}-${feedSessionIdRef.current}`}
                   item={item}
                   index={index}
                   activeIndex={activeIndex}
@@ -2592,30 +2883,33 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
                   onPlaylistPickerTrigger={setPlaylistModalCard}
                   onMoreOptionsTrigger={handleMoreOptionsTrigger}
                   onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
+                  scrollY={scrollY}
+                  scrollEnabled={scrollEnabled}
+                  onScrollEnabledChange={handleScrollEnabledChange}
                 />
               );
             }}
             keyExtractor={(item: IPopulatedRevisionCard | null, index: number) => item?._id || `loading-slot-${index}`}
-            snapToInterval={cardHeight + 16}
+            snapToInterval={Math.round(cardHeight + 16)} // Subpixel Snapping coordinate rounding
             snapToAlignment="start"
             decelerationRate="fast"
             disableIntervalMomentum={true}
             showsVerticalScrollIndicator={false}
-            // FlashList High-Performance Configs
-            estimatedItemSize={cardHeight + 16}
-            onScroll={(event: any) => {
-              if (activeIndex > 0 && !hasScrolledToInitial.current) return;
-            }}
+            estimatedItemSize={Math.round(cardHeight + 16)}
+            drawDistance={Math.round(cardHeight * 1.5)} // Scoped viewport precomputation window
+            removeClippedSubviews={Platform.OS === 'android'} // Android memory containment, off-screen optimization
+            getItemType={(item: IPopulatedRevisionCard | null) => item ? (item.code ? 'CODE_SLIDE' : 'TEXT_SLIDE') : 'LOADING'} // Custom cell templates recycling separation
+            onScroll={handleScroll}
             scrollEventThrottle={16}
             onMomentumScrollEnd={(event: any) => {
               const yOffset = event.nativeEvent.contentOffset.y;
-              const index = Math.round(yOffset / (cardHeight + 16));
+              const index = Math.round(yOffset / Math.round(cardHeight + 16));
               if (index !== activeIndex && index >= 0 && index < cardsList.length) {
                 setNavState({ activeIndex: index, prevIdx: activeIndex });
                 transitionToCard(index);
               }
             }}
-            style={{ width: '100%', height: '100%' }}
+            style={{ width: '100%', height: '100%', backgroundColor: '#F5F5F7' }}
             contentContainerStyle={{ alignItems: 'center' }}
           />
         ) : (
@@ -2663,6 +2957,117 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
           onClose={() => setPlaylistModalCard(null)}
         />
       )}
+
+      {/* Immersive Session Exit Confirmation Modal */}
+      {isExitModalOpen && (
+        <Modal
+          transparent={true}
+          visible={isExitModalOpen}
+          animationType="fade"
+          onRequestClose={() => setIsExitModalOpen(false)}
+        >
+          <View 
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(15, 23, 42, 0.45)', // Premium dark blur shade
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: 24,
+            }}
+          >
+            <View
+              style={{
+                width: '100%',
+                maxWidth: 320,
+                backgroundColor: '#ffffff',
+                borderRadius: 30,
+                padding: 24,
+                alignItems: 'center',
+                shadowColor: '#0F172A',
+                shadowOffset: { width: 0, height: 16 },
+                shadowOpacity: 0.1,
+                shadowRadius: 30,
+                elevation: 10,
+                borderWidth: 1,
+                borderColor: 'rgba(226, 232, 240, 0.8)',
+              }}
+            >
+              {/* Exit Session Title */}
+              <Text 
+                style={{
+                  fontSize: 18,
+                  fontWeight: '800',
+                  color: '#0F172A',
+                  textAlign: 'center',
+                  lineHeight: 24,
+                  marginBottom: 10,
+                }}
+              >
+                End {activePlaybackName} Revision?
+              </Text>
+              
+              <Text 
+                style={{
+                  fontSize: 13,
+                  color: '#64748B',
+                  textAlign: 'center',
+                  lineHeight: 18,
+                  marginBottom: 24,
+                }}
+              >
+                Your progress is securely synchronized offline-first. Return anytime to resume.
+              </Text>
+
+              {/* Confirm Actions */}
+              <TouchableOpacity
+                onPress={() => setIsExitModalOpen(false)}
+                activeOpacity={0.8}
+                style={{
+                  width: '100%',
+                  paddingVertical: 14,
+                  backgroundColor: '#8B5CF6',
+                  borderRadius: 16,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 10,
+                  elevation: 2,
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>
+                  Continue Revising
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  hasConfirmedExit.current = true;
+                  setIsExitModalOpen(false);
+                  router.back();
+                }}
+                activeOpacity={0.7}
+                style={{
+                  width: '100%',
+                  paddingVertical: 14,
+                  backgroundColor: '#F8FAFC',
+                  borderWidth: 1,
+                  borderColor: 'rgba(226, 232, 240, 0.8)',
+                  borderRadius: 16,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#EF4444', fontSize: 13, fontWeight: '700' }}>
+                  End Revision
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
     </GestureHandlerRootView>
   );
 }
@@ -2673,10 +3078,5 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(226, 232, 240, 0.8)',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.04,
-    shadowRadius: 20,
-    elevation: 3,
   },
 });

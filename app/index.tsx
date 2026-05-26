@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import Animated, {
   useSharedValue,
@@ -194,12 +194,62 @@ export default function StartupCoordinator() {
       <View style={styles.content}>
         {/* Glowing Branding Tile */}
         <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
-          <Sparkles color="#8B5CF6" size={44} strokeWidth={1.5} />
+          <View style={{ width: 50, height: 50, alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+            <Text 
+              style={{ 
+                fontSize: 44, 
+                fontWeight: '900', 
+                color: '#8B5CF6', 
+                fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-condensed',
+                lineHeight: 52,
+              }}
+            >
+              R
+            </Text>
+            
+            {/* Star Sparkle (Top Right) */}
+            <View style={{ position: 'absolute', top: -6, right: -10 }}>
+              <Sparkles color="#8B5CF6" size={16} strokeWidth={1.5} />
+            </View>
+
+            {/* Star Sparkle (Bottom Left) */}
+            <View style={{ position: 'absolute', bottom: -4, left: -10 }}>
+              <Sparkles color="#A78BFA" size={12} strokeWidth={1.2} />
+            </View>
+
+            {/* Glowing Purple Dot (Top Left) */}
+            <View 
+              style={{ 
+                position: 'absolute', 
+                top: 2, 
+                left: -4, 
+                width: 5, 
+                height: 5, 
+                borderRadius: 2.5, 
+                backgroundColor: '#8B5CF6', 
+                opacity: 0.8 
+              }} 
+            />
+
+            {/* Glowing Purple Dot (Bottom Right) */}
+            <View 
+              style={{ 
+                position: 'absolute', 
+                bottom: 4, 
+                right: -4, 
+                width: 6, 
+                height: 6, 
+                borderRadius: 3, 
+                backgroundColor: '#C084FC', 
+                opacity: 0.7 
+              }} 
+            />
+          </View>
         </Animated.View>
 
         {/* Cinematic Typographic Sequence */}
         <Animated.View style={[styles.textContainer, textAnimatedStyle]}>
-          <Text style={styles.title}>DSA Revision</Text>
+          <Text style={styles.title}>ReeWise</Text>
           <Text style={styles.subtitle}>Curating active recall...</Text>
         </Animated.View>
       </View>

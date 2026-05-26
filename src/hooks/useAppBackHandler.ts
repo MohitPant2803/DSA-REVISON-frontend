@@ -1,13 +1,23 @@
 import { useCallback } from 'react';
-import { Alert, BackHandler, Platform } from 'react-native';
+import { BackHandler } from 'react-native';
 import { useFocusEffect, useNavigation } from 'expo-router';
+import { useUIStore } from '@/store/useUIStore';
 
 /**
  * Handles Android hardware back and coordinates with the navigation stack.
  * When the stack cannot go back, prompts before exiting the app.
  */
 export function useAppBackHandler() {
-  const navigation = useNavigation();
+  const navigation = navigationHookWrapper();
+  const setExitPromptOpen = useUIStore((state) => state.setExitPromptOpen);
+
+  function navigationHookWrapper() {
+    try {
+      return useNavigation();
+    } catch {
+      return { canGoBack: () => false, goBack: () => {} } as any;
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -17,28 +27,14 @@ export function useAppBackHandler() {
           return true;
         }
 
-        Alert.alert(
-          'Leave app?',
-          'Are you sure you want to leave?',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Exit',
-              style: 'destructive',
-              onPress: () => {
-                if (Platform.OS === 'android') {
-                  BackHandler.exitApp();
-                }
-              },
-            },
-          ],
-          { cancelable: true }
-        );
+        // Open our premium, high-aesthetic global exit confirmation modal
+        setExitPromptOpen(true);
         return true;
       };
 
       const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => subscription.remove();
-    }, [navigation])
+    }, [navigation, setExitPromptOpen])
   );
 }
+

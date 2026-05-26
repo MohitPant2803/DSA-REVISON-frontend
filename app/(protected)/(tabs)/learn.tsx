@@ -39,6 +39,9 @@ import Svg, { Circle } from 'react-native-svg';
 import { useFolderLoops } from '@/services/useUserProgress';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { usePlaylists } from '@/hooks/usePlaylists';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useBiometricReauth } from '@/hooks/useBiometricReauth';
+import { theme } from '@/theme';
 import { FolderCard } from '@/components/FolderCard';
 import { FolderFormModal } from '@/components/FolderFormModal';
 import { SearchFilterBar } from '@/components/SearchFilterBar';
@@ -49,7 +52,7 @@ import { GlassPanel } from '@/components/motion/GlassPanel';
 import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable';
 import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 import api from '@/services/api';
-import { cacheStorage } from '@/lib/cache';
+import { useUIStore } from '@/store/useUIStore';
 
 import Animated, {
   useSharedValue,
@@ -62,36 +65,17 @@ import Animated, {
   FadeIn,
   FadeOut,
   FadeInUp,
-  FadeInDown,
   interpolate,
   SharedValue,
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
 
-const LOCAL_FALLBACK_QUOTES = [
-  {
-    text: "Consistency beats intensity. Build your foundation step by step, card by card.",
-    author: "Active Recall",
-    collegeName: "DSA Revision",
-    branch: "Computer Science",
-    yearOfGraduation: 2026
-  },
-  {
-    text: "The only way to do great work is to love what you do. Keep looking, don't settle.",
-    author: "Steve Jobs",
-    collegeName: "Stanford University",
-    branch: "Design",
-    yearOfGraduation: 2026
-  },
-  {
-    text: "Success is not final, failure is not fatal: it is the courage to continue that counts.",
-    author: "Winston Churchill",
-    collegeName: "Harvard University",
-    branch: "History",
-    yearOfGraduation: 2026
-  }
-];
+// Global session state to ensure cinematic animations only play the first time 
+// the user visits the Learn screen per app session.
+let globalHasPlayedLearnAnimation = false;
+let globalQuotesList: any[] = [];
+
 
 // Staggered Chained Card Drag-Chain Momentum Component with Stretch and Compress Physics
 const StaggeredCard = ({
@@ -137,15 +121,42 @@ const StaggeredCard = ({
   );
 };
 
-let hasAppBeenAnimated = false;
+const FolderCardSkeleton = () => {
+  const opacity = useSharedValue(0.4);
+  useEffect(() => {
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(0.7, { duration: 800 }),
+        withTiming(0.4, { duration: 800 })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const skeletonStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  return (
+    <Animated.View style={[styles.skeletonCard, skeletonStyle]}>
+      <View style={styles.skeletonTitle} />
+      <View style={styles.skeletonSub} />
+      <View style={styles.skeletonBar} />
+    </Animated.View>
+  );
+};
 
 export default function LearnScreen() {
   useAppBackHandler();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, isSessionExpired } = useAuthStore();
+  const { triggerBiometricReauth } = useBiometricReauth();
   const { preferences } = useOnboardingStore();
   const { canManageContent, role } = useRole();
+  const { setHasAppBeenAnimated } = useUIStore();
+  const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
 
   const { data: stats, refetch: refetchStats, isRefetching: isStatsRefetching } = useDashboard();
   const { setActivePlaylistId } = useBookmarkStore();
@@ -167,29 +178,29 @@ export default function LearnScreen() {
 
   const folders = useMemo(() => data?.results ?? [], [data]);
 
+  // Explicit cinematic loading phases
+  const [phase, setPhase] = useState<'typing' | 'authorReveal' | 'waitingForContent' | 'contentReady' | 'timeoutWarning' | 'settled'>(globalHasPlayedLearnAnimation ? 'settled' : 'typing');
+  const [showAuthor, setShowAuthor] = useState(globalHasPlayedLearnAnimation);
+  const [isTypingComplete, setIsTypingComplete] = useState(globalHasPlayedLearnAnimation);
+  const [isWarningStarted, setIsWarningStarted] = useState(false);
+  const [displayedMessage, setDisplayedMessage] = useState('');
+  const [seniorModalVisible, setSeniorModalVisible] = useState(false);
+
   // Dynamic MongoDB Quote integration
-  const [quotesList, setQuotesList] = useState<any[]>([]);
+  const [quotesList, setQuotesList] = useState<any[]>(globalQuotesList);
 
   useEffect(() => {
     const fetchQuotes = async () => {
-      const key = 'senior_quotes';
+      if (globalQuotesList.length > 0) return; // Retrieve from cached global to prevent blank flashes
       try {
+        // Prepend is omitted because api baseURL already concludes with /api
         const response = await api.get('/senior-quotes');
         if (response.data?.success && response.data?.data && response.data.data.length > 0) {
-          setQuotesList(response.data.data);
-          await cacheStorage.set(key, response.data.data);
-        } else {
-          const cached = await cacheStorage.get<any[]>(key);
-          if (cached && cached.length > 0) {
-            setQuotesList(cached);
-          }
+          globalQuotesList = response.data.data;
+          setQuotesList(globalQuotesList);
         }
       } catch (err) {
         console.warn('Failed to fetch senior quotes from DB:', err);
-        const cached = await cacheStorage.get<any[]>(key);
-        if (cached && cached.length > 0) {
-          setQuotesList(cached);
-        }
       }
     };
     fetchQuotes();
@@ -197,40 +208,42 @@ export default function LearnScreen() {
 
   // Selected Quote Selection for Ghost Typing - deterministically shifts to the next quote every 12 hours (at 12:00 AM and 12:00 PM)
   const selectedQuote = useMemo(() => {
-    const list = quotesList && quotesList.length > 0 ? quotesList : LOCAL_FALLBACK_QUOTES;
+    if (!quotesList || quotesList.length === 0) {
+      return {
+        text: "",
+        author: "",
+        collegeName: "",
+        branch: "",
+        yearOfGraduation: 2026
+      };
+    }
     const twelveHourIntervals = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
-    return list[twelveHourIntervals % list.length];
+    return quotesList[twelveHourIntervals % quotesList.length];
   }, [quotesList]);
 
-  // Explicit cinematic loading phases
-  const [phase, setPhase] = useState<'typing' | 'waitingForContent' | 'contentReady' | 'timeoutWarning' | 'settled'>(
-    hasAppBeenAnimated ? 'settled' : 'typing'
-  );
-  const [showAuthor, setShowAuthor] = useState(hasAppBeenAnimated);
-  const [isTypingComplete, setIsTypingComplete] = useState(hasAppBeenAnimated);
-  const [isWarningStarted, setIsWarningStarted] = useState(false);
-  const [displayedMessage, setDisplayedMessage] = useState(
-    hasAppBeenAnimated && selectedQuote ? selectedQuote.text : ''
-  );
-  const [seniorModalVisible, setSeniorModalVisible] = useState(false);
+  const authorName = selectedQuote?.author || selectedQuote?.name || selectedQuote?.studentName || "Senior Author";
 
   // Master timeline progress representation (0% to 100%)
-  const timelineProgress = useSharedValue(hasAppBeenAnimated ? 100 : 0);
+  const timelineProgress = useSharedValue(globalHasPlayedLearnAnimation ? 100 : 0);
 
   // Math-calibrated center offset so the quote is drawn exactly in the vertical center of the screen
   const quoteInitialY = 245;
 
-  const cursorOpacity = useSharedValue(1);
-  const authorOpacity = useSharedValue(0);
+  const cursorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 0 : 1);
+  const authorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 1 : 0);
 
   // Reveal senior author gently exactly 0.5s after animations settle
   useEffect(() => {
     if (phase === 'settled') {
-      const t = setTimeout(() => {
-        setShowAuthor(true);
-        authorOpacity.value = withTiming(1, { duration: 500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
-      },100);
-      return () => clearTimeout(t);
+      setHasAppBeenAnimated(true);
+      if (!globalHasPlayedLearnAnimation) {
+        globalHasPlayedLearnAnimation = true;
+      }
+    } else if (globalHasPlayedLearnAnimation) {
+      setShowAuthor(true);
+      authorOpacity.value = 1;
+    } else if (phase === 'authorReveal' || phase === 'contentReady') {
+      // Handled during authorReveal and contentReady timeline transitions
     } else {
       setShowAuthor(false);
       authorOpacity.value = 0;
@@ -239,17 +252,20 @@ export default function LearnScreen() {
 
   // 1. Initial Soft Entry & Ambient Variable Typing Engine
   useEffect(() => {
-    if (hasAppBeenAnimated) {
-      if (selectedQuote && selectedQuote.text) {
-        setDisplayedMessage(selectedQuote.text);
-      }
-      return;
-    }
     // If quotes are not yet loaded from DB, remain completely quiet, clean, and empty
     if (!selectedQuote || !selectedQuote.text) {
       setDisplayedMessage('');
-      setIsTypingComplete(false);
-      timelineProgress.value = 0;
+      setIsTypingComplete(globalHasPlayedLearnAnimation);
+      timelineProgress.value = globalHasPlayedLearnAnimation ? 100 : 0;
+      return;
+    }
+
+    // If we have already animated once this session, snap to the finished layout instantly
+    if (globalHasPlayedLearnAnimation) {
+      setDisplayedMessage(selectedQuote.text);
+      setIsTypingComplete(true);
+      timelineProgress.value = 100;
+      cursorOpacity.value = 0;
       return;
     }
 
@@ -345,19 +361,40 @@ export default function LearnScreen() {
   }, [phase, isTypingComplete, isWarningStarted]);
 
   // 3. State-Driven Loading Check
-  const isDataReady = !isLoading || data !== undefined || isError;
+  const isDataReady = !isLoading && data !== undefined;
 
   useEffect(() => {
     if (phase === 'settled') return;
 
     if (isTypingComplete) {
-      if (isDataReady) {
-        setPhase('contentReady');
+      if (globalHasPlayedLearnAnimation) {
+        setPhase('settled');
       } else {
-        setPhase('waitingForContent');
+        setPhase('authorReveal');
       }
     }
-  }, [isTypingComplete, isDataReady, phase]);
+  }, [isTypingComplete]);
+
+  // Intermediate cinematic stage: Reveal author in center immediately after typewriter
+  useEffect(() => {
+    if (phase === 'authorReveal') {
+      setShowAuthor(true);
+      authorOpacity.value = withTiming(1, { 
+        duration: 800, 
+        easing: Easing.out(Easing.ease) 
+      });
+
+      const timer = setTimeout(() => {
+        if (isDataReady) {
+          setPhase('contentReady');
+        } else {
+          setPhase('waitingForContent');
+        }
+      }, 1100); // 800ms fade-in + 300ms pause for calm breathing room
+
+      return () => clearTimeout(timer);
+    }
+  }, [phase, isDataReady]);
 
   useEffect(() => {
     if ((phase === 'waitingForContent' || phase === 'timeoutWarning') && isDataReady) {
@@ -379,7 +416,6 @@ export default function LearnScreen() {
 
   // 4. Content Reveal Transition with Premium Easing (Text pulls cards upward)
   useEffect(() => {
-    if (hasAppBeenAnimated) return;
     if (phase === 'contentReady') {
       // Luxurious cinematic workspace assembly timeline animation (T = 30 to 100)
       timelineProgress.value = withTiming(100, {
@@ -389,19 +425,11 @@ export default function LearnScreen() {
 
       const timer = setTimeout(() => {
         setPhase('settled');
-        hasAppBeenAnimated = true; // Mark as animated!
       }, 2500);
 
       return () => clearTimeout(timer);
     }
   }, [phase]);
-
-  // Synchronize and update the static quote instantly if the app has already been animated once
-  useEffect(() => {
-    if (hasAppBeenAnimated && selectedQuote && selectedQuote.text) {
-      setDisplayedMessage(selectedQuote.text);
-    }
-  }, [selectedQuote]);
 
   // Master Orchestrated Reanimated Style Mappings
   const welcomeAnimatedStyle = useAnimatedStyle(() => {
@@ -552,19 +580,40 @@ export default function LearnScreen() {
         contentContainerStyle={{ paddingBottom: 140, paddingHorizontal: 24, paddingTop: 24 }}
         refreshControl={
           <RefreshControl 
-            refreshing={phase === 'settled' && (isRefetching || isStatsRefetching)} 
+            refreshing={isRefetching || isStatsRefetching} 
             onRefresh={handleRefetchAll} 
             tintColor="#8B5CF6" 
-            enabled={phase === 'settled'} // Always mounted, only enabled when settled to completely remove ScrollView recreations/flickers
           />
         }
-        scrollEnabled={phase === 'settled'}
+        scrollEnabled={true}
       >
         {/* Top welcome line and centered quote anchor */}
         <View style={styles.headerBlock}>
-          <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
-            Welcome back, {firstName}
-          </Animated.Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: 8 }}>
+            <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
+              Welcome back, {firstName}
+            </Animated.Text>
+            
+            {/* Elegant inline sync status indicator dot */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(148, 163, 184, 0.05)', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12 }}>
+              <View 
+                style={{ 
+                  width: 8, 
+                  height: 8, 
+                  borderRadius: 4, 
+                  backgroundColor: 
+                    syncStatus === 'synced' ? theme.colors.status.success :
+                    syncStatus === 'syncing' ? theme.colors.status.info :
+                    theme.colors.status.warning,
+                }} 
+              />
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>
+                {syncStatus === 'synced' ? 'Synced' :
+                 syncStatus === 'syncing' ? 'Syncing...' :
+                 'Offline'}
+              </Text>
+            </View>
+          </View>
           
           {/* ONE Persistent, continuous Quote block that slides upward with 100% object permanence */}
           <Animated.View style={[styles.headerQuoteContainer, quoteAnimatedStyle]}>
@@ -587,10 +636,65 @@ export default function LearnScreen() {
                 onPress={() => setSeniorModalVisible(true)} 
                 activeOpacity={0.6}
               >
-                <Text style={styles.headerAuthorText}>— {selectedQuote.author}</Text>
+                <Text style={styles.headerAuthorText}>— {authorName}</Text>
               </TouchableOpacity>
             </Animated.View>
           </Animated.View>
+          
+          {/* Soft Session Expired warning banner */}
+          {isSessionExpired && (
+            <Animated.View 
+              entering={FadeInUp.duration(400)}
+              exiting={FadeOut.duration(300)}
+              style={{
+                backgroundColor: '#FEF3C7',
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: '#FCD34D',
+                padding: 16,
+                marginTop: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+              }}
+            >
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#78350F' }}>
+                  Sync Suspended
+                </Text>
+                <Text style={{ fontSize: 11, fontWeight: '500', color: '#92400E', marginTop: 2 }}>
+                  Your session expired. Verify your identity to resume progress backup.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={async () => {
+                  const success = await triggerBiometricReauth();
+                  if (!success) {
+                    Alert.alert('Authentication Required', 'Please sign in to continue.', [
+                      { text: 'Sign In', onPress: async () => {
+                          const { logout } = useAuthStore.getState();
+                          await logout();
+                          router.replace('/(auth)/login');
+                        }
+                      },
+                      { text: 'Cancel', style: 'cancel' }
+                    ]);
+                  }
+                }}
+                style={{
+                  backgroundColor: '#78350F',
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 12,
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
+                  Unlock
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
         </View>
 
         {/* Section Header Row softly fades and slides upward */}
@@ -608,34 +712,32 @@ export default function LearnScreen() {
 
         {/* Render collections list with staggered drag-chain momentum effects directly in ScrollView to avoid parent clipping and fade delays */}
         <View style={styles.collectionsList}>
-          {folders.map((folder, index) => {
-            const completedLoops = folderLoopsData?.find((f: any) => f.folderId === folder._id)?.completedLoops || 0;
-            return (
-              <StaggeredCard key={folder._id} index={index} timelineProgress={timelineProgress}>
-                <FolderCard
-                  folder={folder}
-                  completedLoops={completedLoops}
-                  hideCardCount={true}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/(protected)/folder/[folderId]',
-                      params: { folderId: folder._id, title: folder.title },
-                    })
-                  }
-                  onLongPress={() => handleFolderLongPress(folder)}
-                />
-              </StaggeredCard>
-            );
-          })}
-
-          {phase === 'settled' && folders.length === 0 && (
-            <Animated.View entering={FadeInDown.duration(600)} style={styles.emptyStateContainer}>
-              <Activity color="#94A3B8" size={32} strokeWidth={1.5} style={{ marginBottom: 12 }} />
-              <Text style={styles.emptyStateTitle}>Your study journals are empty</Text>
-              <Text style={styles.emptyStateSubtitle}>
-                {isError ? "Connect to the internet to sync and download your journals." : "Create your first revision journal using the 'New journal' button above!"}
-              </Text>
-            </Animated.View>
+          {isLoading || phase === 'waitingForContent' ? (
+            <>
+              <FolderCardSkeleton />
+              <FolderCardSkeleton />
+              <FolderCardSkeleton />
+            </>
+          ) : (
+            folders.map((folder, index) => {
+              const completedLoops = folderLoopsData?.find((f: any) => f.folderId === folder._id)?.completedLoops || 0;
+              return (
+                <StaggeredCard key={folder._id} index={index} timelineProgress={timelineProgress}>
+                  <FolderCard
+                    folder={folder}
+                    completedLoops={completedLoops}
+                    hideCardCount={true}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(protected)/folder/[folderId]',
+                        params: { folderId: folder._id, title: folder.title },
+                      })
+                    }
+                    onLongPress={() => handleFolderLongPress(folder)}
+                  />
+                </StaggeredCard>
+              );
+            })
           )}
         </View>
       </ScrollView>
@@ -675,7 +777,7 @@ export default function LearnScreen() {
               
               <View style={styles.divider} />
               
-              <Text style={styles.seniorName}>{selectedQuote.author}</Text>
+              <Text style={styles.seniorName}>{authorName}</Text>
               
               <View style={styles.detailsBlock}>
                 <Text style={styles.detailValue}>{selectedQuote.collegeName}</Text>
@@ -919,6 +1021,36 @@ const styles = StyleSheet.create({
   collectionsList: {
     marginTop: 22,
   },
+  skeletonCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.1)',
+    padding: 24,
+    marginBottom: 16,
+    height: 120,
+    justifyContent: 'center',
+  },
+  skeletonTitle: {
+    backgroundColor: '#E2E8F0',
+    height: 18,
+    borderRadius: 4,
+    width: '60%',
+    marginBottom: 10,
+  },
+  skeletonSub: {
+    backgroundColor: '#E2E8F0',
+    height: 12,
+    borderRadius: 3,
+    width: '40%',
+    marginBottom: 16,
+  },
+  skeletonBar: {
+    backgroundColor: '#E2E8F0',
+    height: 8,
+    borderRadius: 2,
+    width: '100%',
+  },
   // Refined Cinematic Ghost Loading Experience
   cursor: {
     color: '#8B5CF6',
@@ -1021,34 +1153,5 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
-  },
-  emptyStateContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 48,
-    paddingHorizontal: 24,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.08)',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.02,
-    shadowRadius: 12,
-    elevation: 1,
-    marginTop: 20,
-  },
-  emptyStateTitle: {
-    color: '#0F172A',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  emptyStateSubtitle: {
-    color: '#64748B',
-    fontSize: 12,
-    lineHeight: 18,
-    textAlign: 'center',
   },
 });

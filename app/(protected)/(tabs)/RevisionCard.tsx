@@ -90,6 +90,7 @@ interface RevisionCardProps {
   currentIndex: number;
   totalCount: number;
   onContinuePress?: () => void;
+  scrollEnabled?: boolean;
 }
 
 interface ActionButtonProps {
@@ -132,7 +133,7 @@ const TopicBadge = ({ topic }: { topic: string }) => {
   );
 };
 
-export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress }: RevisionCardProps) => {
+export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress, scrollEnabled = true }: RevisionCardProps) => {
   const { card } = slide;
   const router = useRouter();
   const { mutate: updateProgress } = useUpdateCardProgress();
@@ -148,10 +149,11 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
   const [isCodeLoaded, setIsCodeLoaded] = useState(false);
   React.useEffect(() => {
     if (slide.type === 'code') {
-      const handle = requestIdleCallback(() => {
+      // Delay rendering the heavy SyntaxHighlighter by 250ms to allow the swiping slide transition to completely settle first
+      const timeout = setTimeout(() => {
         setIsCodeLoaded(true);
-      });
-      return () => cancelIdleCallback(handle);
+      }, 250);
+      return () => clearTimeout(timeout);
     }
   }, [slide.type]);
 
@@ -167,14 +169,6 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
       action === 'favorite' ? 'isFavorite' : action === 'difficult' ? 'isDifficult' : 'isArchived';
     const currentValue = !!card[key];
     updateProgress({ cardId: card._id, action, value: !currentValue });
-    if (action === 'favorite') {
-      Toast.show({
-        type: 'success',
-        text1: currentValue ? 'Removed from Favorites' : 'Added to Favorites',
-        position: 'top',
-        visibilityTime: 1500,
-      });
-    }
   };
 
   const handleDelete = () => {
@@ -198,7 +192,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress 
   return (
     <StyledView className="flex-1 bg-transparent pr-14">
       <StyledView className="flex-1 pt-2 pb-6">
-        <StyledScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        <StyledScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }} scrollEnabled={scrollEnabled}>
           <StyledView className="gap-y-5">
             
             {/* Premium Apple-style Badge Row */}

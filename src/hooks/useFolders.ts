@@ -1,104 +1,219 @@
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-  keepPreviousData,
-  UseQueryResult,
-  UseMutationResult,
-} from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import * as folderService from '@/services/folderService';
+import { useAuthStore } from '@/store/useAuthStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import type { CreateFolderDTO, IFolder, PaginatedFolders, UpdateFolderDTO } from '@/types/folder';
 import type { QueryFoldersInput } from '@/services/folderService';
 
-const FOLDERS_QUERY_KEY = 'folders';
+// 1. Local-First Hybrid Read hook for Folders
+export const useGetFolders = (query?: QueryFoldersInput) => {
+  const foldersById = usePlaylistStateStore((s) => s.foldersById);
+  const hydrateFolders = usePlaylistStateStore((s) => s.hydrateFolders);
 
-export const useGetFolders = (
-  query?: QueryFoldersInput
-): UseQueryResult<PaginatedFolders, Error> => {
-  return useQuery({
-    queryKey: [FOLDERS_QUERY_KEY, query],
-    queryFn: () => folderService.getFolders(query),
-    placeholderData: keepPreviousData,
+  const folderList = useMemo(() => {
+    let list = Object.values(foldersById);
+
+    // Parent folder filter
+    if (query?.parentFolderId) {
+      if (query.parentFolderId === 'null') {
+        list = list.filter((f) => !f.parentFolderId);
+      } else {
+        list = list.filter((f) => f.parentFolderId === query.parentFolderId);
+      }
+    } else {
+      list = list.filter((f) => !f.parentFolderId);
+    }
+
+    // Search filter
+    if (query?.search) {
+      const s = query.search.toLowerCase();
+      list = list.filter((f) => f.title.toLowerCase().includes(s) || f.description?.toLowerCase().includes(s));
+    }
+
+    // Sort by order and createdAt
+    return list.sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [foldersById, query?.parentFolderId, query?.search]);
+
+  const queryResult = useQuery({
+    queryKey: ['folders', query],
+    queryFn: async () => {
+      try {
+        const paginated = await folderService.getFolders(query);
+        if (paginated && paginated.results) {
+          hydrateFolders(paginated.results);
+        }
+        return paginated;
+      } catch (err) {
+        console.warn('[useGetFolders] Background fetch failed, using local cache:', err);
+        return {
+          results: folderList,
+          page: 1,
+          limit: 100,
+          totalPages: 1,
+          totalResults: folderList.length,
+        } as PaginatedFolders;
+      }
+    },
+    staleTime: 1000 * 60,
   });
+
+  const hasLocal = folderList.length > 0;
+
+  return {
+    data: hasLocal ? {
+      results: folderList,
+      page: 1,
+      limit: 100,
+      totalPages: 1,
+      totalResults: folderList.length,
+    } as PaginatedFolders : queryResult.data,
+    isLoading: queryResult.isLoading && !hasLocal,
+    isError: queryResult.isError && !hasLocal,
+    error: queryResult.error,
+    refetch: queryResult.refetch,
+    isRefetching: queryResult.isRefetching,
+  };
 };
 
 export const useGetFolder = (folderId: string | undefined) => {
-  return useQuery({
-    queryKey: [FOLDERS_QUERY_KEY, folderId],
-    queryFn: () => folderService.getFolderById(folderId!),
+  const folder = usePlaylistStateStore((s) => folderId ? s.foldersById[folderId] : undefined);
+  const hydrateFolders = usePlaylistStateStore((s) => s.hydrateFolders);
+
+  const queryResult = useQuery({
+    queryKey: ['folders', folderId],
+    queryFn: async () => {
+      if (!folderId) return null;
+      try {
+        const data = await folderService.getFolderById(folderId);
+        if (data) {
+          hydrateFolders([data]);
+        }
+        return data;
+      } catch (err) {
+        return folder || null;
+      }
+    },
     enabled: !!folderId,
   });
+
+  return {
+    data: folder || queryResult.data,
+    isLoading: queryResult.isLoading && !folder,
+    isError: queryResult.isError && !folder,
+    error: queryResult.error,
+    refetch: queryResult.refetch,
+  };
 };
 
-export const useCreateFolder = (): UseMutationResult<IFolder, Error, CreateFolderDTO> => {
-  const queryClient = useQueryClient();
+// 2. Optimistic Mutation hooks
+export const useCreateFolder = () => {
+  const createFolderInStore = usePlaylistStateStore((s) => s.createFolderInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+  const user = useAuthStore((s) => s.user);
+
   return useMutation({
-    mutationFn: folderService.createFolder,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [FOLDERS_QUERY_KEY] });
+    mutationFn: async (dto: CreateFolderDTO) => {
+      const tempId = `temp-folder-${Date.now()}`;
+      
+      const tempFolder: IFolder = {
+        _id: tempId,
+        title: dto.title,
+        description: dto.description || '',
+        icon: dto.icon || 'Folder',
+        color: dto.color || '#8B5CF6',
+        createdBy: user 
+          ? { _id: user.id, name: user.name, email: user.email, role: user.role } 
+          : { _id: 'guest', name: 'Guest', email: '' },
+        visibility: dto.visibility || 'public',
+        roleAccess: dto.roleAccess || ['user'],
+        order: dto.order || 0,
+        parentFolderId: dto.parentFolderId || null,
+        cardCount: 0,
+        hasSubfolders: false,
+        cardIds: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 1. Optimistic Update Local Zustand Store immediately
+      createFolderInStore(tempFolder);
+
+      // 2. Enqueue offline action with unique client-side actionId
+      enqueueOfflineAction({
+        action: 'CREATE_FOLDER',
+        payload: { tempId, dto },
+        timestamp: Date.now(),
+      });
+
+      // 3. Silent background call
+      try {
+        const folder = await folderService.createFolder(dto);
+        usePlaylistStateStore.setState((state) => {
+          const nextFolders = { ...state.foldersById };
+          delete nextFolders[tempId];
+          nextFolders[folder._id] = folder;
+          return { foldersById: nextFolders };
+        });
+        return folder;
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Folder created locally. Sync queued.', error);
+        return tempFolder;
+      }
     },
   });
 };
 
-export const useUpdateFolder = (): UseMutationResult<
-  IFolder,
-  Error,
-  { folderId: string; updateData: UpdateFolderDTO }
-> => {
-  const queryClient = useQueryClient();
+export const useUpdateFolder = () => {
+  const updateFolderInStore = usePlaylistStateStore((s) => s.updateFolderInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
-    mutationFn: folderService.updateFolder,
-    onMutate: async ({ folderId, updateData }) => {
-      await queryClient.cancelQueries({ queryKey: [FOLDERS_QUERY_KEY] });
-      const previous = queryClient.getQueriesData({ queryKey: [FOLDERS_QUERY_KEY] });
-      queryClient.setQueriesData<PaginatedFolders>(
-        { queryKey: [FOLDERS_QUERY_KEY] },
-        (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            results: old.results.map((f) =>
-              f._id === folderId ? { ...f, ...updateData } : f
-            ),
-          };
-        }
-      );
-      return { previous };
-    },
-    onError: (_err, _vars, context) => {
-      context?.previous?.forEach(([key, data]) => queryClient.setQueryData(key, data));
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: [FOLDERS_QUERY_KEY] });
+    mutationFn: async ({ folderId, updateData }: { folderId: string; updateData: UpdateFolderDTO }) => {
+      // 1. Optimistic Update Local Zustand Store immediately
+      updateFolderInStore(folderId, updateData);
+
+      // 2. Enqueue offline action
+      enqueueOfflineAction({
+        action: 'UPDATE_FOLDER',
+        payload: { folderId, updateData },
+        timestamp: Date.now(),
+      });
+
+      // 3. Silent background call
+      try {
+        const updated = await folderService.updateFolder({ folderId, updateData });
+        return updated;
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Folder updated locally. Sync queued.', error);
+        return { _id: folderId, ...updateData } as IFolder;
+      }
     },
   });
 };
 
-export const useDeleteFolder = (): UseMutationResult<void, Error, string> => {
-  const queryClient = useQueryClient();
+export const useDeleteFolder = () => {
+  const deleteFolderInStore = usePlaylistStateStore((s) => s.deleteFolderInStore);
+  const enqueueOfflineAction = usePlaylistStateStore((s) => s.enqueueOfflineAction);
+
   return useMutation({
-    mutationFn: folderService.deleteFolder,
-    onMutate: async (folderId) => {
-      await queryClient.cancelQueries({ queryKey: [FOLDERS_QUERY_KEY] });
-      const previous = queryClient.getQueriesData({ queryKey: [FOLDERS_QUERY_KEY] });
-      queryClient.setQueriesData<PaginatedFolders>(
-        { queryKey: [FOLDERS_QUERY_KEY] },
-        (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            results: old.results.filter((f) => f._id !== folderId),
-            totalResults: Math.max(0, old.totalResults - 1),
-          };
-        }
-      );
-      return { previous };
-    },
-    onError: (_err, _vars, context) => {
-      context?.previous?.forEach(([key, data]) => queryClient.setQueryData(key, data));
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: [FOLDERS_QUERY_KEY] });
+    mutationFn: async (folderId: string) => {
+      // 1. Optimistic Delete Local Zustand Store immediately
+      deleteFolderInStore(folderId);
+
+      // 2. Enqueue offline action
+      enqueueOfflineAction({
+        action: 'DELETE_FOLDER',
+        payload: { folderId },
+        timestamp: Date.now(),
+      });
+
+      // 3. Silent background call
+      try {
+        await folderService.deleteFolder(folderId);
+      } catch (error) {
+        if (__DEV__) console.warn('[Offline Mode] Folder deleted locally. Sync queued.', error);
+      }
     },
   });
 };

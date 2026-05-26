@@ -43,8 +43,6 @@ export function resolveCardState(
       return card;
     }
 
-    console.log(`[DIAGNOSTIC - SELECTOR] Card ID: ${cleanId} resolved strictly from ACTIVE SESSION MAP: "${localDifficulty}"`);
-
     return {
       ...card,
       difficultyState: localDifficulty,
@@ -62,8 +60,6 @@ export function resolveCardState(
       return card;
     }
     
-    console.log(`[DIAGNOSTIC - SELECTOR] Card ID: ${cleanId} resolved from CANONICAL CACHE: "${cached.difficultyState}"`);
-
     return {
       ...card,
       difficultyState: cached.difficultyState,
@@ -86,11 +82,6 @@ export function mergeCardState(
 ): IPopulatedRevisionCard {
   if (!incoming) return incoming;
   const cleanId = incoming._id.split('-loop-')[0];
-
-  console.log(`[DIAGNOSTIC - HYDRATION] mergeCardState for Card ID: ${cleanId} | Time: ${Date.now()}`);
-  console.log(`  - Incoming query payload difficultyState: "${incoming.difficultyState}"`);
-  console.log(`  - Canonical cache difficultyState: "${cached?.difficultyState}" (updatedAt: ${cached?.updatedAt})`);
-  console.log(`  - Session map difficultyState: "${local?.difficulty}" (optimistic: ${local?.optimistic})`);
 
   // 1. Start with the incoming card data as the baseline, forcing clean canonical ID
   let merged = { ...incoming, _id: cleanId };
@@ -136,8 +127,6 @@ export function mergeCardState(
     merged.difficultyState = localDifficulty;
     merged.currentUserQuestionProgress = resolvedQP;
   }
-
-  console.log(`  -> RESULT Reconciled difficultyState: "${merged.difficultyState}"`);
 
   return merged;
 }
