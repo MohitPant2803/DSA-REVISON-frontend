@@ -2798,6 +2798,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       isFirstScrollMount.current = false;
       return;
     }
+    if (!hasScrolledToInitial.current) return;
+    
     useTrackingStore.getState().incrementScroll();
   }, [activeIndex]);
 
