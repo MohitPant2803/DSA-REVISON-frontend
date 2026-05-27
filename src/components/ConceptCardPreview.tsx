@@ -370,14 +370,16 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
         </View>
 
         {/* Middle Section (Spacious Problem Statement Explanation) */}
-        <View className="flex-1 justify-center my-4">
-          <View className="bg-violet-50/30 border border-violet-100/50 rounded-[32px] p-5 shadow-sm gap-y-3 h-full justify-between">
+        <View className="my-4" style={{ maxHeight: 380, flexShrink: 1, justifyContent: 'center' }}>
+          <View className="bg-violet-50/30 border border-violet-100/50 rounded-[32px] p-5 shadow-sm gap-y-3 justify-between" style={{ maxHeight: '100%', flexShrink: 1 }}>
             <View className="flex-row items-center justify-between">
               <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
             </View>
             <ScrollView 
               showsVerticalScrollIndicator={false} 
-              className="flex-1 mt-1.5"
+              className="mt-1.5"
+              style={{ flexShrink: 1 }}
+              contentContainerStyle={{ flexGrow: 1 }}
               scrollEnabled={scrollEnabled}
             >
               <RichText
