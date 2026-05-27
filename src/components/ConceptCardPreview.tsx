@@ -328,7 +328,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
     <View className="flex-1 justify-between bg-transparent h-full pb-6 pr-14">
       <View className="flex-1 justify-between gap-y-4">
         {/* Top Section */}
-        <View className="gap-y-3.5">
+        <View className="gap-y-3">
           {/* Modern Apple-style Capsule Tags */}
           <View className="flex-row flex-wrap gap-2 items-center">
             <View className="px-3 py-1 rounded-full bg-violet-50 border border-violet-100/80">
@@ -354,65 +354,45 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
 
           {/* Title */}
           <Text
-            className="text-slate-900 font-black tracking-tight leading-tight text-[36px]"
+            className="text-slate-900 font-black tracking-tight leading-none text-[44px]"
             numberOfLines={2}
           >
             {card.title}
           </Text>
 
-          {/* Meta Details Box */}
-          <View className="bg-slate-50/50 border border-slate-100/80 rounded-2xl p-4 gap-y-2 mt-1">
-            <View className="flex-row items-center gap-2">
-              <Text className="text-slate-400 text-xs">🏢</Text>
-              <Text className="text-slate-600 text-[11px] font-semibold tracking-wide uppercase">
+          {/* Premium Spacious Companies Capsule */}
+          <View className="bg-slate-50/80 border border-slate-200/50 rounded-2xl p-4 flex-row items-center gap-x-3 mt-1 shadow-sm shadow-slate-100/30">
+            <Text className="text-lg">🏢</Text>
+            <View className="flex-1">
+              <Text className="text-slate-400 text-[8px] font-black uppercase tracking-widest leading-none">Active Interview Target</Text>
+              <Text className="text-slate-700 text-[13px] font-extrabold tracking-wide uppercase mt-1 leading-tight">
                 {companies}
               </Text>
-            </View>
-            <View className="flex-row items-center justify-between border-t border-slate-100/60 pt-2 mt-0.5">
-              <View className="flex-row items-center gap-1.5">
-                <Text className="text-slate-400 text-xs">⏱️</Text>
-                <Text className="text-slate-500 text-[11px] font-bold">{timeExpected} expected</Text>
-              </View>
-              <View className="flex-row items-center gap-1.5">
-                <Text className="text-slate-400 text-xs">🔥</Text>
-                <Text className="text-slate-500 text-[11px] font-bold">Freq: {frequencyText} ({frequencyScore}%)</Text>
-              </View>
             </View>
           </View>
         </View>
 
-        {/* Middle Section (Welcoming, Simple Explanation) */}
-        <View className="flex-1 justify-center my-1">
-          <View className="bg-violet-50/20 border border-violet-100/30 rounded-2xl p-5 shadow-sm gap-y-2.5">
-            <Text className="text-violet-600/70 font-black uppercase text-[10px] tracking-widest">🎯 The Mission</Text>
+        {/* Middle Section (Spacious Problem Statement Explanation) */}
+        <View className="flex-1 justify-center my-2">
+          <View className="bg-violet-50/20 border border-violet-100/30 rounded-[24px] p-5 shadow-sm gap-y-3 h-full justify-between">
+            <View className="flex-row items-center justify-between">
+              <Text className="text-violet-600/70 font-black uppercase text-[10px] tracking-widest">🎯 Problem Statement</Text>
+              <View className="flex-row items-center gap-x-1.5">
+                <Text className="text-[10px] font-bold text-slate-400">⏱️ {timeExpected}</Text>
+              </View>
+            </View>
             <ScrollView 
               showsVerticalScrollIndicator={false} 
-              className="max-h-[160px]"
+              className="flex-1 mt-1"
               scrollEnabled={scrollEnabled}
             >
               <RichText
                 text={card.explanation || ''}
-                style={{ color: '#475569', fontSize: 14.5, lineHeight: 23, fontWeight: '500' }}
+                style={{ color: '#475569', fontSize: 15.5, lineHeight: 25, fontWeight: '500' }}
                 boldStyle={{ color: '#0F172A', fontWeight: '800' }}
               />
             </ScrollView>
           </View>
-        </View>
-
-        {/* Bottom Section (Pattern blueprint and calming anchor) */}
-        <View className="gap-y-3 mb-2">
-          {card.tags && card.tags.length > 0 && (
-            <View className="flex-row flex-wrap gap-1.5 items-center justify-center">
-              {card.tags.slice(0, 3).map((tag, i) => (
-                <View key={i} className="px-2.5 py-0.5 rounded-md bg-slate-50 border border-slate-200/50">
-                  <Text className="text-slate-500 text-[10px] font-bold">{tag}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-          <Text className="text-violet-500/70 text-center font-bold text-[11px] italic">
-            ✨ "Oh wait... this is manageable."
-          </Text>
         </View>
       </View>
 
