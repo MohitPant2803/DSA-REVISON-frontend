@@ -1544,13 +1544,13 @@
       "rootFolderName": "DSA",
       "subfolderPath": "Sheets/Striver SDE Sheet/Arrays & Matrix",
       "visibility": "public",
-      "explanation": "Given an `m x n` integer matrix, if an element is `0`, set its entire row and column to `0`'s.\n\n🎯 **Goal**:\nModify the matrix **in-place** so that if any cell is `0`, its entire row and column are completely wiped out to `0`'s, using optimal **O(1)** extra auxiliary space."
+      "explanation": "Given an `m x n` integer matrix, if any element is `0`, set its entire row and column to `0`'s. You must perform this modification **in-place** without using a duplicate matrix. The goal is to optimize the space complexity to constant **O(1)** auxiliary space.\n\n🔢 **Example**:\nInput: `[[1,1,1],[1,0,1],[1,1,1]]`\nOutput: `[[1,0,1],[0,0,0],[1,0,1]]`"
     },
     {
       "_id": "6a1655fbb129b168bb16bb4f",
       "title": "Pascal's Triangle",
       "topic": "Arrays",
-      "explanation": "Given an integer `numRows`, generate and return the first `numRows` of Pascal's Triangle.\n\n🔺 **Structure**:\n- Every row starts and ends with `1`.\n- Each middle element is formed by summing the two adjacent parent elements directly above it.",
+      "explanation": "Given an integer `numRows`, generate and return the first `numRows` of Pascal's Triangle. In this triangle, every row starts and ends with the value `1`. Each middle element is constructed by summing the two adjacent parent numbers directly above it.\n\n🔺 **Example**:\nInput: `numRows = 4`\nOutput: `[[1], [1,1], [1,2,1], [1,3,3,1]]`",
       "code": "vector<vector<int>> generate(int numRows) {\n    vector<vector<int>> triangle;\n\n    for (int row = 0; row < numRows; row++) {\n        vector<int> currentRow(row + 1, 1);\n\n        for (int col = 1; col < row; col++) {\n            currentRow[col] =\n                triangle[row - 1][col - 1] +\n                triangle[row - 1][col];\n        }\n\n        triangle.push_back(currentRow);\n    }\n\n    return triangle;\n}",
       "tags": [
         "Arrays",
@@ -22409,6 +22409,6 @@
       "updatedAt": "2026-05-27T02:25:17.844Z"
     }
   ],
-  "dbVersion": "striver-sde-sheet-1779875920064",
-  "timestamp": "2026-05-27T09:58:40.064Z"
+  "dbVersion": "striver-sde-sheet-1779876724727",
+  "timestamp": "2026-05-27T10:12:04.727Z"
 }
