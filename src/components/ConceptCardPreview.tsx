@@ -352,18 +352,18 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
             )}
           </View>
 
-          {/* Title */}
+          {/* Title (Striking, Extremely Large Typographical Focal Point) */}
           <Text
-            className="text-slate-900 font-black tracking-tight leading-none text-[44px]"
+            className="text-slate-900 font-black tracking-tighter leading-none text-[54px] mt-0.5"
             numberOfLines={2}
           >
             {card.title}
           </Text>
 
-          {/* Premium Spacious Companies Capsule (Small, Without Emoji/Timer) */}
-          <View className="bg-slate-50/80 border border-slate-200/50 rounded-2xl px-4 py-2.5 mt-1 shadow-sm shadow-slate-100/30">
-            <Text className="text-slate-400 text-[8px] font-black uppercase tracking-widest leading-none">Companies</Text>
-            <Text className="text-slate-700 text-[13px] font-extrabold tracking-wide uppercase mt-1 leading-tight">
+          {/* Premium Compact Companies Pill (Reduced by Half) */}
+          <View className="bg-slate-50/80 border border-slate-200/40 rounded-xl px-2.5 py-1.5 mt-1 self-start flex-row items-center gap-x-1.5 shadow-sm shadow-slate-100/10">
+            <Text className="text-slate-400 text-[7px] font-black uppercase tracking-widest leading-none">Companies:</Text>
+            <Text className="text-slate-600 text-[10px] font-extrabold tracking-wide uppercase leading-none">
               {companies}
             </Text>
           </View>
