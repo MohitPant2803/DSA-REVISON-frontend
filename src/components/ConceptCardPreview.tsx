@@ -325,19 +325,19 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
   }, [card.title, card.difficulty, card.tags]);
 
   return (
-    <View className="flex-1 justify-between bg-transparent h-full pb-6 pr-14">
+    <View className="flex-1 justify-between bg-transparent h-full pb-11 pr-14">
       <View className="flex-1 justify-between gap-y-4">
         {/* Top Section */}
         <View className="gap-y-3">
           {/* Modern Apple-style Capsule Tags */}
           <View className="flex-row flex-wrap gap-2 items-center">
-            <View className="px-3 py-1 rounded-full bg-violet-50 border border-violet-100/80">
-              <Text className="text-violet-700 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
+            <View className="px-3 py-1 rounded-full bg-slate-50 border border-slate-200/60">
+              <Text className="text-slate-600 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
             </View>
             <View className={`px-3 py-1 rounded-full ${
-              card.difficulty === 'Easy' ? 'bg-emerald-50 border border-emerald-100' :
-              card.difficulty === 'Medium' ? 'bg-amber-50 border border-amber-100' :
-              'bg-rose-50 border border-rose-100'
+              card.difficulty === 'Easy' ? 'bg-emerald-50/60 border border-emerald-100' :
+              card.difficulty === 'Medium' ? 'bg-amber-50/60 border border-amber-100' :
+              'bg-rose-50/60 border border-rose-100'
             }`}>
               <Text className={`text-[10px] font-extrabold uppercase tracking-wider ${
                 card.difficulty === 'Easy' ? 'text-emerald-700' :
@@ -360,26 +360,20 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
             {card.title}
           </Text>
 
-          {/* Premium Spacious Companies Capsule */}
-          <View className="bg-slate-50/80 border border-slate-200/50 rounded-2xl p-4 flex-row items-center gap-x-3 mt-1 shadow-sm shadow-slate-100/30">
-            <Text className="text-lg">🏢</Text>
-            <View className="flex-1">
-              <Text className="text-slate-400 text-[8px] font-black uppercase tracking-widest leading-none">Active Interview Target</Text>
-              <Text className="text-slate-700 text-[13px] font-extrabold tracking-wide uppercase mt-1 leading-tight">
-                {companies}
-              </Text>
-            </View>
+          {/* Premium Spacious Companies Capsule (Small, Without Emoji/Timer) */}
+          <View className="bg-slate-50/80 border border-slate-200/50 rounded-2xl px-4 py-2.5 mt-1 shadow-sm shadow-slate-100/30">
+            <Text className="text-slate-400 text-[8px] font-black uppercase tracking-widest leading-none">Companies</Text>
+            <Text className="text-slate-700 text-[13px] font-extrabold tracking-wide uppercase mt-1 leading-tight">
+              {companies}
+            </Text>
           </View>
         </View>
 
         {/* Middle Section (Spacious Problem Statement Explanation) */}
         <View className="flex-1 justify-center my-2">
-          <View className="bg-violet-50/20 border border-violet-100/30 rounded-[24px] p-5 shadow-sm gap-y-3 h-full justify-between">
+          <View className="bg-slate-50/40 border border-slate-200/40 rounded-[24px] p-5 shadow-sm gap-y-3 h-full justify-between">
             <View className="flex-row items-center justify-between">
-              <Text className="text-violet-600/70 font-black uppercase text-[10px] tracking-widest">🎯 Problem Statement</Text>
-              <View className="flex-row items-center gap-x-1.5">
-                <Text className="text-[10px] font-bold text-slate-400">⏱️ {timeExpected}</Text>
-              </View>
+              <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 Problem Statement</Text>
             </View>
             <ScrollView 
               showsVerticalScrollIndicator={false} 
@@ -411,7 +405,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
               onViewExplanation(1);
             }
           }}
-          className="flex-row items-center justify-center py-1.5 bg-violet-600 rounded-full px-5 shadow-sm shadow-violet-600/10"
+          className="flex-row items-center justify-center py-1.5 bg-violet-500 rounded-full px-5 shadow-sm shadow-violet-500/10"
         >
           <Text className="text-white text-[12px] font-extrabold tracking-wider uppercase text-center">
             {slideCount} slides {'>'}
