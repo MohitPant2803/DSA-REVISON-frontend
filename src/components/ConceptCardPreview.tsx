@@ -393,8 +393,8 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
         </View>
       </View>
 
-      {/* Spacer 2: 2/3 distance (flex: 2) */}
-      <View style={{ flex: 2 }} />
+      {/* Spacer 2: 2/3 distance (flex: 3.5 for highly pronounced visual alignment) */}
+      <View style={{ flex: 3.5 }} />
 
       {/* Redesigned Pulsing Interactive Walkthrough CTA */}
       <Animated.View style={ctaAnimatedStyle} className="self-center mb-2">
