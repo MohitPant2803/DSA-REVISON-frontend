@@ -354,16 +354,16 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
 
           {/* Title (Striking, Extremely Large Typographical Focal Point) */}
           <Text
-            className="text-slate-900 font-black tracking-tighter leading-none text-[54px] mt-0.5"
+            style={{ fontSize: 35, fontWeight: '900', color: '#0F172A', letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
             numberOfLines={2}
           >
             {card.title}
           </Text>
 
           {/* Premium Compact Companies Pill (Reduced by Half) */}
-          <View className="bg-slate-50/80 border border-slate-200/40 rounded-xl px-2.5 py-1.5 mt-1 self-start flex-row items-center gap-x-1.5 shadow-sm shadow-slate-100/10">
-            <Text className="text-slate-400 text-[7px] font-black uppercase tracking-widest leading-none">Companies:</Text>
-            <Text className="text-slate-600 text-[10px] font-extrabold tracking-wide uppercase leading-none">
+          <View className="bg-slate-50/80 border border-slate-200/40 rounded-xl px-4 py-2 mt-1 self-start flex-row items-center gap-x-2 shadow-sm shadow-slate-100/10">
+            <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8' }}>Companies:</Text>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
               {companies}
             </Text>
           </View>
@@ -391,7 +391,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
       </View>
 
       {/* Redesigned Pulsing Interactive Walkthrough CTA */}
-      <Animated.View style={ctaAnimatedStyle} className="mt-auto self-center">
+      <Animated.View style={ctaAnimatedStyle} className="mt-auto self-center mb-2">
         <Pressable
           onPressIn={() => {
             ctaScale.value = withSpring(0.96, { damping: 10, stiffness: 350 });
@@ -405,7 +405,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
               onViewExplanation(1);
             }
           }}
-          className="flex-row items-center justify-center py-1.5 bg-violet-500 rounded-full px-5 shadow-sm shadow-violet-500/10"
+          className="flex-row items-center justify-center py-2.5 bg-violet-500 rounded-full px-6 shadow-sm shadow-violet-500/10"
         >
           <Text className="text-white text-[12px] font-extrabold tracking-wider uppercase text-center">
             {slideCount} slides {'>'}
