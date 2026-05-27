@@ -377,13 +377,13 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
             </View>
             <ScrollView 
               showsVerticalScrollIndicator={false} 
-              className="flex-1 mt-1"
+              className="flex-1 mt-1.5"
               scrollEnabled={scrollEnabled}
             >
               <RichText
                 text={card.explanation || ''}
-                style={{ color: '#475569', fontSize: 15.5, lineHeight: 25, fontWeight: '500' }}
-                boldStyle={{ color: '#0F172A', fontWeight: '800' }}
+                style={{ color: '#334155', fontSize: 18.5, lineHeight: 29, fontWeight: '600' }}
+                boldStyle={{ color: '#0F172A', fontWeight: '900' }}
               />
             </ScrollView>
           </View>
