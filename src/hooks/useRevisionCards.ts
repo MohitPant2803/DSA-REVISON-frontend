@@ -225,7 +225,7 @@ export const useCreateRevisionCard = () => {
 
       // 2. Enqueue offline action
       enqueueOfflineAction({
-        action: 'CREATE_FOLDER',
+        action: 'CREATE_CARD',
         payload: { tempId, dto },
         timestamp: Date.now(),
       });
@@ -254,7 +254,7 @@ export const useUpdateRevisionCard = () => {
 
       // 2. Enqueue offline action
       enqueueOfflineAction({
-        action: 'UPDATE_FOLDER',
+        action: 'UPDATE_CARD',
         payload: { cardId, updateData },
         timestamp: Date.now(),
       });
@@ -275,7 +275,7 @@ export const useDeleteRevisionCard = () => {
 
       // 2. Enqueue action
       enqueueOfflineAction({
-        action: 'DELETE_FOLDER',
+        action: 'DELETE_CARD',
         payload: { cardId },
         timestamp: Date.now(),
       });

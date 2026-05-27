@@ -328,7 +328,7 @@ export default function DashboardScreen() {
               </SpringPressable>
 
               <SpringPressable
-                onPress={() => router.push({ pathname: '/(protected)/playlist/[playlistId]', params: { playlistId: 'hard' } })}
+                onPress={() => router.push({ pathname: '/(protected)/(tabs)/playlist/[playlistId]', params: { playlistId: 'hard' } })}
                 className="flex-1 bg-white border p-3.5 rounded-[20px] flex-row items-center justify-center"
                 style={{
                   borderColor: 'rgba(148,163,184,0.10)',
@@ -378,7 +378,7 @@ export default function DashboardScreen() {
                         key={sheet._id}
                         onPress={() =>
                           router.push({
-                            pathname: '/(protected)/folder/[folderId]',
+                            pathname: '/(protected)/(tabs)/folder/[folderId]',
                             params: { folderId: sheet._id, title: sheet.title },
                           })
                         }

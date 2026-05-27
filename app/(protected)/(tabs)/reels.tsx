@@ -1138,13 +1138,10 @@ const ActiveReelItem = React.memo(({
     return (
       <RevisionCard
         slide={{
+          ...slide,
           card: item,
           slideIndex: indexInDeck,
           totalSlides: slides.length,
-          type: slide.type,
-          headline: slide.headline,
-          body: slide.body,
-          code: slide.code,
         }}
         currentIndex={indexInDeck}
         totalCount={slides.length}
@@ -2056,21 +2053,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   // Derived visible limit for progressive rendering to maximize memory/performance
   const visibleCardsList = useMemo(() => {
-    const totalLength = cardsList.length;
-    if (totalLength <= 20) return cardsList;
-    
-    let limit = 20;
-    if (activeIndex >= 10) {
-      limit = 20 + Math.floor((activeIndex - 10) / 10 + 1) * 10;
-    }
-    
-    // Edge case: If remaining reels < 10, render all remaining reels immediately
-    if (totalLength - limit < 10) {
-      limit = totalLength;
-    }
-    
-    return cardsList.slice(0, limit);
-  }, [cardsList, activeIndex]);
+    return cardsList;
+  }, [cardsList]);
 
   const activeCardId = cardsList[activeIndex];
   const activeCardIdClean = activeCardId ? activeCardId.split('-loop-')[0] : null;
@@ -2774,7 +2758,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
       options.push({
         text: '✍️ Edit Card',
         onPress: () => {
-          const folderId = typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
+          const folderId = typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;
           router.push({
             pathname: '/(protected)/(tabs)/CreateRevisionScreen',
             params: { cardId: card._id.split('-loop-')[0], folderId, card: JSON.stringify(card) },
@@ -2904,6 +2888,9 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     if (!isCustomPlayer) return;
 
     const unsubscribe = navigation.addListener('blur', () => {
+      // If we already navigated customly, we don't need to do router.back() again!
+      if (hasConfirmedExit.current) return;
+
       // If we are a custom reels player inside the tabs navigator, and the tab loses focus (blur event),
       // immediately pop back so that the user's Home/My Space page resets back to the original folder/playlist!
       router.back();
@@ -3088,15 +3075,129 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
             const activeCardItem = usePlaylistStateStore.getState().cardsById[activeCardId.split('-loop-')[0]];
             if (!activeCardItem) return;
 
-            const slides = getSlidesForCard(activeCardItem);
-            const slidesContent = slides.map((slide, i) => {
-              const bodyStr = slide.body ? `\nBody: ${slide.body}` : '';
-              const codeStr = slide.code ? `\nCode: ${slide.code}` : '';
-              const blocksStr = slide.blocks ? `\nData: ${JSON.stringify(slide.blocks)}` : '';
-              return `[Slide ${i+1} - ${slide.type || 'content'}]\nHeadline: ${slide.headline}${bodyStr}${codeStr}${blocksStr}`;
-            }).join('\n\n');
+            const prompt = `You are a world-class educational designer and subject matter expert. Your job is to create deeply individualized, beautifully crafted flashcards following the strict **FLASHCARD GENERATION PROTOCOL**.
 
-            const prompt = `Please explain this DSA problem to me:\n\nTitle: ${activeCardItem.title}\nTopic: ${activeCardItem.topic}\nDifficulty: ${activeCardItem.difficulty}\n\nExplanation:\n${activeCardItem.explanation}\n\nCode:\n${activeCardItem.code || 'N/A'}\n\n--- SLIDES DATA ---\n${slidesContent}\n------------------\n\nPlease analyze this fully.`;
+Act as a highly skilled peer (a student who has got an exceptional, deep grasp of the topic) trying to teach their juniors in terms they easily understand, keeping all technical terms intact so the explanation is both completely intuitive and academically complete.
+
+---
+
+**SYSTEM PROMPT — FLASHCARD GENERATION PROTOCOL**
+
+## MANDATORY PIPELINE (Execute for every card)
+
+### STAGE 1 — DEEP CONTENT RESEARCH
+Before touching design or layout, spend time truly understanding this concept:
+- What is the *core insight* a student must internalize?
+- What are the most common misconceptions about this topic?
+- What is the most elegant, memorable way to explain this — not the most common way?
+- Use the sharpest analogy, the best example, the most precise wording.
+- Ask yourself: "If I had 30 seconds to make this click for someone, what would I say?"
+- Refine your explanation at least twice before moving forward.
+
+### STAGE 2 — LAYOUT IDEATION (First Pass — Reject the Template)
+Think about how this specific concept wants to be shown:
+- Should it be a comparison? A flow? A formula breakdown? A visual metaphor? A numbered sequence? A single bold statement?
+- The layout must emerge from the content — not the other way around.
+
+### STAGE 3 — VISUAL CRITIQUE (Second Pass — Kill the Cliché)
+Review your planned visual and ask:
+- Does this look like every other card in the deck? If yes, redesign it.
+- Is the color palette, typography weight, or spacing doing meaningful work?
+- Redesign at least one element that felt "safe" or "default."
+- Consider: contrast ratios, visual hierarchy, use of negative space, accent elements, icons, diagrams.
+
+### STAGE 4 — FINAL BUILD
+Now write/render the final card with:
+- A layout that is specific to this concept — never recycled.
+- Typography that guides the eye through the hierarchy of information.
+- The explanation refined to its sharpest, most memorable form.
+- An optional "hook" — a micro-analogy, surprising fact, or one-line mnemonic that makes it stick.
+
+---
+
+## HARD RULES
+❌ Never reuse the same layout structure twice in a row.
+❌ Never use a generic two-box Q&A template unless the concept is truly simple.
+❌ Never copy-paste your explanation from a textbook — rewrite it in the sharpest possible voice.
+❌ Never produce more than one card before fully completing this pipeline.
+✅ Each card must look and feel like it was hand-designed for that specific question.
+✅ If the concept is visual by nature, make it visual.
+✅ If the concept is sequential, show sequence.
+✅ If the concept is a contrast, show tension.
+
+---
+
+### INPUT CONCEPT METADATA:
+Title: ${activeCardItem.title}
+Topic: ${activeCardItem.topic}
+Difficulty: ${activeCardItem.difficulty}
+Explanation: ${activeCardItem.explanation}
+Code: ${activeCardItem.code || 'N/A'}
+Complexity: ${activeCardItem.complexity || 'N/A'}
+Examples: ${JSON.stringify(activeCardItem.examples || [])}
+
+---
+
+### OUTPUT FORMAT REQUIREMENTS:
+Generate a single, raw, valid JSON object matching the schema below. Do NOT write any conversational markdown text (e.g. do not write "Here is the JSON:") before or after the JSON codeblock. Wrap the JSON in a standard markdown json block.
+
+The output JSON MUST strictly match this schema:
+{
+  "title": "${activeCardItem.title}",
+  "topic": "${activeCardItem.topic}",
+  "difficulty": "${activeCardItem.difficulty}",
+  "complexity": "${activeCardItem.complexity || 'O(N)'}",
+  "explanation": "Provide a brief, crystal-clear 1-sentence breakdown of the core goal in the voice of a peer student teaching juniors.",
+  "analogy": "Provide a highly memorable, creative real-world analogy that builds immediate intuition.",
+  "intuition": "Explain the breakthrough insight (the 'Aha!' moment) that makes the optimal solution click, keeping it punchy.",
+  "mistake": "Highlight a common rookie mistake, trap, or sub-optimal brute force trap.",
+  "prefer": "Explain the clean, highly preferred optimal strategy and why it is superior.",
+  "dryRun": "A short, step-by-step visual trace explaining how running pointers/variables update.",
+  "code": "Provide the cleanest, most optimized C++ code implementation.",
+  "examples": [
+    "Step 1: Description of variables and active state",
+    "Step 2: Description of the next step",
+    "Step 3: Description of the final result state"
+  ],
+  "slides": [
+    {
+      "type": "intro",
+      "headline": "${activeCardItem.title}: Snapshot",
+      "body": "**Goal**:\\n{Brief peer statement}\\n\\n💡 **Mental Analogy**:\\n{Analogy}\\n\\n*Let's see how to spot the pattern instantly...*"
+    },
+    {
+      "type": "explanation",
+      "headline": "Pattern: Spotting the Clues",
+      "body": "❓ **When does this click in interviews?**\\n- {Trigger 1}\\n- {Trigger 2}\\n\\n⚡ **Trigger Words**: \`{word1}\`, \`{word2}\`.\\n\\n❌ **Rookie Trap**: {Rookie mistake or sort first traps}."
+    },
+    {
+      "type": "explanation",
+      "headline": "Intuition: The Hook",
+      "body": "🧠 **Peer Breakdown**:\\n{Intuition explanation}\\n\\n*Notice how shifting our perspective collapses the search space!*"
+    },
+    {
+      "type": "explanation",
+      "headline": "⚠️ Trap vs Clean Way",
+      "body": "❌ **The Trap**:\\n{Rookie mistake/complexity trap}\\n\\n✅ **The Clean Way**:\\n{Preferred strategy}."
+    },
+    {
+      "type": "code",
+      "headline": "Code: Breathable C++",
+      "body": "Review the clean, highly optimized implementation below:",
+      "code": "{Clean C++ code}"
+    },
+    {
+      "type": "dryrun",
+      "headline": "Visual: State Walkthrough",
+      "body": "Step-by-step trace simulation:\\n\\n{Dry run text}"
+    },
+    {
+      "type": "summary",
+      "headline": "Recall: Spaced Repetition",
+      "body": "✨ **Mastery Takeaway**:\\n{Core breakthrough memory tip}\\n\\n⏱️ **Big-O**:\\n- Time Complexity: \`{Time}\`\\n- Space Complexity: \`{Space}\`"
+    }
+  ]
+}`;
             
             // Fire clipboard asynchronously without blocking the UI thread
             Clipboard.setStringAsync(prompt).catch(err => console.warn('Clipboard failed:', err));
@@ -3323,6 +3424,23 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
                 onPress={() => {
                   hasConfirmedExit.current = true;
                   setIsExitModalOpen(false);
+                  
+                  if (isCustomPlayer) {
+                    if (folderIdParam) {
+                      router.push({
+                        pathname: '/(protected)/(tabs)/folder/[folderId]',
+                        params: { folderId: folderIdParam },
+                      });
+                      return;
+                    } else if (activePlaylistId) {
+                      router.push({
+                        pathname: '/(protected)/(tabs)/playlist/[playlistId]',
+                        params: { playlistId: activePlaylistId },
+                      });
+                      return;
+                    }
+                  }
+                  
                   router.back();
                 }}
                 activeOpacity={0.7}

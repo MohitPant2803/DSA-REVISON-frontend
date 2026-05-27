@@ -44,9 +44,11 @@ const lightHaptic = () => {
 };
 
 export const getSlidesForCard = (card: IPopulatedRevisionCard): ISlide[] => {
-  if (card.slides && card.slides.length > 0) {
+  // If the card already has a full deck of custom slides (> 1 slide), use them!
+  if (card.slides && card.slides.length > 1) {
     return card.slides;
   }
+
   const slides: ISlide[] = [];
   
   // 1. Intro / Cover Card (rendered via ConceptCardPreview)
@@ -56,47 +58,58 @@ export const getSlidesForCard = (card: IPopulatedRevisionCard): ISlide[] => {
     body: card.explanation,
   });
 
-  // 2. Intuition / Explanation slide
+  // 2. Simplified Analogy / Metaphor
+  if (card.analogy) {
+    slides.push({
+      type: 'explanation',
+      headline: '💡 The Mental Model',
+      body: `**Simplified Analogy**:\n${card.analogy}\n\n*Think of this conceptually before diving into the code.*`,
+    });
+  }
+
+  // 3. Core Intuition (How it clicks)
   slides.push({
     type: 'explanation',
-    headline: 'Core Intuition',
-    body: card.explanation || 'Analyze the fundamental approach and optimal strategy for this problem.',
+    headline: '🧠 Core Intuition',
+    body: card.intuition || card.explanation || 'At its core, this problem asks us to observe how values shift relative to our active bounds.',
   });
 
-  // 3. Code Walkthrough slide (if code is available)
+  // 4. Common Mistake vs Preferred Approach (Tension)
+  if (card.mistake || card.prefer) {
+    const mistakeStr = card.mistake ? `❌ **Common Trap**:\n${card.mistake}` : '';
+    const preferStr = card.prefer ? `✅ **Preferred Approach**:\n${card.prefer}` : '';
+    slides.push({
+      type: 'explanation',
+      headline: '⚠️ The Trap vs The Clean Way',
+      body: `${mistakeStr}\n\n${preferStr}`,
+    });
+  }
+
+  // 5. Optimal Implementation (Code)
   if (card.code && card.code.trim()) {
     slides.push({
       type: 'code',
-      headline: 'Code Walkthrough',
+      headline: '💻 Optimal Implementation',
       body: 'Review the clean, highly optimized implementation below:',
       code: card.code,
     });
   }
 
-  // 4. Dry Run / Step-by-Step test cases (if examples are available)
+  // 6. Dry Run Trace
   if (card.examples && card.examples.length > 0) {
     slides.push({
       type: 'dryrun',
-      headline: 'Dry Run Trace',
-      body: "Walk through step-by-step executions of the algorithm:",
+      headline: '🔍 Dry Run Trace',
+      body: card.dryRun || "Walk through step-by-step executions of the algorithm:",
     });
   }
 
-  // 5. Complexity Matrix slide (if complexity is available)
+  // 7. Complexity Matrix slide
   if (card.complexity) {
     slides.push({
       type: 'complexity',
-      headline: 'Complexity Analysis',
+      headline: '⚡ Performance Footprints',
       body: 'Time and space performance benchmarks for this pattern.',
-    });
-  }
-
-  // 6. Visualization / Illustrative Diagram (if card has an image or we can show pointer visuals)
-  if (card.image) {
-    slides.push({
-      type: 'visualization',
-      headline: 'Visual Diagram',
-      body: 'Conceptual stack/heap pointer trace representation:',
     });
   }
 
@@ -104,7 +117,7 @@ export const getSlidesForCard = (card: IPopulatedRevisionCard): ISlide[] => {
   if (slides.length <= 2) {
     slides.push({
       type: 'summary',
-      headline: 'Concept Summary',
+      headline: '✨ Spaced Repetition Recall',
       body: 'Successfully mastered this DSA pattern! Retain this core logic for coding interviews.',
     });
   }
@@ -138,7 +151,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
   const { mutate: deleteCard } = useDeleteRevisionCard();
   const togglePlaylistItem = useTogglePlaylistItem();
 
-  const folderId = typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
+  const folderId = typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;
   const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
   const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, card.createdBy) : false);
 
@@ -341,7 +354,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
 
           {/* Title */}
           <Text
-            className="text-slate-900 font-black tracking-tight leading-tight text-[28px]"
+            className="text-slate-900 font-black tracking-tight leading-tight text-[36px]"
             numberOfLines={2}
           >
             {card.title}
@@ -420,8 +433,8 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
           }}
           className="flex-row items-center justify-center py-1.5 bg-violet-600 rounded-full px-5 shadow-sm shadow-violet-600/10"
         >
-          <Text className="text-white text-[11px] font-extrabold tracking-wider uppercase text-center">
-            Tap to learn gently ({slideCount} slides)
+          <Text className="text-white text-[12px] font-extrabold tracking-wider uppercase text-center">
+            {slideCount} slides {'>'}
           </Text>
         </Pressable>
       </Animated.View>

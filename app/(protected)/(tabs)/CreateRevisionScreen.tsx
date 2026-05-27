@@ -55,7 +55,7 @@ export default function CreateRevisionScreen() {
   const isEditMode = !!cardId && !!cardToEdit;
 
   const resolvedFolderId =
-    (typeof cardToEdit?.folderId === 'object'
+    (typeof cardToEdit?.folderId === 'object' && cardToEdit.folderId !== null
       ? cardToEdit.folderId._id
       : cardToEdit?.folderId) ||
     defaultFolderId ||
@@ -96,9 +96,9 @@ export default function CreateRevisionScreen() {
         difficulty: cardToEdit.difficulty,
         complexity: cardToEdit.complexity,
         folderId:
-          typeof cardToEdit.folderId === 'object'
+          typeof cardToEdit.folderId === 'object' && cardToEdit.folderId !== null
             ? cardToEdit.folderId._id
-            : String(cardToEdit.folderId),
+            : String(cardToEdit.folderId || ''),
       });
     } else if (resolvedFolderId) {
       reset((prev) => ({ ...prev, folderId: resolvedFolderId }));

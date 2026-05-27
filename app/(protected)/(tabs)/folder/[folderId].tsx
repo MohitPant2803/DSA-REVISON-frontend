@@ -357,7 +357,7 @@ export default function FolderCardsScreen() {
                 folder={sub}
                 onPress={() =>
                   router.push({
-                    pathname: '/(protected)/folder/[folderId]',
+                    pathname: '/(protected)/(tabs)/folder/[folderId]',
                     params: { folderId: sub._id, title: sub.title },
                   })
                 }

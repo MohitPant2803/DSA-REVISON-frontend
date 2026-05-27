@@ -50,6 +50,11 @@ export interface IRevisionCard {
   visibility: CardVisibility;
   order: number;
   slides?: ISlide[];
+  analogy?: string;
+  intuition?: string;
+  dryRun?: string;
+  mistake?: string;
+  prefer?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +88,11 @@ export type CreateRevisionCardDTO = {
   visibility?: CardVisibility;
   order?: number;
   slides?: ISlide[];
+  analogy?: string;
+  intuition?: string;
+  dryRun?: string;
+  mistake?: string;
+  prefer?: string;
 };
 
 export type UpdateRevisionCardDTO = Partial<CreateRevisionCardDTO>;

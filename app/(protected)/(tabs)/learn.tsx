@@ -605,7 +605,7 @@ export default function LearnScreen() {
                     hideCardCount={true}
                     onPress={() =>
                       router.push({
-                        pathname: '/(protected)/folder/[folderId]',
+                        pathname: '/(protected)/(tabs)/folder/[folderId]',
                         params: { folderId: folder._id, title: folder.title },
                       })
                     }

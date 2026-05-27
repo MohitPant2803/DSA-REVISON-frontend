@@ -12,6 +12,15 @@ import { syncTelemetry } from '@/utils/syncTelemetry';
 import { mergeCardState } from '@/utils/resolveCardState';
 import type { IFolder } from '@/types/folder';
 import type { ApiPlaylist } from '@/services/playlistService';
+import offlineSeed from '../constants/offlineSeed.json';
+import {
+  saveCardsToSQLite,
+  saveFoldersToSQLite,
+  savePlaylistsToSQLite,
+  deleteFolderFromSQLite,
+  deletePlaylistFromSQLite,
+} from '@/utils/sqliteSyncBridge';
+
 
 // Entity dirty check: returns true if there is a pending action in the offline queue for this entity
 const isEntityDirty = (queue: OfflineAction[], entityId: string): boolean => {
@@ -23,6 +32,29 @@ const isEntityDirty = (queue: OfflineAction[], entityId: string): boolean => {
     if (a.payload.tempId === entityId) return true;
     return false;
   });
+};
+
+// Helper: Calculate deterministic SHA-256 local catalog checksum
+const calculateLocalChecksum = async (playlistsById: any, foldersById: any): Promise<string> => {
+  const playlistIds = Object.keys(playlistsById).sort();
+  const folderIds = Object.keys(foldersById).sort();
+  const hashInput = JSON.stringify({ playlistIds, folderIds });
+  try {
+    const Crypto = require('expo-crypto');
+    return await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      hashInput
+    );
+  } catch (err) {
+    // Simple robust deterministic fallback hash if expo-crypto is unavailable
+    let hash = 0;
+    for (let i = 0; i < hashInput.length; i++) {
+      const char = hashInput.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
+  }
 };
 
 // Conflict-Free Merge policy: local optimistic changes win over server updates
@@ -43,13 +75,13 @@ export function useSyncEngine() {
   const queryClient = useQueryClient();
   const { isAuthenticated, isAuthReady } = useAuthStore();
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const currentDelayRef = useRef<number>(2000); // Start backoff retry delay at 2s
-  const feedSessionIdRef = useRef<string>(Date.now().toString()); // For server-side idempotency tracking
-
+  const currentDelayRef = useRef<number>(2000); // Backoff base
   const isSyncInFlight = useRef(false);
   const appStateRef = useRef(AppState.currentState);
-  const syncingStartedAtRef = useRef<number>(0);
   const startupSyncTriggered = useRef(false);
+
+  // Ref to resolve mutual recursion between scheduleRetry and triggerBackgroundSync in TS
+  const triggerBackgroundSyncRef = useRef<((force?: boolean) => Promise<void>) | null>(null);
 
   const {
     offlineActionQueue,
@@ -67,6 +99,11 @@ export function useSyncEngine() {
     setLastSuccessfulSyncAt,
     setLastCatalogIntegrityCheck,
     setSyncStatus,
+    lastSyncedRevision,
+    setLastSyncedRevision,
+    enableRevisionSync,
+    enableStrictContiguity,
+    applyQueueRewrite
   } = usePlaylistStateStore(
     useShallow((s) => ({
       offlineActionQueue: s.offlineActionQueue,
@@ -84,6 +121,11 @@ export function useSyncEngine() {
       setLastSuccessfulSyncAt: s.setLastSuccessfulSyncAt,
       setLastCatalogIntegrityCheck: s.setLastCatalogIntegrityCheck,
       setSyncStatus: s.setSyncStatus,
+      lastSyncedRevision: s.lastSyncedRevision,
+      setLastSyncedRevision: s.setLastSyncedRevision,
+      enableRevisionSync: s.enableRevisionSync,
+      enableStrictContiguity: s.enableStrictContiguity,
+      applyQueueRewrite: s.applyQueueRewrite
     }))
   );
 
@@ -155,481 +197,515 @@ export function useSyncEngine() {
     return true;
   }, [setLastCatalogIntegrityCheck]);
 
-  const triggerBackgroundSync = useCallback(async (force?: boolean) => {
-    // 1. Enforce the isAuthReady gate check
-    if (!isAuthenticated || !isAuthReady) return;
-
-    // Enforce strictly one sync per session (unless forced)
-    const state = usePlaylistStateStore.getState();
-    if (state.hasSyncedThisSession && !force) {
-      if (__DEV__) console.log('[Sync Engine] Already synced this session. Skipping background sync...');
-      return;
-    }
-
-    // 2. Request Deduplication & Coalescing (prevent parallel sweeps)
+  // Flicker-Free shadow cache swap full resync routine
+  const executeFullResync = useCallback(async (forcedByChecksum = false) => {
     if (isSyncInFlight.current) return;
-
-    // 3. Pause sync check (unless forced via Home screen return)
-    if (state.isLiveSyncPaused && !force) {
-      if (__DEV__) console.log('[Sync Engine] Live sync is currently paused in interaction zones. Skipping...');
-      return;
-    }
-
-    // 4. Cooldown protection (no delta sync within 60s unless forced or queue exists)
-    const now = Date.now();
-    if (!force && state.offlineActionQueue.length === 0 && state.lastSuccessfulSyncAt) {
-      const elapsed = now - state.lastSuccessfulSyncAt;
-      if (elapsed < 60000) {
-        if (__DEV__) console.log(`[Sync Engine] Cooldown active (${Math.round(elapsed / 1000)}s elapsed). Skipping...`);
-        return;
-      }
-    }
-
-    // 5. Stop syncing if app is backgrounded
-    if (appStateRef.current !== 'active') return;
-
     isSyncInFlight.current = true;
-    syncTelemetry.logSyncStart(state.offlineActionQueue.length);
-
-    // Immediate Connectivity Check via isNetworkConnected utility
-    const isConnected = await isNetworkConnected();
-    if (!isConnected) {
-      setSyncStatus('offline');
-      isSyncInFlight.current = false;
-      return;
-    }
-
     setSyncStatus('syncing');
-    syncingStartedAtRef.current = Date.now();
-
-    // Delta Sync Swipes & Scrolls to MongoDB
-    const { unsyncedSwipes, unsyncedScrolls, clearUnsyncedAnalytics } = useTrackingStore.getState();
-    if (unsyncedSwipes > 0 || unsyncedScrolls > 0) {
-      try {
-        if (__DEV__) console.log('[Sync Engine] Syncing analytics deltas to MongoDB:', { swipes: unsyncedSwipes, scrolls: unsyncedScrolls });
-        const res = await api.post('/progress/sync-analytics', { swipes: unsyncedSwipes, scrolls: unsyncedScrolls });
-        
-        // Update local totals from server response
-        const updatedStats = res.data?.data?.result;
-        if (updatedStats) {
-          useTrackingStore.setState({
-            totalSwipes: updatedStats.totalSwipes ?? 0,
-            totalScrolls: updatedStats.totalScrolls ?? 0,
-          });
-        }
-        
-        clearUnsyncedAnalytics();
-        if (__DEV__) console.log('[Sync Engine] Analytics synced successfully.');
-      } catch (err) {
-        console.error('[Sync Engine] Failed to sync analytics:', err);
-      }
-    }
-
-    // Capture incremented generation ID for stale snapshot protection
-    const activeGen = state.incrementSyncGeneration();
-
+    
     const startTime = performance.now();
-    let cardsCount = 0;
-    let foldersCount = 0;
-    let playlistsCount = 0;
+    syncTelemetry.log('info', `Flicker-Free Shadow Cache Full Resync initiated. Reason: ${forcedByChecksum ? 'Checksum Mismatch' : 'Compaction / Direct Request'}`);
 
     try {
-      // Pre-sync token validity check (Bug 4)
-      const currentToken = useAuthStore.getState().token;
-      if (currentToken) {
-        try {
-          const base64Url = currentToken.split('.')[1];
-          const decodeBase64 = (input: string): string => {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-            const str = input.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
-            let output = '', buffer = 0, bc = 0;
-            for (let idx = 0; idx < str.length; idx++) {
-              const pos = chars.indexOf(str.charAt(idx));
-              if (pos === -1) continue;
-              buffer = bc % 4 ? (buffer << 6) + pos : pos;
-              if (bc++ % 4) output += String.fromCharCode(255 & (buffer >> ((-2 * bc) & 6)));
-            }
-            return output;
-          };
-          const decodedPayload = JSON.parse(decodeBase64(base64Url));
-          if (decodedPayload.exp && decodedPayload.exp < Date.now() / 1000) {
-            if (__DEV__) console.warn('[SyncEngine] JWT expired. Attempting silent refresh before sync...');
-            const refreshed = await useAuthStore.getState().silentTokenRefresh();
-            if (!refreshed) {
-              if (__DEV__) console.warn('[SyncEngine] Token refresh failed. Aborting sync — user must re-authenticate.');
-              currentDelayRef.current = 2000;
-              if (retryTimeoutRef.current) {
-                clearTimeout(retryTimeoutRef.current);
-                retryTimeoutRef.current = null;
-              }
-              isSyncInFlight.current = false;
-              return;
-            }
-            if (__DEV__) console.log('[SyncEngine] Token refreshed successfully. Proceeding with sync.');
-          }
-        } catch (e) {
-          // Token decode failed — proceed and let the API call handle it
-        }
-      }
-
-      // Update bootstrap lifecycle to in_progress if starting cold
-      if (bootstrapStatus === 'not_started' || bootstrapStatus === 'failed') {
-        setBootstrapStatus('in_progress');
-      }
-
-      // High Priority: Process and upload offline enqueued mutations sequentially (Transactional Replay)
-      if (state.offlineActionQueue.length > 0) {
-        state.compressOfflineQueue();
-        const compactedQueue = usePlaylistStateStore.getState().offlineActionQueue;
-        
-        if (compactedQueue.length > 0) {
-          // Extract idempotency keys from queue actions for server-side deduplication (Bug 3)
-          const idempotencyKeys = compactedQueue.map((a: any) => a.id);
-          const response = await api.post('/sync/actions', {
-            actions: compactedQueue,
-            idempotencyKeys, // Server should use these to deduplicate CREATE operations
-            clientSessionId: feedSessionIdRef.current || Date.now().toString(),
-          });
-          const { processedIds = [], failedIds = [] } = response.data?.data || {};
-          
-          if (processedIds.length > 0) {
-            state.removeProcessedActions(processedIds);
-          }
-          if (failedIds.length > 0) {
-            state.isolatePoisonActions(failedIds);
-          }
-        }
-      }
-
-      // Medium Priority: Perform delta fetch from server
-      const sinceParam = state.lastSyncedAt ? encodeURIComponent(state.lastSyncedAt) : '';
-      const response = await api.get(`/sync?since=${sinceParam}`);
-
-      // Proactively sync senior quotes from server to keep local phone cache up-to-date
-      try {
-        if (__DEV__) console.log('[Sync Engine] Syncing senior quotes from server...');
-        const quotesRes = await api.get('/senior-quotes');
-        if (quotesRes.data?.success && quotesRes.data?.data && quotesRes.data.data.length > 0) {
-          usePlaylistStateStore.getState().setSeniorQuotes(quotesRes.data.data);
-          if (__DEV__) console.log(`[Sync Engine] Synced ${quotesRes.data.data.length} senior quotes.`);
-        }
-      } catch (err) {
-        if (__DEV__) console.warn('[Sync Engine] Senior quotes sync failed silently:', err);
-      }
-
-      // Stale Snapshot Protection check right at network resolution time!
-      const currentState = usePlaylistStateStore.getState();
-      if (activeGen !== currentState.syncGenerationId || currentState.isLiveSyncPaused) {
-        if (__DEV__) console.log(`[Sync Engine] Stale snapshot discarded. Generation: ${activeGen}. Paused: ${currentState.isLiveSyncPaused}`);
-        isSyncInFlight.current = false;
-        return;
-      }
-
+      const freshState = usePlaylistStateStore.getState();
+      
+      // Request complete clean revision fetch
+      const response = await api.get('/sync?sinceRevision=0&since=');
       const payload = response.data?.data;
 
       if (payload) {
-        const serverDbVersion = payload.dbVersion || 'striver-sde-sheet-v1';
-        const currentDbVersion = usePlaylistStateStore.getState().dbVersion;
-        
-        if (currentDbVersion && serverDbVersion !== currentDbVersion) {
-          if (__DEV__) console.warn(`[Sync Engine] DB version mismatch (Server: ${serverDbVersion}, Local: ${currentDbVersion}). Auto-purging stale cache...`);
-          
-          const localQueue = usePlaylistStateStore.getState().offlineActionQueue;
-          usePlaylistStateStore.getState().hardResetStore();
-          
-          usePlaylistStateStore.setState({
-            offlineActionQueue: localQueue,
-            dbVersion: serverDbVersion,
-            lastSyncedAt: null,
-          });
-          
-          isSyncInFlight.current = false;
-          setTimeout(() => {
-            triggerBackgroundSync(true);
-          }, 100);
-          return;
-        }
+        // Hydrate background shadow structures to prevent white flashes and layout jumps
+        const shadowCards = { ...payload.delta?.cards?.reduce((acc: any, c: any) => {
+          if (c && c._id) acc[c._id.split('-loop-')[0]] = c;
+          return acc;
+        }, {}) };
 
-        if (!currentDbVersion) {
-          usePlaylistStateStore.setState({ dbVersion: serverDbVersion });
-          
-          const existingFoldersCount = Object.keys(usePlaylistStateStore.getState().foldersById).length;
-          if (existingFoldersCount > 0 && serverDbVersion !== 'striver-sde-sheet-v1') {
-            if (__DEV__) console.warn(`[Sync Engine] Existing cache detected without DB version anchor. Purging once to initialize safely under ${serverDbVersion}...`);
-            const localQueue = usePlaylistStateStore.getState().offlineActionQueue;
-            usePlaylistStateStore.getState().hardResetStore();
-            usePlaylistStateStore.setState({
-              offlineActionQueue: localQueue,
-              dbVersion: serverDbVersion,
-              lastSyncedAt: null,
-            });
-            isSyncInFlight.current = false;
-            setTimeout(() => {
-              triggerBackgroundSync(true);
-            }, 100);
-            return;
+        const shadowFolders = { ...payload.delta?.folders?.reduce((acc: any, f: any) => {
+          if (f && f._id) acc[f._id] = f;
+          return acc;
+        }, {}) };
+
+        const shadowPlaylists = { ...payload.delta?.playlists?.reduce((acc: any, p: any) => {
+          if (p && p._id) acc[p._id] = p;
+          return acc;
+        }, {}) };
+
+        const shadowOrderMap: Record<string, string[]> = {
+          all: Object.keys(shadowCards),
+          likes: [],
+          'watch-later': [],
+          easy: [],
+          medium: [],
+          hard: [],
+          skipped: []
+        };
+
+        // Map playlist collections
+        payload.delta?.playlists?.forEach((p: any) => {
+          if (!p || !p._id) return;
+          if (!['easy', 'medium', 'hard', 'skipped'].includes(p._id)) {
+            const cardIds = p.cardIds || p.orderedCardIds || [];
+            shadowOrderMap[p._id] = cardIds.map((id: string) => id.split('-loop-')[0]).filter(Boolean);
           }
-        }
-
-        const {
-          cards = [],
-          folders = [],
-          playlists = [],
-          questionProgress = [],
-          progress = [],
-        } = payload.delta || {};
-
-        cardsCount = cards.length;
-        foldersCount = folders.length;
-        playlistsCount = playlists.length;
-
-        const freshState = usePlaylistStateStore.getState();
-        const activeQueue = freshState.offlineActionQueue;
-
-        const mergedCards = { ...freshState.cardsById };
-        const mergedOrderMap = { ...freshState.playlistCardOrderMap };
-        const mergedHydratedPlaylists = { ...freshState.hydratedPlaylists };
-        const mergedFolders = { ...freshState.foldersById };
-        const mergedPlaylists = { ...freshState.playlistsById };
-        const mergedDifficultyMap = { ...freshState.cardDifficultyMap };
-        const mergedDeltas = { ...freshState.smartPlaylistDeltaCounts };
-
-        // 1. Process Cards Delta
-        if (cards && cards.length > 0) {
-          cards.forEach((card: any) => {
-            if (!card || !card._id) return;
-            const cleanId = card._id.split('-loop-')[0];
-            const existingCard = mergedCards[cleanId];
-            const local = freshState.cardDifficultyMap[cleanId];
-            mergedCards[cleanId] = mergeCardState(local, existingCard, card);
-          });
-
-          // Hydrate card order for 'all' playlist
-          const cleanIds = cards.map((c: any) => c._id?.split('-loop-')[0]).filter(Boolean);
-          const existingOrder = mergedOrderMap['all'];
-          if (!existingOrder) {
-            mergedOrderMap['all'] = cleanIds;
-          } else {
-            const existingSet = new Set(existingOrder);
-            const newIds = cleanIds.filter((id: string) => !existingSet.has(id));
-            mergedOrderMap['all'] = [...existingOrder, ...newIds];
-          }
-          mergedHydratedPlaylists['all'] = true;
-        }
-
-        // 2. Process Folders Delta with Optimistic Merger
-        if (folders && folders.length > 0) {
-          folders.forEach((serverFolder: any) => {
-            if (!serverFolder || !serverFolder._id) return;
-            const isDirty = isEntityDirty(activeQueue, serverFolder._id);
-            const localFolder = freshState.foldersById[serverFolder._id];
-            mergedFolders[serverFolder._id] = mergeEntityState(localFolder, serverFolder, isDirty);
-          });
-        }
-
-        // 3. Process Playlists Delta with Optimistic Merger
-        if (playlists && playlists.length > 0) {
-          playlists.forEach((serverPlaylist: any) => {
-            if (!serverPlaylist || !serverPlaylist._id) return;
-            const isDirty = isEntityDirty(activeQueue, serverPlaylist._id);
-            
-            // Check if there are any pending TOGGLE_PLAYLIST_ITEM or REORDER_PLAYLIST actions for this playlist in the offline queue
-            const hasPendingPlaylistAction = activeQueue.some(
-              (a) => 
-                (a.action === 'TOGGLE_PLAYLIST_ITEM' && a.payload?.playlistId === serverPlaylist._id) ||
-                (a.action === 'REORDER_PLAYLIST' && a.payload?.playlistId === serverPlaylist._id)
-            );
-
-            const localPlaylist = freshState.playlistsById[serverPlaylist._id];
-            mergedPlaylists[serverPlaylist._id] = mergeEntityState(localPlaylist, serverPlaylist, isDirty);
-
-            // Hydrate custom playlist order ONLY if there are no pending local modifications for this playlist!
-            if (!['easy', 'medium', 'hard', 'skipped'].includes(serverPlaylist._id)) {
-              if (hasPendingPlaylistAction) {
-                if (__DEV__) console.log(`[SyncEngine] Skipping server card list for playlist ${serverPlaylist._id} - pending local queue action exists.`);
-              } else {
-                const cardIds = serverPlaylist.cardIds || serverPlaylist.orderedCardIds || [];
-                const cleanIds = cardIds.map((id: string) => id.split('-loop-')[0]).filter(Boolean);
-                mergedOrderMap[serverPlaylist._id] = cleanIds;
-                mergedHydratedPlaylists[serverPlaylist._id] = true;
-              }
-            }
-          });
-        }
-
-        // 4. Process rated card question states (optimistic guard from Phase 1 Bug 3)
-        if (questionProgress && questionProgress.length > 0) {
-          questionProgress.forEach((qp: any) => {
-            const cardId = qp.questionId || qp.cardId || qp.revisionCardId;
-            const cardState = qp.perceivedDifficultyByUser || (qp.attemptStatus === 'skipped' ? 'skipped' : null);
-            if (cardId && cardState) {
-              const cleanId = cardId.split('-loop-')[0];
-              const currentLocal = mergedDifficultyMap[cleanId];
-              
-              if (currentLocal?.optimistic === true) {
-                if (__DEV__) console.log(`[SyncEngine] Skipping server state for ${cardId} — active local optimistic override exists.`);
-                return; // Preserve user's newer classification
-              }
-
-              const oldState = currentLocal !== undefined
-                ? currentLocal.difficulty
-                : (mergedCards[cleanId]?.difficultyState || null);
-
-              if (oldState === cardState) return;
-
-              if (oldState && ['easy', 'medium', 'hard', 'skipped'].includes(oldState)) {
-                mergedDeltas[oldState] = (mergedDeltas[oldState] || 0) - 1;
-                if (mergedOrderMap[oldState]) {
-                  mergedOrderMap[oldState] = mergedOrderMap[oldState].filter((id) => id !== cleanId);
-                }
-              }
-              if (cardState && ['easy', 'medium', 'hard', 'skipped'].includes(cardState)) {
-                mergedDeltas[cardState] = (mergedDeltas[cardState] || 0) + 1;
-                const newList = mergedOrderMap[cardState] || [];
-                if (!newList.includes(cleanId)) {
-                  mergedOrderMap[cardState] = [cleanId, ...newList];
-                }
-              }
-
-              delete mergedDifficultyMap[cleanId];
-
-              const qpObj = cardState
-                ? {
-                    attemptStatus: cardState === 'skipped' ? ('skipped' as const) : ('attempted' as const),
-                    perceivedDifficultyByUser: cardState === 'skipped' ? null : (cardState as any),
-                  }
-                : null;
-
-              mergedCards[cleanId] = {
-                ...(mergedCards[cleanId] || { _id: cleanId }),
-                difficultyState: cardState,
-                currentUserQuestionProgress: qpObj,
-                dirty: false,
-              };
-            }
-          });
-        }
-
-        // 5. Process Favorites / Likes
-        if (progress && progress.length > 0) {
-          progress.forEach((pr: any) => {
-            const cardId = pr.revisionCardId;
-            if (cardId) {
-              const cleanId = cardId.split('-loop-')[0];
-              const queueHasPendingAction = activeQueue.some(
-                (a) => (a.payload?.cardId === cleanId) && (a.action === 'TOGGLE_FAVORITE')
-              );
-              if (queueHasPendingAction) {
-                if (__DEV__) console.log(`[SyncEngine] Skipping server favorite state for ${cleanId} — pending queue action exists.`);
-                return;
-              }
-              if (pr.favorite !== undefined) {
-                if (mergedCards[cleanId]) {
-                  mergedCards[cleanId] = {
-                    ...mergedCards[cleanId],
-                    isFavorite: pr.favorite,
-                  };
-                }
-                const currentLikes = mergedOrderMap['likes'] || [];
-                let newLikes = currentLikes;
-                if (pr.favorite) {
-                  if (!currentLikes.includes(cleanId)) {
-                    newLikes = [cleanId, ...currentLikes];
-                  }
-                } else {
-                  newLikes = currentLikes.filter(id => id !== cleanId);
-                }
-                mergedOrderMap['likes'] = newLikes;
-              }
-            }
-          });
-        }
-
-        // 6. Apply everything in ONE atomic set()
-        usePlaylistStateStore.setState({
-          cardsById: mergedCards,
-          foldersById: mergedFolders,
-          playlistsById: mergedPlaylists,
-          cardDifficultyMap: mergedDifficultyMap,
-          playlistCardOrderMap: mergedOrderMap,
-          hydratedPlaylists: mergedHydratedPlaylists,
-          smartPlaylistDeltaCounts: mergedDeltas,
-          lastSyncedAt: payload.timestamp || new Date().toISOString(),
-          lastSuccessfulSyncAt: Date.now(),
-          syncStatus: 'synced',
-          hasSyncedThisSession: true,
         });
 
-        resetSyncFailure();
+        // 100% Data Preservation: Merge optimistic clicks currently enqueued in the actions queue
+        const activeQueue = freshState.offlineActionQueue;
+        activeQueue.forEach((action) => {
+          const act = action.action;
+          const pl = action.payload;
+          if (act === 'CLASSIFY_CARD' && pl.cardId && shadowCards[pl.cardId]) {
+            shadowCards[pl.cardId].difficultyState = pl.state;
+          } else if (act === 'TOGGLE_FAVORITE' && pl.cardId && shadowCards[pl.cardId]) {
+            shadowCards[pl.cardId].isFavorite = pl.value;
+          } else if (act === 'TOGGLE_PLAYLIST_ITEM' && pl.playlistId && pl.cardId) {
+            const pId = pl.playlistId;
+            if (shadowOrderMap[pId]) {
+              if (pl.value && !shadowOrderMap[pId].includes(pl.cardId)) {
+                shadowOrderMap[pId].push(pl.cardId);
+              } else if (!pl.value) {
+                shadowOrderMap[pId] = shadowOrderMap[pId].filter(id => id !== pl.cardId);
+              }
+            }
+          }
+        });
 
-        // Verify relationship integrity
-        const integrityValid = validateEntityIntegrity();
+        // Persist to SQLite canonical storage
+        try {
+          saveCardsToSQLite(Object.values(shadowCards));
+          saveFoldersToSQLite(Object.values(shadowFolders));
+          savePlaylistsToSQLite(Object.values(shadowPlaylists));
+        } catch (sqlErr: any) {
+          console.error('[SQLite Sync Engine Error] Full resync SQLite persistence failed:', sqlErr.message);
+        }
 
-        if (integrityValid) {
-          setBootstrapStatus('completed');
-          currentDelayRef.current = 2000; // Reset exponential retry delay on absolute success
-        } else {
-          setBootstrapStatus('failed');
+        // Swap caches instantly in a single React tick!
+        usePlaylistStateStore.setState({
+          cardsById: shadowCards,
+          foldersById: shadowFolders,
+          playlistsById: shadowPlaylists,
+          playlistCardOrderMap: shadowOrderMap,
+          lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
+          lastSyncedAt: payload.timestamp || new Date().toISOString(),
+          lastSuccessfulSyncAt: Date.now(),
+          syncFailureCount: 0,
+        });
+
+        const duration = performance.now() - startTime;
+        syncTelemetry.logSyncSuccess(duration, activeQueue.length, {
+          totalPlaylistsCount: Object.keys(shadowPlaylists).length,
+          totalFoldersCount: Object.keys(shadowFolders).length,
+          shadowCacheSwap: true
+        });
+        
+        if (__DEV__) {
+          console.log(`[Shadow Cache Swap] Atomic swap completed in ${duration.toFixed(2)}ms. Flicker avoided!`);
+        }
+      }
+    } catch (err: any) {
+      console.error('[Shadow Cache Swap] Full resync failed:', err.message);
+      syncTelemetry.logSyncFailure(err, usePlaylistStateStore.getState().syncFailureCount + 1);
+      usePlaylistStateStore.getState().incrementSyncFailure();
+    } finally {
+      isSyncInFlight.current = false;
+      setSyncStatus('synced');
+    }
+  }, [setSyncStatus]);
+
+  // Exponential Backoff retry scheduler
+  const scheduleRetry = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+    }
+    const state = usePlaylistStateStore.getState();
+    const attempts = state.syncFailureCount;
+    
+    const baseDelay = 2000;
+    const maxDelay = 60000;
+    const delay = Math.min(maxDelay, baseDelay * Math.pow(2, attempts));
+    const jitter = Math.floor(Math.random() * 1000) - 500;
+    const jitteredDelay = Math.max(1000, delay + jitter);
+
+    if (__DEV__) {
+      console.log(`[Sync Engine Backoff] Scheduling retry in ${jitteredDelay}ms (Attempt #${attempts + 1})`);
+    }
+
+    retryTimeoutRef.current = setTimeout(() => {
+      triggerBackgroundSyncRef.current?.(true);
+    }, jitteredDelay);
+  }, []);
+
+  const triggerBackgroundSync = useCallback(async (force?: boolean) => {
+    const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    const hasAccess = isAuthenticated || isGuest;
+    if (!hasAccess || !isAuthReady) return;
+
+    if (isSyncInFlight.current) return;
+
+    isSyncInFlight.current = true;
+    setSyncStatus('syncing');
+    setBootstrapStatus('in_progress');
+
+    try {
+      const state = usePlaylistStateStore.getState();
+      const currentDbVersion = state.dbVersion;
+      const targetDbVersion = offlineSeed.dbVersion;
+
+      // Check if we need local seeding
+      const needsSeeding = force || !currentDbVersion || currentDbVersion !== targetDbVersion || Object.keys(state.cardsById).length === 0 || !state.cardsById['6a1655fbb129b168bb16bb45']?.slides;
+
+      if (needsSeeding) {
+        if (__DEV__) console.log(`[Offline Sync] Local seeding triggered. Version: ${currentDbVersion} -> ${targetDbVersion}`);
+        
+        const existingCards = state.cardsById || {};
+        const existingFolders = state.foldersById || {};
+        const existingPlaylists = state.playlistsById || {};
+        const existingOrderMap = state.playlistCardOrderMap || {};
+
+        const nextCards = { ...existingCards };
+        const nextFolders = { ...existingFolders };
+        const nextPlaylists = { ...existingPlaylists };
+        const nextOrderMap = { ...existingOrderMap };
+
+        offlineSeed.folders.forEach((f: any) => {
+          nextFolders[f._id] = f;
+        });
+
+        offlineSeed.playlists.forEach((p: any) => {
+          nextPlaylists[p._id] = p;
+          if (!nextOrderMap[p._id]) {
+            nextOrderMap[p._id] = p.cardIds || [];
+          }
+        });
+
+        offlineSeed.revisionCards.forEach((c: any) => {
+          const existingCard = existingCards[c._id] as any;
+          if (existingCard) {
+            nextCards[c._id] = {
+              ...c,
+              difficultyState: existingCard.difficultyState !== undefined ? existingCard.difficultyState : c.difficultyState,
+              isFavorite: existingCard.isFavorite !== undefined ? existingCard.isFavorite : c.isFavorite,
+              isWatchLater: existingCard.isWatchLater !== undefined ? existingCard.isWatchLater : c.isWatchLater,
+              currentUserQuestionProgress: existingCard.currentUserQuestionProgress || c.currentUserQuestionProgress,
+            } as any;
+          } else {
+            nextCards[c._id] = c as any;
+          }
+        });
+
+        const allCardIds = offlineSeed.revisionCards.map((c: any) => c._id);
+        nextOrderMap['all'] = allCardIds;
+
+        ['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].forEach(key => {
+          if (!nextOrderMap[key]) {
+            nextOrderMap[key] = [];
+          }
+        });
+
+        let seniorQuotes = state.seniorQuotes;
+        if ((offlineSeed as any).seniorQuotes && (offlineSeed as any).seniorQuotes.length > 0) {
+          seniorQuotes = (offlineSeed as any).seniorQuotes;
+        }
+
+        // Calculate the highest updatedAt in offlineSeed as the safe bootstrap sync checkpoint
+        let maxSeedTime = new Date(0);
+        offlineSeed.revisionCards.forEach((c: any) => {
+          if (c.updatedAt) {
+            const t = new Date(c.updatedAt);
+            if (t > maxSeedTime) maxSeedTime = t;
+          }
+        });
+        const safeBootstrapCheckpoint = maxSeedTime.getTime() > 0 ? maxSeedTime.toISOString() : new Date(0).toISOString();
+
+        // Persist local seed values to SQLite canonical storage
+        try {
+          saveCardsToSQLite(Object.values(nextCards));
+          saveFoldersToSQLite(Object.values(nextFolders));
+          savePlaylistsToSQLite(Object.values(nextPlaylists));
+        } catch (sqlErr: any) {
+          console.error('[SQLite Sync Engine Error] Local seeding SQLite persistence failed:', sqlErr.message);
+        }
+
+        usePlaylistStateStore.setState({
+          cardsById: nextCards,
+          foldersById: nextFolders,
+          playlistsById: nextPlaylists,
+          playlistCardOrderMap: nextOrderMap,
+          seniorQuotes,
+          dbVersion: targetDbVersion,
+          lastSyncedAt: safeBootstrapCheckpoint,
+          lastSyncedRevision: 0, // Reset revision sweep to ensure a clean delta sync sweep
+          lastSuccessfulSyncAt: Date.now(),
+        });
+      }
+
+      validateEntityIntegrity();
+      setBootstrapStatus('completed');
+      setLastSuccessfulSyncAt(Date.now());
+      if (!isAuthenticated || isGuest) {
+        setLastSyncedAt(new Date().toISOString());
+      }
+
+      // --- ONLINE SERVER SWEEP ---
+      if (isAuthenticated && !isGuest) {
+        const isConnected = await isNetworkConnected();
+        if (isConnected) {
+          syncTelemetry.logSyncStart(offlineActionQueue.length);
+          const flushStart = performance.now();
+
+          // 1. Flush pending enqueued offline actions
+          const pendingActions = usePlaylistStateStore.getState().offlineActionQueue;
+          if (pendingActions.length > 0) {
+            if (__DEV__) console.log(`[Sync Engine] Flushing ${pendingActions.length} enqueued offline actions...`);
+            try {
+              const flushResponse = await api.post('/sync/actions', { actions: pendingActions });
+              const { processedIds, failedIds } = flushResponse.data?.data || flushResponse.data || {};
+              
+              if (processedIds && processedIds.length > 0) {
+                usePlaylistStateStore.getState().removeProcessedActions(processedIds);
+              }
+              if (failedIds && failedIds.length > 0) {
+                usePlaylistStateStore.getState().isolatePoisonActions(failedIds);
+              }
+            } catch (flushErr) {
+              console.warn('[Sync Engine] Failed to flush enqueued actions queue:', flushErr);
+              throw flushErr;
+            }
+          }
+
+          // 2. Strict contiguous sweep query
+          try {
+            const freshState = usePlaylistStateStore.getState();
+            const sinceRevision = freshState.lastSyncedRevision || 0;
+            const sinceParam = freshState.lastSyncedAt ? encodeURIComponent(freshState.lastSyncedAt) : '';
+
+            // Handle Phase 0 feature flag toggling
+            const url = freshState.enableRevisionSync
+              ? `/sync?sinceRevision=${sinceRevision}&since=${sinceParam}`
+              : `/sync?since=${sinceParam}`;
+
+            const response = await api.get(url);
+            const payload = response.data?.data;
+
+            if (payload) {
+              // Compaction redirect validation check
+              if (payload.requiresFullResync) {
+                if (__DEV__) console.log('[Sync Engine] Compaction window limit reached. Triggering Shadow Cache Full Resync.');
+                isSyncInFlight.current = false;
+                await executeFullResync();
+                return;
+              }
+
+              const serverDbVersion = payload.dbVersion || targetDbVersion;
+              const {
+                cards = [],
+                folders = [],
+                playlists = [],
+                progress = [],
+                deletedEntities = []
+              } = payload.delta || {};
+
+              const mergedCards = { ...freshState.cardsById };
+              const mergedOrderMap = { ...freshState.playlistCardOrderMap };
+              const mergedHydratedPlaylists = { ...freshState.hydratedPlaylists };
+              const mergedFolders = { ...freshState.foldersById };
+              const mergedPlaylists = { ...freshState.playlistsById };
+
+              // A: Process deletions tombstones delta
+              if (deletedEntities && deletedEntities.length > 0) {
+                deletedEntities.forEach((del: any) => {
+                  if (!del || !del.entityId) return;
+                  if (del.entityType === 'playlist') {
+                    delete mergedPlaylists[del.entityId];
+                    delete mergedOrderMap[del.entityId];
+                    delete mergedHydratedPlaylists[del.entityId];
+                  } else if (del.entityType === 'folder') {
+                    delete mergedFolders[del.entityId];
+                  }
+                });
+              }
+
+              // B: Merge Cards
+              if (cards && cards.length > 0) {
+                cards.forEach((card: any) => {
+                  if (!card || !card._id) return;
+                  const cleanId = card._id.split('-loop-')[0];
+                  const existingCard = mergedCards[cleanId];
+                  const local = freshState.cardDifficultyMap[cleanId];
+                  mergedCards[cleanId] = mergeCardState(local, existingCard, card);
+                });
+
+                const cleanIds = cards.map((c: any) => c._id?.split('-loop-')[0]).filter(Boolean);
+                const existingOrder = mergedOrderMap['all'];
+                if (!existingOrder) {
+                  mergedOrderMap['all'] = cleanIds;
+                } else {
+                  const existingSet = new Set(existingOrder);
+                  const newIds = cleanIds.filter((id: string) => !existingSet.has(id));
+                  mergedOrderMap['all'] = [...existingOrder, ...newIds];
+                }
+                mergedHydratedPlaylists['all'] = true;
+              }
+
+              // C: Merge Folders
+              if (folders && folders.length > 0) {
+                folders.forEach((serverFolder: any) => {
+                  if (!serverFolder || !serverFolder._id) return;
+                  const local = mergedFolders[serverFolder._id];
+                  const isDirty = isEntityDirty(freshState.offlineActionQueue, serverFolder._id);
+                  mergedFolders[serverFolder._id] = mergeEntityState(local, serverFolder, isDirty);
+                });
+              }
+
+              // D: Merge Playlists
+              if (playlists && playlists.length > 0) {
+                playlists.forEach((serverPlaylist: any) => {
+                  if (!serverPlaylist || !serverPlaylist._id) return;
+                  const local = mergedPlaylists[serverPlaylist._id];
+                  const isDirty = isEntityDirty(freshState.offlineActionQueue, serverPlaylist._id);
+                  mergedPlaylists[serverPlaylist._id] = mergeEntityState(local, serverPlaylist, isDirty);
+
+                  if (!['easy', 'medium', 'hard', 'skipped'].includes(serverPlaylist._id)) {
+                    const cardIds = serverPlaylist.cardIds || serverPlaylist.orderedCardIds || [];
+                    const cleanIds = cardIds.map((id: string) => id.split('-loop-')[0]).filter(Boolean);
+                    mergedOrderMap[serverPlaylist._id] = cleanIds;
+                    mergedHydratedPlaylists[serverPlaylist._id] = true;
+                  }
+                });
+              }
+
+              // E: CRDT-lite logical sequence conflict progress merging
+              if (progress && progress.length > 0) {
+                progress.forEach((p: any) => {
+                  if (!p || !p.revisionCardId) return;
+                  const cardId = p.revisionCardId.toString();
+                  const localDiff = freshState.cardDifficultyMap[cardId];
+
+                  // Difficulty state conflict clock resolution
+                  const serverDiffSeq = p.difficultyLogicalSequence || 0;
+                  const localDiffSeq = (localDiff as any)?.difficultyLogicalSequence || 0;
+                  
+                  if (!localDiff || serverDiffSeq > localDiffSeq) {
+                    if (mergedCards[cardId]) {
+                      mergedCards[cardId].difficultyState = p.difficultyState;
+                    }
+                    if (p.difficultyState) {
+                      const list = mergedOrderMap[p.difficultyState] || [];
+                      if (!list.includes(cardId)) {
+                        mergedOrderMap[p.difficultyState] = [cardId, ...list];
+                      }
+                    }
+                  }
+
+                  // Favorite state conflict clock resolution
+                  const serverFavSeq = p.favoriteLogicalSequence || 0;
+                  const localFavSeq = (localDiff as any)?.favoriteLogicalSequence || 0;
+
+                  if (serverFavSeq > localFavSeq) {
+                    if (mergedCards[cardId]) {
+                      mergedCards[cardId].isFavorite = p.favorite;
+                    }
+                    const likesList = mergedOrderMap['likes'] || [];
+                    if (p.favorite && !likesList.includes(cardId)) {
+                      mergedOrderMap['likes'] = [cardId, ...likesList];
+                    } else if (!p.favorite) {
+                      mergedOrderMap['likes'] = likesList.filter(id => id !== cardId);
+                    }
+                  }
+                });
+              }
+
+              // SQLite persistence writes
+              try {
+                // A: Handle deletions
+                if (deletedEntities && deletedEntities.length > 0) {
+                  deletedEntities.forEach((del: any) => {
+                    if (!del || !del.entityId) return;
+                    if (del.entityType === 'playlist') {
+                      deletePlaylistFromSQLite(del.entityId);
+                    } else if (del.entityType === 'folder') {
+                      deleteFolderFromSQLite(del.entityId);
+                    }
+                  });
+                }
+                
+                // B: Handle updates/insertions
+                if (cards && cards.length > 0) {
+                  const updatedCardsList = cards.map((c: any) => {
+                    const cleanId = c._id.split('-loop-')[0];
+                    return mergedCards[cleanId] || c;
+                  });
+                  saveCardsToSQLite(updatedCardsList);
+                }
+                if (folders && folders.length > 0) {
+                  saveFoldersToSQLite(folders);
+                }
+                if (playlists && playlists.length > 0) {
+                  savePlaylistsToSQLite(playlists);
+                }
+                if (progress && progress.length > 0) {
+                  const progressCardIds = progress.map((p: any) => p.revisionCardId.toString());
+                  const progressCardsToSave = progressCardIds.map((id: string) => mergedCards[id]).filter(Boolean);
+                  saveCardsToSQLite(progressCardsToSave);
+                }
+              } catch (sqlErr: any) {
+                console.error('[SQLite Sync Engine Error] Delta sync SQLite persistence failed:', sqlErr.message);
+              }
+
+              // Save everything in one single atomic transaction update
+              usePlaylistStateStore.setState({
+                cardsById: mergedCards,
+                foldersById: mergedFolders,
+                playlistsById: mergedPlaylists,
+                playlistCardOrderMap: mergedOrderMap,
+                hydratedPlaylists: mergedHydratedPlaylists,
+                dbVersion: serverDbVersion,
+                lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
+                lastSyncedAt: payload.timestamp || new Date().toISOString(),
+                lastSuccessfulSyncAt: Date.now(),
+                syncFailureCount: 0,
+              });
+
+              // F: Cryptographic Fingerprint Checksum Auditing
+              if (freshState.enableStrictContiguity && payload.checksum) {
+                const localChecksum = await calculateLocalChecksum(mergedPlaylists, mergedFolders);
+                if (localChecksum !== payload.checksum) {
+                  if (__DEV__) {
+                    console.warn(`[Checksum Audit] Checksum Mismatch! Local: ${localChecksum} | Server: ${payload.checksum}. Initiating shadow self-healing.`);
+                  }
+                  isSyncInFlight.current = false;
+                  await executeFullResync(true);
+                  return;
+                }
+              }
+
+              const duration = performance.now() - flushStart;
+              syncTelemetry.logSyncSuccess(duration, pendingActions.length, {
+                cardsDelta: cards.length,
+                foldersDelta: folders.length,
+                playlistsDelta: playlists.length
+              });
+              resetSyncFailure();
+            }
+          } catch (serverErr: any) {
+            console.warn('[Sync Engine] Online dynamic fetch failed:', serverErr.message);
+            incrementSyncFailure();
+            scheduleRetry();
+            throw serverErr;
+          }
         }
       }
 
-      // Transition syncStatus to synced safely with min 700ms display filter to avoid rapid layout flickering
-      const elapsed = Date.now() - syncingStartedAtRef.current;
-      const remaining = Math.max(0, 700 - elapsed);
       setTimeout(() => {
         setSyncStatus('synced');
-      }, remaining);
-
-      // Low Priority background updates deferred to run after animations/interactions!
-      InteractionManager.runAfterInteractions(() => {
-        if (__DEV__) console.log('[Sync Engine] Scheduling low-priority dashboard statistics refresh.');
+        usePlaylistStateStore.setState({ hasSyncedThisSession: true });
         queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
-      });
+      }, 500);
 
-      syncTelemetry.logSyncSuccess(performance.now() - startTime, usePlaylistStateStore.getState().offlineActionQueue.length, {
-        cards: cardsCount,
-        folders: foldersCount,
-        playlists: playlistsCount,
-      });
-
-    } catch (error: any) {
-      // Detect auth failures and stop retrying — the user needs to re-authenticate
-      const is401 = error?.status === 401 || error?.response?.status === 401;
-      if (is401) {
-        console.warn('[SyncEngine] 401 Unauthorized during sync. Stopping retries. User must re-authenticate.');
-        // Attempt silent token refresh before giving up
-        try {
-          const { useAuthStore } = require('@/store/useAuthStore');
-          const refreshed = await useAuthStore.getState().silentTokenRefresh();
-          if (refreshed) {
-            console.log('[SyncEngine] Token refreshed successfully. Will retry on next interval.');
-            // Don't schedule immediate retry — let the normal 60s interval pick it up
-          }
-        } catch (refreshErr) {
-          console.warn('[SyncEngine] Silent token refresh failed:', refreshErr);
-        }
-        // Reset backoff so next legitimate sync attempt starts fresh
-        resetSyncFailure();
-        currentDelayRef.current = 2000;
-        
-        isSyncInFlight.current = false;
-        return; // DO NOT schedule retry — breaks the infinite loop
-      }
-
-      incrementSyncFailure();
-      syncTelemetry.logSyncFailure(error, syncFailureCount + 1);
-
-      // Transition bootstrap status to failed if first bootstrap attempt crashes
-      if (bootstrapStatus === 'in_progress') {
-        setBootstrapStatus('failed');
-      }
-
-      // Safe silent backoff retry scheduler cleaned up
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-        retryTimeoutRef.current = null;
-      }
-      // Removed automatic background retries to comply with startup-only sync requirement
+    } catch (err) {
+      console.error('[Offline Sync] Background sync cycle aborted:', err);
+      setBootstrapStatus('failed');
+      setSyncStatus('offline');
     } finally {
       isSyncInFlight.current = false;
     }
@@ -638,22 +714,23 @@ export function useSyncEngine() {
     isAuthReady,
     bootstrapStatus,
     setBootstrapStatus,
-    syncFailureCount,
-    incrementSyncFailure,
-    resetSyncFailure,
     setLastSuccessfulSyncAt,
     validateEntityIntegrity,
     setSyncStatus,
-    hydratePlaylistCards,
-    hydrateFolders,
-    hydratePlaylists,
     setLastSyncedAt,
     queryClient,
+    executeFullResync,
+    scheduleRetry,
+    incrementSyncFailure,
+    resetSyncFailure,
+    offlineActionQueue.length
   ]);
+
+  // Synchronously assign ref to solve circular dependency
+  triggerBackgroundSyncRef.current = triggerBackgroundSync;
 
   const pendingResumeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const maxPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const MAX_PAUSE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 
   const pauseLiveSync = useCallback(() => {
     if (pendingResumeTimeoutRef.current) {
@@ -661,7 +738,7 @@ export function useSyncEngine() {
       pendingResumeTimeoutRef.current = null;
     }
     usePlaylistStateStore.getState().setLiveSyncPaused(true);
-    if (__DEV__) console.log('[Sync Engine] Paused live sync status. Pending resumes cancelled.');
+    if (__DEV__) console.log('[Sync Engine] Paused live sync status.');
     if (maxPauseTimerRef.current) {
       clearTimeout(maxPauseTimerRef.current);
       maxPauseTimerRef.current = null;
@@ -678,23 +755,19 @@ export function useSyncEngine() {
     }
     pendingResumeTimeoutRef.current = setTimeout(() => {
       usePlaylistStateStore.getState().setLiveSyncPaused(false);
-      if (__DEV__) console.log('[Sync Engine] Resumed live sync status.');
-    }, 300);
+      if (__DEV__) console.log('[Sync Engine] Resumed live sync. Flushing...');
+      triggerBackgroundSyncRef.current?.(true);
+    }, 500);
   }, []);
 
-  // Register the gates on store when hook mounts
   useEffect(() => {
     usePlaylistStateStore.setState({
       pauseSyncGate: pauseLiveSync,
       resumeSyncGate: resumeAndFlush,
     });
     return () => {
-      if (pendingResumeTimeoutRef.current) {
-        clearTimeout(pendingResumeTimeoutRef.current);
-      }
-      if (maxPauseTimerRef.current) {
-        clearTimeout(maxPauseTimerRef.current); // Clean up safety timer
-      }
+      if (pendingResumeTimeoutRef.current) clearTimeout(pendingResumeTimeoutRef.current);
+      if (maxPauseTimerRef.current) clearTimeout(maxPauseTimerRef.current);
       usePlaylistStateStore.setState({
         pauseSyncGate: null,
         resumeSyncGate: null,
@@ -702,7 +775,6 @@ export function useSyncEngine() {
     };
   }, [pauseLiveSync, resumeAndFlush]);
 
-  // AppState change listener: clean up retry timeout references when backgrounded
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (appStateRef.current === 'active' && nextAppState !== 'active') {
@@ -710,34 +782,30 @@ export function useSyncEngine() {
           clearTimeout(retryTimeoutRef.current);
           retryTimeoutRef.current = null;
         }
-        if (__DEV__) console.log('[Sync Engine] App backgrounded. Active delay retries cleared.');
       }
       appStateRef.current = nextAppState;
     });
-
     return () => {
       subscription.remove();
     };
   }, []);
 
-  // Reset startup sync tracker if user logs out
   useEffect(() => {
     if (!isAuthenticated) {
       startupSyncTriggered.current = false;
     }
   }, [isAuthenticated]);
 
-  // App Startup / Manual Reset Sync Trigger: Run when authenticated and ready
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    const shouldSync = (isAuthenticated && isAuthReady) && (!startupSyncTriggered.current || bootstrapStatus === 'not_started');
+    const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    const shouldSync = (isAuthenticated || isGuest) && isAuthReady && (!startupSyncTriggered.current || bootstrapStatus === 'not_started');
     
     if (shouldSync) {
       startupSyncTriggered.current = true;
-      if (__DEV__) console.log('[Sync Engine] Triggering sync sweep...');
       timer = setTimeout(() => {
-        triggerBackgroundSync(true); // Force to run even if paused/already synced this session
-      }, 500); // 500ms delay for state and UI to settle
+        triggerBackgroundSyncRef.current?.(true);
+      }, 500);
     }
 
     return () => {
@@ -747,33 +815,39 @@ export function useSyncEngine() {
         retryTimeoutRef.current = null;
       }
     };
-  }, [isAuthenticated, isAuthReady, bootstrapStatus, triggerBackgroundSync]);
+  }, [isAuthenticated, isAuthReady, bootstrapStatus]);
 
-  // Listen for network connectivity transitions to perform delayed session sync
   useEffect(() => {
     if (!isAuthenticated || !isAuthReady) return;
 
-    // If already synced this session, do not subscribe to reconnect triggers
     const state = usePlaylistStateStore.getState();
     if (state.hasSyncedThisSession) return;
-
-    if (__DEV__) console.log('[Sync Engine] Subscribing to NetInfo reconnection triggers...');
 
     const unsubscribe = NetInfo.addEventListener((netState) => {
       const isConnected = netState.isConnected && netState.isInternetReachable !== false;
       const currentState = usePlaylistStateStore.getState();
 
       if (isConnected && !currentState.hasSyncedThisSession) {
-        if (__DEV__) console.log('[Sync Engine] Network transition to ONLINE detected. Syncing...');
-        triggerBackgroundSync(true); // force it to run even if paused
+        triggerBackgroundSyncRef.current?.(true);
       }
     });
 
     return () => {
-      if (__DEV__) console.log('[Sync Engine] Unsubscribing from NetInfo reconnection triggers.');
       unsubscribe();
     };
-  }, [isAuthenticated, isAuthReady, triggerBackgroundSync]);
+  }, [isAuthenticated, isAuthReady]);
 
-  return { triggerBackgroundSync, validateEntityIntegrity, pauseLiveSync, resumeAndFlush };
+  useEffect(() => {
+    const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    if (!isAuthenticated || isGuest || !isAuthReady) return;
+    if (offlineActionQueue.length === 0 || usePlaylistStateStore.getState().isLiveSyncPaused) return;
+
+    const timer = setTimeout(() => {
+      triggerBackgroundSyncRef.current?.(true);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [offlineActionQueue.length, isAuthenticated, isAuthReady]);
+
+  return { triggerBackgroundSync, validateEntityIntegrity, pauseLiveSync, resumeAndFlush, executeFullResync };
 }

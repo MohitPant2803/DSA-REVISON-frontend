@@ -899,7 +899,7 @@ export default function PersonalScreen() {
                   playlist={pl}
                   onPress={() => {
                       router.push({
-                        pathname: '/(protected)/playlist/[playlistId]',
+                        pathname: '/(protected)/(tabs)/playlist/[playlistId]',
                         params: { playlistId: pl.id }
                       });
                   }}
@@ -961,7 +961,7 @@ export default function PersonalScreen() {
                   playlist={pl}
                   onPress={() => {
                     router.push({
-                      pathname: '/(protected)/playlist/[playlistId]',
+                      pathname: '/(protected)/(tabs)/playlist/[playlistId]',
                       params: { playlistId: pl.id }
                     });
                   }}

@@ -19,6 +19,7 @@ import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useGetFolders } from '@/hooks/useFolders';
+import { useSyncEngine } from '@/hooks/useSyncEngine';
 import * as reelsFeedService from '@/services/reelsFeedService';
 import { useQueryClient } from '@tanstack/react-query';
 import Animated, {
@@ -151,6 +152,7 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   const { user, login, logout } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const { triggerBackgroundSync } = useSyncEngine();
 
   const [shouldRender, setShouldRender] = useState(isOpen);
   const backdropOpacity = useSharedValue(0);
@@ -295,42 +297,23 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                   lightHaptic();
                   Alert.alert(
                     "Refresh Content",
-                    "This will refresh all cards and playlists from the database.",
+                    "This will refresh all cards and folders from the local seeder.",
                     [
                       { text: "Cancel", style: "cancel" },
                       {
                         text: "Refresh",
-                        onPress: () => {
+                        onPress: async () => {
                           try {
-                            const { usePlaylistStateStore } = require('@/store/usePlaylistStateStore');
-                            const storeState = usePlaylistStateStore.getState();
-                            
-                            // Retain local action queue so pending offline modifications aren't destroyed
-                            const offlineQueue = storeState.offlineActionQueue;
-                            
-                            // WIPE local cache entirely
-                            storeState.hardResetStore();
-                            
-                            // Clear lastSyncedAt and dbVersion to force full bootstrap on next sweep
-                            usePlaylistStateStore.setState({
-                              offlineActionQueue: offlineQueue,
-                              lastSyncedAt: null,
-                              dbVersion: null,
-                              hasSyncedThisSession: false,
-                              bootstrapStatus: 'not_started',
-                            });
+                            // Trigger a forced offline local seed refresh
+                            await triggerBackgroundSync(true);
 
                             Toast.show({
                               type: 'success',
                               text1: 'Content Refreshed',
+                              text2: 'All offline cards and folders have been updated.',
                             });
                             
-                            // Close settings overlay to trigger immediate react-query refetches
                             onClose();
-                            
-                            // Invalidate React Query caches to boot fresh
-                            const queryClient = useQueryClient();
-                            queryClient.invalidateQueries();
                           } catch (err) {
                             console.error('[Manual Refresh Error]', err);
                             Toast.show({

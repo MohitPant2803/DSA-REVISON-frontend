@@ -159,7 +159,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
   }, [slide.type]);
 
   const folderId =
-    typeof card.folderId === 'object' ? card.folderId._id : card.folderId;
+    typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;
 
   // Superadmin bypass for global CRUD
   const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
@@ -217,14 +217,14 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
           <StyledView className="gap-y-5">
             
             {/* Horizontal Segmented Slide Indicator Track */}
-            <StyledView className="flex-row gap-1 w-full mt-1 mb-2">
+            <StyledView className="flex-row gap-0.5 w-[50%] self-center mt-1 mb-2">
               {Array.from({ length: slide.totalSlides }).map((_, i) => {
                 const isActive = i === slide.slideIndex;
                 const isCompleted = i < slide.slideIndex;
                 return (
                   <StyledView 
                     key={i} 
-                    className={`h-1 flex-1 rounded-full ${
+                    className={`h-[2px] flex-1 rounded-full ${
                       isActive ? 'bg-violet-600' :
                       isCompleted ? 'bg-violet-200' :
                       'bg-slate-100'
@@ -260,26 +260,19 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
             {renderHeadline(slide.headline)}
 
             {/* 1. Intro / Cover & 2. Intuition / Explanation slide rendering */}
-            {(slide.type === 'intro' || slide.type === 'explanation' || slide.type === 'intuition') && (
+            {(slide.type === 'intro' || 
+              slide.type === 'explanation' || 
+              slide.type === 'intuition' ||
+              slide.type === 'core-intuition' ||
+              slide.type === 'deep-reasoning' ||
+              slide.type === 'visual-memory' ||
+              slide.type === 'elite-interview-insight') && (
               <StyledView className="gap-y-4">
                 <RichText
                   text={slide.body || card.explanation || ''}
                   style={{ color: '#475569', fontSize: 15, lineHeight: 24 }}
                   boldStyle={{ color: '#0F172A' }}
                 />
-                
-                {/* Premium Takeaways violet outline summary box */}
-                <StyledView className="bg-violet-50/40 rounded-2xl p-5 border border-violet-200/50 gap-4 mt-2">
-                  <StyledView className="flex-row items-center gap-2">
-                    <StyledView className="w-2.5 h-2.5 rounded-full bg-violet-500" />
-                    <StyledText className="text-violet-800 text-[14px] font-black tracking-tight uppercase">
-                      Core Intuition
-                    </StyledText>
-                  </StyledView>
-                  <StyledText className="text-slate-600 text-[13px] leading-relaxed">
-                    Identify the base boundaries of the problem. Caching states or iterating progressively allows building towards the optimal solution.
-                  </StyledText>
-                </StyledView>
               </StyledView>
             )}
 
@@ -297,9 +290,10 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
             )}
 
             {/* 3. Code Walkthrough slide (Progressive Highlights) */}
-            {slide.type === 'code' && card.code && (
+            {slide.type === 'code' && (slide.code || card.code) && (
               (() => {
                 const codeLang = 'cpp';
+                const activeCode = slide.code || card.code || '';
                 return (
                   <StyledView className="rounded-2xl border border-slate-800 overflow-hidden shadow-lg bg-[#0B0F19]">
                     {/* macOS Style Mock Header */}
@@ -327,7 +321,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                         // @ts-ignore
                         PreTag={Platform.OS === 'web' ? 'pre' : View}
                       >
-                        {card.code}
+                        {activeCode}
                       </SyntaxHighlighter>
                     ) : (
                       /* Premium macOS Code Mockup Skeleton Placeholder */
@@ -348,20 +342,175 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
               })()
             )}
 
-            {/* 4. Dry Run Step Timelines */}
-            {slide.type === 'dryrun' && card.examples?.length > 0 && (
-              <StyledView className="gap-3 mt-1">
-                <StyledText className="text-slate-400 text-[10px] font-black uppercase tracking-wider">
-                  💡 Step-by-Step Test Cases
-                </StyledText>
-                {card.examples.map((ex, i) => (
-                  <StyledView key={i} className="flex-row items-start gap-3 bg-slate-50/80 rounded-xl p-4 border border-slate-100">
-                    <StyledView className="w-5 h-5 rounded-full bg-violet-100 border border-violet-200 justify-center items-center mt-0.5">
-                      <StyledText className="text-violet-700 text-[10px] font-black">{i + 1}</StyledText>
-                    </StyledView>
-                    <RichText text={ex || ''} style={{ color: '#334155', fontSize: 14, lineHeight: 22, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', flex: 1 }} boldStyle={{ color: '#0F172A' }} />
+            {/* Pattern Trigger Recognition */}
+            {slide.type === 'pattern-recognition' && (
+              <StyledView className="gap-y-4">
+                <RichText
+                  text={slide.body || ''}
+                  style={{ color: '#475569', fontSize: 15, lineHeight: 24 }}
+                  boldStyle={{ color: '#0F172A' }}
+                />
+                {(slide as any).flashTags && (
+                  <StyledView className="flex-row flex-wrap gap-2 mt-2">
+                    {(slide as any).flashTags.map((tag: string, i: number) => (
+                      <StyledView key={i} className="px-3 py-1 rounded-full bg-blue-50 border border-blue-100">
+                        <StyledText className="text-blue-700 text-xs font-bold">#{tag}</StyledText>
+                      </StyledView>
+                    ))}
                   </StyledView>
-                ))}
+                )}
+              </StyledView>
+            )}
+
+            {/* 4. Dry Run Step Timelines & Interactive Grid */}
+            {(slide.type === 'dryrun' || slide.type === 'dry-run') && (
+              <StyledView className="gap-3 mt-1">
+                {/* Render Matrix Grid if present */}
+                {(slide as any).matrix && Array.isArray((slide as any).matrix) && (
+                  <StyledView className="items-center my-3">
+                    <StyledView className="bg-slate-100 p-3 rounded-2xl border border-slate-200">
+                      {(slide as any).matrix.map((row: any, rIdx: number) => (
+                        <StyledView key={rIdx} className="flex-row">
+                          {row.map((cell: any, cIdx: number) => (
+                            <StyledView
+                              key={cIdx}
+                              className={`w-10 h-10 border border-slate-300 m-0.5 justify-center items-center rounded-lg ${
+                                cell === 0 ? 'bg-rose-100 border-rose-300' : 'bg-white'
+                              }`}
+                            >
+                              <StyledText className={`font-black ${cell === 0 ? 'text-rose-700' : 'text-slate-800'}`}>
+                                {cell}
+                              </StyledText>
+                            </StyledView>
+                          ))}
+                        </StyledView>
+                      ))}
+                    </StyledView>
+                  </StyledView>
+                )}
+
+                {/* Render Steps */}
+                {(((slide as any).steps && (slide as any).steps.length > 0) || (card.examples && card.examples.length > 0)) && (
+                  <StyledView className="gap-3">
+                    <StyledText className="text-slate-400 text-[10px] font-black uppercase tracking-wider">
+                      💡 Step-by-Step State Execution
+                    </StyledText>
+                    {((slide as any).steps || card.examples).map((ex: string, i: number) => (
+                      <StyledView key={i} className="flex-row items-start gap-3 bg-slate-50/80 rounded-xl p-4 border border-slate-100">
+                        <StyledView className="w-5 h-5 rounded-full bg-violet-100 border border-violet-200 justify-center items-center mt-0.5">
+                          <StyledText className="text-violet-700 text-[10px] font-black">{i + 1}</StyledText>
+                        </StyledView>
+                        <RichText text={ex || ''} style={{ color: '#334155', fontSize: 14, lineHeight: 22, flex: 1 }} boldStyle={{ color: '#0F172A' }} />
+                      </StyledView>
+                    ))}
+                  </StyledView>
+                )}
+
+                {/* Key Observation Highlight */}
+                {(slide as any).keyObservation && (
+                  <StyledView className="bg-amber-50 border border-amber-200 rounded-xl p-4 mt-2">
+                    <StyledText className="text-amber-800 text-[10px] font-black uppercase tracking-widest mb-1">🔑 Key Observation</StyledText>
+                    <StyledText className="text-amber-900 text-sm leading-relaxed font-semibold">{(slide as any).keyObservation}</StyledText>
+                  </StyledView>
+                )}
+              </StyledView>
+            )}
+
+            {/* Algorithm Blueprint Breakdown */}
+            {slide.type === 'algorithm-breakdown' && (
+              <StyledView className="gap-3 mt-1">
+                {(slide as any).steps && (
+                  <StyledView className="gap-3">
+                    <StyledText className="text-slate-400 text-[10px] font-black uppercase tracking-wider">
+                      🧩 Algorithmic Blueprint Steps
+                    </StyledText>
+                    {(slide as any).steps.map((step: string, i: number) => (
+                      <StyledView key={i} className="flex-row items-start gap-3 bg-violet-50/20 rounded-xl p-4 border border-violet-100/50">
+                        <StyledView className="w-5 h-5 rounded-full bg-violet-100 justify-center items-center mt-0.5">
+                          <StyledText className="text-violet-700 text-[10px] font-black">{i + 1}</StyledText>
+                        </StyledView>
+                        <RichText text={step || ''} style={{ color: '#334155', fontSize: 14, lineHeight: 22, flex: 1 }} boldStyle={{ color: '#0F172A' }} />
+                      </StyledView>
+                    ))}
+                  </StyledView>
+                )}
+                {(slide as any).mentalCompression && (
+                  <StyledView className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 mt-2">
+                    <StyledText className="text-emerald-800 text-[10px] font-black uppercase tracking-widest mb-1">💡 Mental Compression</StyledText>
+                    <StyledText className="text-emerald-900 text-sm leading-relaxed font-bold">{(slide as any).mentalCompression}</StyledText>
+                  </StyledView>
+                )}
+              </StyledView>
+            )}
+
+            {/* Bugs, Mistakes & Pitfalls */}
+            {slide.type === 'pitfalls' && (
+              <StyledView className="gap-4">
+                {(slide as any).mistakes && (
+                  <StyledView className="gap-2">
+                    <StyledText className="text-rose-500 text-[10px] font-black uppercase tracking-wider">
+                      ⚠️ Common Bugs & Rookie Mistakes
+                    </StyledText>
+                    {(slide as any).mistakes.map((mistake: string, i: number) => (
+                      <StyledView key={i} className="flex-row items-start gap-2 bg-rose-50/50 rounded-xl p-3 border border-rose-100/80">
+                        <StyledText className="text-rose-600 font-bold mt-0.5">❌</StyledText>
+                        <StyledText className="text-rose-900 text-sm leading-relaxed flex-1">{mistake}</StyledText>
+                      </StyledView>
+                    ))}
+                  </StyledView>
+                )}
+
+                {(slide as any).interviewerQuestions && (
+                  <StyledView className="gap-2 mt-2">
+                    <StyledText className="text-violet-500 text-[10px] font-black uppercase tracking-wider">
+                      ❓ Potential Interviewer Follow-ups
+                    </StyledText>
+                    {(slide as any).interviewerQuestions.map((q: string, i: number) => (
+                      <StyledView key={i} className="flex-row items-start gap-3 bg-violet-50/30 rounded-xl p-3 border border-violet-100/50">
+                        <StyledView className="w-5 h-5 rounded-full bg-violet-100 justify-center items-center mt-0.5">
+                          <StyledText className="text-violet-700 text-[10px] font-black">?</StyledText>
+                        </StyledView>
+                        <StyledText className="text-violet-950 text-sm leading-relaxed font-bold flex-1">{q}</StyledText>
+                      </StyledView>
+                    ))}
+                  </StyledView>
+                )}
+              </StyledView>
+            )}
+
+            {/* Spaced Recall Timeframes */}
+            {slide.type === 'revision' && (
+              <StyledView className="gap-4">
+                {(slide as any).recall && (
+                  <StyledView className="gap-3">
+                    <StyledText className="text-slate-400 text-[10px] font-black uppercase tracking-wider">
+                      ⚡ Rapid Recall Compression
+                    </StyledText>
+                    {Object.entries((slide as any).recall).map(([time, text]: any, i) => (
+                      <StyledView key={i} className="flex-row items-start gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <StyledView className="px-2 py-0.5 rounded bg-violet-100 border border-violet-200 mt-0.5">
+                          <StyledText className="text-violet-700 text-[9px] font-black uppercase">{time}</StyledText>
+                        </StyledView>
+                        <StyledText className="text-slate-700 text-sm leading-relaxed flex-1 font-medium">{text}</StyledText>
+                      </StyledView>
+                    ))}
+                  </StyledView>
+                )}
+
+                {(slide as any).patternConnections && (
+                  <StyledView className="gap-2 mt-2">
+                    <StyledText className="text-slate-400 text-[10px] font-black uppercase tracking-wider">
+                      🔗 Pattern Connections & Similar Problems
+                    </StyledText>
+                    <StyledView className="flex-row flex-wrap gap-2">
+                      {(slide as any).patternConnections.map((problem: string, i: number) => (
+                        <StyledView key={i} className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
+                          <StyledText className="text-slate-700 text-xs font-bold">🔗 {problem}</StyledText>
+                        </StyledView>
+                      ))}
+                    </StyledView>
+                  </StyledView>
+                )}
               </StyledView>
             )}
 
@@ -402,13 +551,15 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                   </StyledView>
                 </StyledView>
                 
-                <StyledView className="bg-slate-50 border border-slate-100 rounded-xl p-4 mt-2">
-                  <RichText
-                    text="💡 **Note**: Optimal algorithms aim to minimize space complexity to O(1) in-place adjustments, while caching indices if a speed lookup tradeoff is desired."
-                    style={{ color: '#64748B', fontSize: 11, lineHeight: 18 }}
-                    boldStyle={{ color: '#334155' }}
-                  />
-                </StyledView>
+                {slide.body ? (
+                  <StyledView className="bg-slate-50 border border-slate-100 rounded-xl p-4 mt-2">
+                    <RichText
+                      text={slide.body}
+                      style={{ color: '#64748B', fontSize: 11, lineHeight: 18 }}
+                      boldStyle={{ color: '#334155' }}
+                    />
+                  </StyledView>
+                ) : null}
               </StyledView>
             )}
 
@@ -430,11 +581,12 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                     />
                   </StyledView>
                 ) : (
-                  <StyledView className="border-2 border-dashed border-slate-200 rounded-2xl p-8 items-center justify-center bg-slate-50">
-                    <BrainCircuit color="#94A3B8" size={32} />
-                    <StyledText className="text-slate-400 text-[11px] text-center mt-2 leading-relaxed font-medium">
-                      Dynamic stack representation is mapped conceptually. Let the core pointer transitions guide your tracing bounds.
-                    </StyledText>
+                  <StyledView className="border border-slate-200 rounded-2xl p-6 bg-slate-50/60 justify-center">
+                    <RichText
+                      text={slide.body || 'Dynamic stack representation is mapped conceptually. Let the core pointer transitions guide your tracing bounds.'}
+                      style={{ color: '#475569', fontSize: 13, lineHeight: 20 }}
+                      boldStyle={{ color: '#0F172A' }}
+                    />
                   </StyledView>
                 )}
               </StyledView>
