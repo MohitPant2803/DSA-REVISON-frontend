@@ -1351,7 +1351,7 @@
   "revisionCards": [
     {
       "_id": "6a1655fbb129b168bb16bb45",
-      "title": "Set Matrix Zeroes",
+      "title": "Set Matrix Rows and Columns to Zero if Element is Zero",
       "topic": "Arrays",
       "subtopic": "Matrix Manipulation",
       "tags": [
@@ -1370,9 +1370,9 @@
         {
           "_id": "6a1682000000000000000001",
           "type": "intro",
-          "headline": "Set Matrix Zeroes",
+          "headline": "Set Matrix Rows and Columns to Zero if Element is Zero: Snapshot",
           "emotion": "curiosity",
-          "body": "⚡ Collapse rows and columns containing zeros to zero in-place.\n\n`[1,1,1]`     `[1,0,1]`\n`[1,0,1]`  ➔  `[0,0,0]`\n`[1,1,1]`     `[1,0,1]`\n\n🧠 Recall:\n- Reuse first row and first column as markers\n- Use `col0` separately to track column 0\n- Traverse backwards to prevent early marker overwrites",
+          "body": "**Problem Statement**:\nGiven an `m x n` integer matrix, if any element is `0`, set its entire row and column to `0`'s in-place without using a duplicate matrix.\n\n💡 **Simplified Analogy**:\nImagine an infected computer in a grid network: one zero infects its entire row and column like a cascading chain reaction.\n\n👉 *But wait... brute force requires auxiliary arrays. Let's see how we can optimize this to constant O(1) extra space!*",
           "visualCue": "Matrix explosion animation from a single zero.",
           "memoryHook": "One zero infects its row and column.",
           "transition": "So how do we remember which rows and columns must become zero without using extra arrays?",
@@ -1548,7 +1548,7 @@
     },
     {
       "_id": "6a1655fbb129b168bb16bb4f",
-      "title": "Pascal's Triangle",
+      "title": "Generate Pascal's Triangle",
       "topic": "Arrays",
       "explanation": "Given an integer `numRows`, generate and return the first `numRows` of Pascal's Triangle. In this triangle, every row starts and ends with the value `1`. Each middle element is constructed by summing the two adjacent parent numbers directly above it.\n\n🔺 **Example**:\nInput: `numRows = 4`\nOutput: `[[1], [1,1], [1,2,1], [1,3,3,1]]`",
       "code": "vector<vector<int>> generate(int numRows) {\n    vector<vector<int>> triangle;\n\n    for (int row = 0; row < numRows; row++) {\n        vector<int> currentRow(row + 1, 1);\n\n        for (int col = 1; col < row; col++) {\n            currentRow[col] =\n                triangle[row - 1][col - 1] +\n                triangle[row - 1][col];\n        }\n\n        triangle.push_back(currentRow);\n    }\n\n    return triangle;\n}",
@@ -1570,9 +1570,9 @@
         {
           "_id": "6a1655fbb129b168bb16bc50",
           "type": "intro",
-          "headline": "Pascal’s Triangle",
+          "headline": "Generate Pascal's Triangle: Snapshot",
           "emotion": "curiosity",
-          "body": "🔺 Every element is formed using the TWO elements above it.\n\n`[1]`\n`[1,1]`\n`[1,2,1]`\n`[1,3,3,1]`\n\n🧠 Recall:\n- Boundary values are always `1`\n- Middle = top-left + top-right\n- Build current row from previous row",
+          "body": "**Problem Statement**:\nGiven an integer `numRows`, generate and return the first `numRows` rows of Pascal's Triangle in-place.\n\n💡 **Simplified Analogy**:\nLike a cascading waterfall: each level is constructed by summing adjacent numbers flowing from the level directly above it.\n\n👉 *But wait... how do we construct this row-by-row dynamically without arithmetic overflows? Let's check!*",
           "visualCue": "Growing pyramid structure starting from a single 1.",
           "memoryHook": "Each brick sits on two parent bricks.",
           "transition": "When should we instantly recognize this structure in coding tests?",
@@ -1754,7 +1754,7 @@
     },
     {
       "_id": "6a1655fbb129b168bb16bb59",
-      "title": "Next Permutation",
+      "title": "Find Next Lexicographical Permutation",
       "topic": "Arrays",
       "explanation": "Rearrange numbers into the lexicographically next greater permutation of numbers.",
       "code": "void nextPermutation(vector<int>& nums) {\n    int i = nums.size() - 2;\n    while (i >= 0 && nums[i] >= nums[i + 1]) i--;\n    if (i >= 0) {\n        int j = nums.size() - 1;\n        while (nums[j] <= nums[i]) j--;\n        swap(nums[i], nums[j]);\n    }\n    reverse(nums.begin() + i + 1, nums.end());\n}",
@@ -1795,7 +1795,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Next Permutation: Snapshot",
+          "headline": "Find Next Lexicographical Permutation: Snapshot",
           "body": "**Problem Statement**:\nRearrange numbers into the lexicographically next greater permutation of numbers.\n\n💡 **Simplified Analogy**:\nLike sorting words alphabetically: we want to find the next alphabetical arrangement by tweaking only the rightmost characters.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fbb129b168bb16bb5a",
@@ -1874,7 +1874,7 @@
     },
     {
       "_id": "6a1655fbb129b168bb16bb63",
-      "title": "Kadane's Algorithm",
+      "title": "Find Maximum Subarray Sum",
       "topic": "Arrays",
       "explanation": "Find the contiguous subarray with the largest sum and return its sum.",
       "code": "int maxSubArray(vector<int>& nums) {\n    int maxSoFar = nums[0];\n    int currentMax = nums[0];\n    for (size_t i = 1; i < nums.size(); i++) {\n        currentMax = max(nums[i], currentMax + nums[i]);\n        maxSoFar = max(maxSoFar, currentMax);\n    }\n    return maxSoFar;\n}",
@@ -1914,7 +1914,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Kadane's Algorithm: Snapshot",
+          "headline": "Find Maximum Subarray Sum: Snapshot",
           "body": "**Problem Statement**:\nFind the contiguous subarray with the largest sum and return its sum.\n\n💡 **Simplified Analogy**:\nImagine climbing a mountain trail where some steps are steep descents. If your energy hits absolute bottom, it is better to reset and start walking from the current sunny peak.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fbb129b168bb16bb64",
@@ -1993,7 +1993,7 @@
     },
     {
       "_id": "6a1655fbb129b168bb16bb6d",
-      "title": "Sort Colors (Sort 0s, 1s, 2s)",
+      "title": "Sort Array of 0s, 1s, and 2s in-place",
       "topic": "Arrays",
       "explanation": "Sort an array of red, white, and blue elements in-place (Dutch National Flag problem).",
       "code": "void sortColors(vector<int>& nums) {\n    int low = 0, mid = 0, high = nums.size() - 1;\n    while (mid <= high) {\n        if (nums[mid] == 0) {\n            swap(nums[low], nums[mid]);\n            low++; mid++;\n        } else if (nums[mid] == 1) {\n            mid++;\n        } else {\n            swap(nums[mid], nums[high]);\n            high--;\n        }\n    }\n}",
@@ -2033,7 +2033,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Sort Colors (Sort 0s, 1s, 2s): Snapshot",
+          "headline": "Sort Array of 0s, 1s, and 2s in-place: Snapshot",
           "body": "**Problem Statement**:\nSort an array of red, white, and blue elements in-place (Dutch National Flag problem).\n\n💡 **Simplified Analogy**:\nLike sorting red, white, and blue marbles by sweeping whites to the center, reds to the left, and blues to the right.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fbb129b168bb16bb6e",
@@ -2112,7 +2112,7 @@
     },
     {
       "_id": "6a1655fbb129b168bb16bb77",
-      "title": "Stock Buy and Sell",
+      "title": "Find Maximum Profit from Stock Buy and Sell",
       "topic": "Arrays",
       "explanation": "Find the maximum profit possible by buying and selling a single stock in-place.",
       "code": "int maxProfit(vector<int>& prices) {\n    int minPrice = INT_MAX;\n    int maxProfit = 0;\n    for (int price : prices) {\n        if (price < minPrice) {\n            minPrice = price;\n        } else {\n            maxProfit = max(maxProfit, price - minPrice);\n        }\n    }\n    return maxProfit;\n}",
@@ -2151,7 +2151,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Stock Buy and Sell: Snapshot",
+          "headline": "Find Maximum Profit from Stock Buy and Sell: Snapshot",
           "body": "**Problem Statement**:\nFind the maximum profit possible by buying and selling a single stock in-place.\n\n💡 **Simplified Analogy**:\nImagine scanning a mountain map from left to right, maintaining a record of the deepest valley you walked past and checking the heights relative to it.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fbb129b168bb16bb78",
@@ -2230,7 +2230,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bb81",
-      "title": "Rotate Image/Matrix",
+      "title": "Rotate Matrix by 90 Degrees Clockwise in-place",
       "topic": "Arrays",
       "explanation": "Rotate a 2D matrix representing an image by 90 degrees clockwise in-place.",
       "code": "void rotate(vector<vector<int>>& matrix) {\n    int n = matrix.size();\n    for (int i = 0; i < n; i++) {\n        for (int j = i + 1; j < n; j++) {\n            swap(matrix[i][j], matrix[j][i]);\n        }\n    }\n    for (int i = 0; i < n; i++) {\n        reverse(matrix[i].begin(), matrix[i].end());\n    }\n}",
@@ -2270,7 +2270,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Rotate Image/Matrix: Snapshot",
+          "headline": "Rotate Matrix by 90 Degrees Clockwise in-place: Snapshot",
           "body": "**Problem Statement**:\nRotate a 2D matrix representing an image by 90 degrees clockwise in-place.\n\n💡 **Simplified Analogy**:\nLike folding a square paper along its diagonal crease, and then flipping it left to right to mirror it.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bb82",
@@ -2349,7 +2349,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bb8b",
-      "title": "Merge Overlapping Subintervals",
+      "title": "Merge Overlapping Intervals",
       "topic": "Arrays",
       "explanation": "Merge all overlapping intervals and return an array of the non-overlapping intervals.",
       "code": "vector<vector<int>> merge(vector<vector<int>>& intervals) {\n    if (intervals.size() <= 1) return intervals;\n    sort(intervals.begin(), intervals.end());\n    vector<vector<int>> merged = {intervals[0]};\n    for (size_t i = 1; i < intervals.size(); i++) {\n        auto& last = merged.back();\n        auto& current = intervals[i];\n        if (current[0] <= last[1]) {\n            last[1] = max(last[1], current[1]);\n        } else {\n            merged.push_back(current);\n        }\n    }\n    return merged;\n}",
@@ -2389,7 +2389,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Merge Overlapping Subintervals: Snapshot",
+          "headline": "Merge Overlapping Intervals: Snapshot",
           "body": "**Problem Statement**:\nMerge all overlapping intervals and return an array of the non-overlapping intervals.\n\n💡 **Simplified Analogy**:\nLike scheduling meetings on a calendar: if meeting B starts before meeting A finishes, block out the entire merged duration.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bb8c",
@@ -2468,7 +2468,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bb95",
-      "title": "Merge Sorted Array Without Extra Space",
+      "title": "Merge Two Sorted Arrays in-place Without Extra Space",
       "topic": "Arrays",
       "explanation": "Merge two sorted arrays into one sorted array in-place without using extra memory.",
       "code": "void merge(vector<int>& nums1, int m, vector<int>& nums2, int n) {\n    int i = m - 1, j = n - 1, k = m + n - 1;\n    while (j >= 0) {\n        if (i >= 0 && nums1[i] > nums2[j]) {\n            nums1[k--] = nums1[i--];\n        } else {\n            nums1[k--] = nums2[j--];\n        }\n    }\n}",
@@ -2508,7 +2508,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Merge Sorted Array Without Extra Space: Snapshot",
+          "headline": "Merge Two Sorted Arrays in-place Without Extra Space: Snapshot",
           "body": "**Problem Statement**:\nMerge two sorted arrays into one sorted array in-place without using extra memory.\n\n💡 **Simplified Analogy**:\nImagine two lines of students arranged by height. The tall students at the back of the first line are shifted backward to make room for shorter ones from the second line.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bb96",
@@ -2587,7 +2587,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bb9f",
-      "title": "Find the Duplicate Number",
+      "title": "Find the Single Duplicate Number in N+1 Array",
       "topic": "Arrays",
       "explanation": "Given an array containing N+1 integers where each integer is between 1 and N, find the single duplicate number in O(1) space.",
       "code": "int findDuplicate(vector<int>& nums) {\n    int slow = nums[0], fast = nums[0];\n    do {\n        slow = nums[slow];\n        fast = nums[nums[fast]];\n    } while (slow != fast);\n    slow = nums[0];\n    while (slow != fast) {\n        slow = nums[slow];\n        fast = nums[fast];\n    }\n    return slow;\n}",
@@ -2627,7 +2627,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Find the Duplicate Number: Snapshot",
+          "headline": "Find the Single Duplicate Number in N+1 Array: Snapshot",
           "body": "**Problem Statement**:\nGiven an array containing N+1 integers where each integer is between 1 and N, find the single duplicate number in O(1) space.\n\n💡 **Simplified Analogy**:\nLike a track race: if two runners travel at different speeds on a track with a loop, they will meet inside the loop. The loop entrance is the duplicate value.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bba0",
@@ -2706,7 +2706,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bba9",
-      "title": "Repeat and Missing Number",
+      "title": "Find Repeating and Missing Number in Array",
       "topic": "Arrays",
       "explanation": "Find the repeating and missing numbers in an array of size N containing values from 1 to N.",
       "code": "vector<int> findErrorNums(vector<int>& nums) {\n    long long n = nums.size();\n    long long sum = 0, sqSum = 0;\n    long long expectedSum = (n * (n + 1)) / 2;\n    long long expectedSqSum = (n * (n + 1) * (2 * n + 1)) / 6;\n    for (int num : nums) {\n        sum += num;\n        sqSum += 1LL * num * num;\n    }\n    long long diff = sum - expectedSum; // x - y\n    long long sqDiff = sqSum - expectedSqSum; // x^2 - y^2\n    long long sumXY = sqDiff / diff; // x + y\n    long long x = (diff + sumXY) / 2;\n    long long y = sumXY - x;\n    return {(int)x, (int)y}; // [Repeating, Missing]\n}",
@@ -2746,7 +2746,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Repeat and Missing Number: Snapshot",
+          "headline": "Find Repeating and Missing Number in Array: Snapshot",
           "body": "**Problem Statement**:\nFind the repeating and missing numbers in an array of size N containing values from 1 to N.\n\n💡 **Simplified Analogy**:\nLike auditing a bank ledger: checking both the total cash sum and the squared transaction total to isolate exactly who duplicated and who is missing.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbaa",
@@ -2825,7 +2825,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbb3",
-      "title": "Inversion of Array",
+      "title": "Count Inversions in an Array",
       "topic": "Arrays",
       "explanation": "Count the number of inversions in an array. Two elements form an inversion if a[i] > a[j] and i < j.",
       "code": "auto countInversions(auto arr) {\n  auto mergeSort(auto temp, auto left, auto right) {\n    if (left >= right) return 0;\n    const auto mid = ((left + right) / 2);\n    auto invCount = 0;\n    invCount += mergeSort(temp, left, mid);\n    invCount += mergeSort(temp, mid + 1, right);\n    invCount += merge(temp, left, mid, right);\n    return invCount;\n  }\n  auto merge(auto temp, auto left, auto mid, auto right) {\n    auto i = left, j = mid + 1, k = left, inv = 0;\n    while (i <= mid && j <= right) {\n      if (arr[i] <= arr[j]) {\n        temp[k++] = arr[i++];\n      } else {\n        temp[k++] = arr[j++];\n        inv += (mid - i + 1);\n      }\n    }\n    while (i <= mid) temp[k++] = arr[i++];\n    while (j <= right) temp[k++] = arr[j++];\n    for (auto x = left; x <= right; x++) arr[x] = temp[x];\n    return inv;\n  }\n  return mergeSort(new Array(arr.size()), 0, arr.size() - 1);\n}",
@@ -2865,7 +2865,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Inversion of Array: Snapshot",
+          "headline": "Count Inversions in an Array: Snapshot",
           "body": "**Problem Statement**:\nCount the number of inversions in an array. Two elements form an inversion if a[i] > a[j] and i < j.\n\n💡 **Simplified Analogy**:\nImagine measuring how messy a stack of books is: count how many times you would have to swap adjacent books to get them sorted.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbb4",
@@ -2944,7 +2944,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbbd",
-      "title": "Search a 2D Matrix",
+      "title": "Search in a Sorted 2D Matrix",
       "topic": "Arrays",
       "explanation": "Search for a target value in an MxN matrix where rows and columns are sorted.",
       "code": "bool searchMatrix(auto matrix, auto target) {\n  if (!matrix.size()) return false;\n  const auto rows = matrix.size(), cols = matrix[0].size();\n  auto low = 0, high = rows * cols - 1;\n  while (low <= high) {\n    const auto mid = ((low + high) / 2);\n    const auto r = (mid / cols), c = mid % cols;\n    if (matrix[r][c] == target) return true;\n    if (matrix[r][c] < target) low = mid + 1;\n    else high = mid - 1;\n  }\n  return false;\n}",
@@ -2985,7 +2985,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Search a 2D Matrix: Snapshot",
+          "headline": "Search in a Sorted 2D Matrix: Snapshot",
           "body": "**Problem Statement**:\nSearch for a target value in an MxN matrix where rows and columns are sorted.\n\n💡 **Simplified Analogy**:\nLike searching for a page in a multi-volume book set: treat all pages across all volumes as one continuous sequence.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbbe",
@@ -3064,7 +3064,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbc7",
-      "title": "Pow(x, n)",
+      "title": "Calculate x Raised to the Power n",
       "topic": "Arrays",
       "explanation": "Implement pow(x, n), which calculates x raised to the power n.",
       "code": "auto myPow(auto x, auto n) {\n  if (n == 0) return 1.0;\n  auto nn = n < 0 ? -n : n;\n  auto ans = 1.0;\n  while (nn > 0) {\n    if (nn % 2 == 1) {\n      ans = ans * x;\n      nn = nn - 1;\n    } else {\n      x = x * x;\n      nn = nn / 2;\n    }\n  }\n  return n < 0 ? 1.0 / ans : ans;\n}",
@@ -3105,7 +3105,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Pow(x, n): Snapshot",
+          "headline": "Calculate x Raised to the Power n: Snapshot",
           "body": "**Problem Statement**:\nImplement pow(x, n), which calculates x raised to the power n.\n\n💡 **Simplified Analogy**:\nInstead of printing a book 8 times, print a double-sided version 4 times, then double it again to save half the printing steps.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbc8",
@@ -3184,7 +3184,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbd1",
-      "title": "Majority Element (>N/2)",
+      "title": "Find Majority Element appearing more than N/2 times",
       "topic": "Arrays",
       "explanation": "Find the element that appears more than N/2 times in an array.",
       "code": "auto majorityElement(auto nums) {\n  auto count = 0, candidate = nullptr;\n  for (auto i = 0; i < nums.size(); i++) {\n    if (count == 0) candidate = nums[i];\n    count += (nums[i] == candidate) ? 1 : -1;\n  }\n  return candidate;\n}",
@@ -3223,7 +3223,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Majority Element (>N/2): Snapshot",
+          "headline": "Find Majority Element appearing more than N/2 times: Snapshot",
           "body": "**Problem Statement**:\nFind the element that appears more than N/2 times in an array.\n\n💡 **Simplified Analogy**:\nImagine a political debate room where every speaker opposes candidates from other parties. The majority party candidate will survive the debate.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbd2",
@@ -3302,7 +3302,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbdb",
-      "title": "Majority Element II (>N/3)",
+      "title": "Find Majority Elements appearing more than N/3 times",
       "topic": "Arrays",
       "explanation": "Find all elements that appear more than N/3 times in an array.",
       "code": "auto majorityElement(auto nums) {\n  auto num1 = nullptr, num2 = nullptr, c1 = 0, c2 = 0;\n  for (auto i = 0; i < nums.size(); i++) {\n    const auto val = nums[i];\n    if (val == num1) c1++;\n    else if (val == num2) c2++;\n    else if (c1 == 0) { num1 = val; c1 = 1; }\n    else if (c2 == 0) { num2 = val; c2 = 1; }\n    else { c1--; c2--; }\n  }\n  c1 = 0; c2 = 0;\n  for (auto i = 0; i < nums.size(); i++) {\n    if (nums[i] == num1) c1++;\n    else if (nums[i] == num2) c2++;\n  }\n  const auto result = [];\n  if (c1 > (nums.size() / 3)) result.push(num1);\n  if (c2 > (nums.size() / 3)) result.push(num2);\n  return result;\n}",
@@ -3341,7 +3341,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Majority Element II (>N/3): Snapshot",
+          "headline": "Find Majority Elements appearing more than N/3 times: Snapshot",
           "body": "**Problem Statement**:\nFind all elements that appear more than N/3 times in an array.\n\n💡 **Simplified Analogy**:\nLike a three-way political race. At most two candidates can have more than one-third of all votes.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbdc",
@@ -3420,7 +3420,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbe5",
-      "title": "Grid Unique Paths",
+      "title": "Count Unique Paths from Top-Left to Bottom-Right",
       "topic": "Arrays",
       "explanation": "Calculate the number of unique paths from the top-left corner of an MxN grid to the bottom-right corner.",
       "code": "auto uniquePaths(auto m, auto n) {\n  const auto dp = new Array(n).fill(1);\n  for (auto i = 1; i < m; i++) {\n    for (auto j = 1; j < n; j++) {\n      dp[j] = dp[j] + dp[j - 1];\n    }\n  }\n  return dp[n - 1];\n}",
@@ -3460,7 +3460,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Grid Unique Paths: Snapshot",
+          "headline": "Count Unique Paths from Top-Left to Bottom-Right: Snapshot",
           "body": "**Problem Statement**:\nCalculate the number of unique paths from the top-left corner of an MxN grid to the bottom-right corner.\n\n💡 **Simplified Analogy**:\nImagine a courier delivering packages through a grid of city blocks, moving only east or south.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbe6",
@@ -3539,7 +3539,7 @@
     },
     {
       "_id": "6a1655fcb129b168bb16bbef",
-      "title": "Reverse Pairs",
+      "title": "Count Reverse Pairs where nums[i] > 2 * nums[j]",
       "topic": "Arrays",
       "explanation": "Count the number of reverse pairs where i < j and nums[i] > 2 * nums[j].",
       "code": "auto reversePairs(auto nums) {\n  auto mergeSort(auto left, auto right) {\n    if (left >= right) return 0;\n    const auto mid = ((left + right) / 2);\n    auto count = mergeSort(left, mid) + mergeSort(mid + 1, right);\n    auto j = mid + 1;\n    for (auto i = left; i <= mid; i++) {\n      while (j <= right && nums[i] > 2 * nums[j]) j++;\n      count += (j - (mid + 1));\n    }\n    merge(left, mid, right);\n    return count;\n  }\n  auto merge(auto left, auto mid, auto right) {\n    const auto temp = [];\n    auto i = left, j = mid + 1;\n    while (i <= mid && j <= right) {\n      if (nums[i] <= nums[j]) temp.push(nums[i++]);\n      else temp.push(nums[j++]);\n    }\n    while (i <= mid) temp.push(nums[i++]);\n    while (j <= right) temp.push(nums[j++]);\n    for (auto x = left; x <= right; x++) nums[x] = temp[x - left];\n  }\n  return mergeSort(0, nums.size() - 1);\n}",
@@ -3579,7 +3579,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Reverse Pairs: Snapshot",
+          "headline": "Count Reverse Pairs where nums[i] > 2 * nums[j]: Snapshot",
           "body": "**Problem Statement**:\nCount the number of reverse pairs where i < j and nums[i] > 2 * nums[j].\n\n💡 **Simplified Analogy**:\nSimilar to counting inversions, but here you only count when an element is more than twice as large as the other.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fcb129b168bb16bbf0",
@@ -3658,7 +3658,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bbf9",
-      "title": "Two Sum",
+      "title": "Find Two Indices that Sum to Target",
       "topic": "Arrays",
       "explanation": "Find two indices in an array that add up to a specific target.",
       "code": "vector<int> twoSum(vector<int>& nums, int target) {\n    unordered_map<int, int> m;\n    for (int i = 0; i < nums.size(); i++) {\n        int diff = target - nums[i];\n        if (m.find(diff) != m.end()) {\n            return {m[diff], i};\n        }\n        m[nums[i]] = i;\n    }\n    return {};\n}",
@@ -3698,7 +3698,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Two Sum: Snapshot",
+          "headline": "Find Two Indices that Sum to Target: Snapshot",
           "body": "**Problem Statement**:\nFind two indices in an array that add up to a specific target.\n\n💡 **Simplified Analogy**:\nLike matching coats at a cloakroom: when a guest checks in, search the logbook for their complement number.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bbfa",
@@ -3777,7 +3777,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bc03",
-      "title": "4-Sum",
+      "title": "Find all Unique Quadruplets that Sum to Target",
       "topic": "Arrays",
       "explanation": "Find all unique quadruplets in the array which sum to target.",
       "code": "auto fourSum(auto nums, auto target) {\n  nums.sort((a, b) => a - b);\n  const auto result = [];\n  const auto n = nums.size();\n  for (auto i = 0; i < n; i++) {\n    if (i > 0 && nums[i] == nums[i - 1]) continue;\n    for (auto j = i + 1; j < n; j++) {\n      if (j > i + 1 && nums[j] == nums[j - 1]) continue;\n      auto left = j + 1, right = n - 1;\n      while (left < right) {\n        const auto sum = nums[i] + nums[j] + nums[left] + nums[right];\n        if (sum == target) {\n          result.push([nums[i], nums[j], nums[left], nums[right]]);\n          while (left < right && nums[left] == nums[left + 1]) left++;\n          while (left < right && nums[right] == nums[right - 1]) right--;\n          left++; right--;\n        } else if (sum < target) left++;\n        else right--;\n      }\n    }\n  }\n  return result;\n}",
@@ -3817,7 +3817,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "4-Sum: Snapshot",
+          "headline": "Find all Unique Quadruplets that Sum to Target: Snapshot",
           "body": "**Problem Statement**:\nFind all unique quadruplets in the array which sum to target.\n\n💡 **Simplified Analogy**:\nLike organizing a 4-member committee where members are grouped to achieve a net-zero impact.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bc04",
@@ -3896,7 +3896,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bc0d",
-      "title": "Longest Consecutive Sequence",
+      "title": "Find Longest Consecutive Elements Sequence",
       "topic": "Arrays",
       "explanation": "Find the length of the longest consecutive elements sequence in an unsorted array.",
       "code": "int longestConsecutive(vector<int>& nums) {\n    unordered_set<int> s(nums.begin(), nums.end());\n    int maxLen = 0;\n    for (int num : s) {\n        if (s.find(num - 1) == s.end()) {\n            int currentNum = num, currentLen = 1;\n            while (s.find(currentNum + 1) != s.end()) {\n                currentNum++;\n                currentLen++;\n            }\n            maxLen = max(maxLen, currentLen);\n        }\n    }\n    return maxLen;\n}",
@@ -3936,7 +3936,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Longest Consecutive Sequence: Snapshot",
+          "headline": "Find Longest Consecutive Elements Sequence: Snapshot",
           "body": "**Problem Statement**:\nFind the length of the longest consecutive elements sequence in an unsorted array.\n\n💡 **Simplified Analogy**:\nImagine tracing paths of stepping stones. Start tracing only from the very first stone of a path (the one with no stone behind it).\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bc0e",
@@ -4015,7 +4015,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bc17",
-      "title": "Longest Subarray with 0 Sum",
+      "title": "Find Longest Subarray with Zero Sum",
       "topic": "Arrays",
       "explanation": "Find the length of the longest subarray with a sum equal to 0.",
       "code": "int maxLen(auto arr) {\n  const auto map = unordered_map<int, int>();\n  auto maxLen = 0, sum = 0;\n  for (auto i = 0; i < arr.size(); i++) {\n    sum += arr[i];\n    if (sum == 0) {\n      maxLen = i + 1;\n    } else if (map.has(sum)) {\n      maxLen = max(maxLen, i - map.get(sum));\n    } else {\n      map.set(sum, i);\n    }\n  }\n  return maxLen;\n}",
@@ -4055,7 +4055,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Longest Subarray with 0 Sum: Snapshot",
+          "headline": "Find Longest Subarray with Zero Sum: Snapshot",
           "body": "**Problem Statement**:\nFind the length of the longest subarray with a sum equal to 0.\n\n💡 **Simplified Analogy**:\nLike traveling on a loop: if you return to the exact same altitude you were at earlier, the net change in altitude over that section is zero.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bc18",
@@ -4134,7 +4134,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bc21",
-      "title": "Count Number of Subarrays with Given XOR K",
+      "title": "Count Subarrays with XOR Sum Equal to K",
       "topic": "Arrays",
       "explanation": "Find the total number of subarrays whose XOR sum is equal to K.",
       "code": "auto solve(auto A, auto B) {\n  const auto map = unordered_map<int, int>();\n  map.set(0, 1);\n  auto xor = 0, count = 0;\n  for (auto i = 0; i < A.size(); i++) {\n    xor = xor ^ A[i];\n    const auto x = xor ^ B;\n    if (map.has(x)) {\n      count += map.get(x);\n    }\n    map.set(xor, (map.get(xor) || 0) + 1);\n  }\n  return count;\n}",
@@ -4174,7 +4174,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Count Number of Subarrays with Given XOR K: Snapshot",
+          "headline": "Count Subarrays with XOR Sum Equal to K: Snapshot",
           "body": "**Problem Statement**:\nFind the total number of subarrays whose XOR sum is equal to K.\n\n💡 **Simplified Analogy**:\nLike counting complementary patterns: checking if the XOR history has registered a matching complement state.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bc22",
@@ -4253,7 +4253,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bc2b",
-      "title": "Longest Substring Without Repeating Characters",
+      "title": "Find Longest Substring Without Repeating Characters",
       "topic": "Arrays",
       "explanation": "Find the length of the longest contiguous substring that contains unique characters.",
       "code": "auto lengthOfLongestSubstring(auto s) {\n  const auto map = unordered_map<int, int>();\n  auto left = 0, maxLen = 0;\n  for (auto right = 0; right < s.size(); right++) {\n    if (map.has(s[right])) {\n      left = max(left, map.get(s[right]) + 1);\n    }\n    map.set(s[right], right);\n    maxLen = max(maxLen, right - left + 1);\n  }\n  return maxLen;\n}",
@@ -4294,7 +4294,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Longest Substring Without Repeating Characters: Snapshot",
+          "headline": "Find Longest Substring Without Repeating Characters: Snapshot",
           "body": "**Problem Statement**:\nFind the length of the longest contiguous substring that contains unique characters.\n\n💡 **Simplified Analogy**:\nLike a caterpillar crawling along a string: it stretches forward but must pull its tail forward if its head touches a duplicate character.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bc2c",
@@ -4373,7 +4373,7 @@
     },
     {
       "_id": "6a1655fdb129b168bb16bc35",
-      "title": "3 Sum",
+      "title": "Find all Unique Triplets that Sum to Zero",
       "topic": "Arrays",
       "explanation": "Find all unique triplets in the array which sum to zero.",
       "code": "auto threeSum(auto nums) {\n  nums.sort((a, b) => a - b);\n  const auto result = [];\n  for (auto i = 0; i < nums.size() - 2; i++) {\n    if (i > 0 && nums[i] == nums[i - 1]) continue;\n    auto left = i + 1, right = nums.size() - 1;\n    while (left < right) {\n      const auto sum = nums[i] + nums[left] + nums[right];\n      if (sum == 0) {\n        result.push([nums[i], nums[left], nums[right]]);\n        while (left < right && nums[left] == nums[left + 1]) left++;\n        while (left < right && nums[right] == nums[right - 1]) right--;\n        left++; right--;\n      } else if (sum < 0) left++;\n      else right--;\n    }\n  }\n  return result;\n}",
@@ -4412,7 +4412,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "3 Sum: Snapshot",
+          "headline": "Find all Unique Triplets that Sum to Zero: Snapshot",
           "body": "**Problem Statement**:\nFind all unique triplets in the array which sum to zero.\n\n💡 **Simplified Analogy**:\nLike selecting three members in a balance beam game to perfectly neutralize the weight to 0.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655fdb129b168bb16bc36",
@@ -4491,7 +4491,7 @@
     },
     {
       "_id": "6a1655feb129b168bb16bc3f",
-      "title": "Trapping Rain Water",
+      "title": "Calculate Maximum Trapped Rain Water",
       "topic": "Arrays",
       "explanation": "Compute how much water can be trapped between walls after raining.",
       "code": "auto trap(auto height) {\n  auto left = 0, right = height.size() - 1;\n  auto leftMax = 0, rightMax = 0, water = 0;\n  while (left < right) {\n    if (height[left] <= height[right]) {\n      if (height[left] >= leftMax) leftMax = height[left];\n      else water += leftMax - height[left];\n      left++;\n    } else {\n      if (height[right] >= rightMax) rightMax = height[right];\n      else water += rightMax - height[right];\n      right--;\n    }\n  }\n  return water;\n}",
@@ -4530,7 +4530,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Trapping Rain Water: Snapshot",
+          "headline": "Calculate Maximum Trapped Rain Water: Snapshot",
           "body": "**Problem Statement**:\nCompute how much water can be trapped between walls after raining.\n\n💡 **Simplified Analogy**:\nImagine buckets created by high mountain peaks: the water level is bounded by the shorter of the left and right peaks.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655feb129b168bb16bc40",
@@ -4609,7 +4609,7 @@
     },
     {
       "_id": "6a1655feb129b168bb16bc49",
-      "title": "Remove Duplicate from Sorted array",
+      "title": "Remove Duplicates from Sorted Array in-place",
       "topic": "Arrays",
       "explanation": "Remove duplicates from a sorted array in-place such that each unique element appears once.",
       "code": "auto removeDuplicates(auto nums) {\n  if (nums.size() == 0) return 0;\n  auto i = 0;\n  for (auto j = 1; j < nums.size(); j++) {\n    if (nums[j] != nums[i]) {\n      i++; nums[i] = nums[j];\n    }\n  }\n  return i + 1;\n}",
@@ -4648,7 +4648,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Remove Duplicate from Sorted array: Snapshot",
+          "headline": "Remove Duplicates from Sorted Array in-place: Snapshot",
           "body": "**Problem Statement**:\nRemove duplicates from a sorted array in-place such that each unique element appears once.\n\n💡 **Simplified Analogy**:\nLike sorting items in a tray: slide unique items to the front of the tray and ignore copies.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655feb129b168bb16bc4a",
@@ -4727,7 +4727,7 @@
     },
     {
       "_id": "6a1655feb129b168bb16bc53",
-      "title": "Max consecutive ones",
+      "title": "Find Max Consecutive Ones in Binary Array",
       "topic": "Arrays",
       "explanation": "Find the maximum number of consecutive 1s in a binary array.",
       "code": "auto findMaxConsecutiveOnes(auto nums) {\n  auto maxCount = 0, currentCount = 0;\n  for (auto i = 0; i < nums.size(); i++) {\n    if (nums[i] == 1) {\n      currentCount++; maxCount = max(maxCount, currentCount);\n    } else {\n      currentCount = 0;\n    }\n  }\n  return maxCount;\n}",
@@ -4766,7 +4766,7 @@
       "slides": [
         {
           "type": "intro",
-          "headline": "Max consecutive ones: Snapshot",
+          "headline": "Find Max Consecutive Ones in Binary Array: Snapshot",
           "body": "**Problem Statement**:\nFind the maximum number of consecutive 1s in a binary array.\n\n💡 **Simplified Analogy**:\nLike recording a weather streak of consecutive sunny days: reset the count to 0 when it rains.\n\n👉 *But wait... brute force recalculates everything. Let's see how to spot the pattern instantly...*",
           "blocks": [],
           "_id": "6a1655feb129b168bb16bc54",
@@ -22409,6 +22409,6 @@
       "updatedAt": "2026-05-27T02:25:17.844Z"
     }
   ],
-  "dbVersion": "striver-sde-sheet-1779876724727",
-  "timestamp": "2026-05-27T10:12:04.727Z"
+  "dbVersion": "striver-sde-sheet-1779877012752",
+  "timestamp": "2026-05-27T10:16:52.752Z"
 }
