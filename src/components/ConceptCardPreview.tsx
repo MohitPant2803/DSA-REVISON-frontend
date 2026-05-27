@@ -325,75 +325,79 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
   }, [card.title, card.difficulty, card.tags]);
 
   return (
-    <View className="flex-1 justify-between bg-transparent h-full pb-11 pr-14">
-      <View className="flex-1 justify-between gap-y-4">
-        {/* Top Section */}
-        <View className="gap-y-3">
-          {/* Modern Apple-style Capsule Tags */}
-          <View className="flex-row flex-wrap gap-2 items-center">
-            <View className="px-3 py-1 rounded-full bg-slate-50 border border-slate-200/60">
-              <Text className="text-slate-600 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
-            </View>
-            <View className={`px-3 py-1 rounded-full ${
-              card.difficulty === 'Easy' ? 'bg-emerald-50/60 border border-emerald-100' :
-              card.difficulty === 'Medium' ? 'bg-amber-50/60 border border-amber-100' :
-              'bg-rose-50/60 border border-rose-100'
-            }`}>
-              <Text className={`text-[10px] font-extrabold uppercase tracking-wider ${
-                card.difficulty === 'Easy' ? 'text-emerald-700' :
-                card.difficulty === 'Medium' ? 'text-amber-700' :
-                'text-rose-700'
-              }`}>{card.difficulty}</Text>
-            </View>
-            {card.complexity && (
-              <View className="px-3 py-1 rounded-full bg-slate-50 border border-slate-200/60">
-                <Text className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</Text>
-              </View>
-            )}
+    <View className="flex-1 bg-transparent h-full pb-11 pr-14" style={{ flexDirection: 'column' }}>
+      {/* Top Section */}
+      <View className="gap-y-3">
+        {/* Modern Apple-style Capsule Tags (Flat, transparent background) */}
+        <View className="flex-row flex-wrap gap-2 items-center">
+          <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
+            <Text className="text-slate-600 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
           </View>
-
-          {/* Title (Striking, Extremely Large Typographical Focal Point) */}
-          <Text
-            style={{ fontSize: 35, fontWeight: '900', color: '#0F172A', letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
-            numberOfLines={2}
-          >
-            {card.title}
-          </Text>
-
-          {/* Premium Compact Companies Pill (Reduced by Half) */}
-          <View className="bg-slate-50/80 border border-slate-200/40 rounded-xl px-4 py-2 mt-1 self-start flex-row items-center gap-x-2 shadow-sm shadow-slate-100/10">
-            <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8' }}>Companies:</Text>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
-              {companies}
-            </Text>
+          <View className={`px-3 py-1 rounded-full bg-transparent ${
+            card.difficulty === 'Easy' ? 'border border-emerald-200' :
+            card.difficulty === 'Medium' ? 'border border-amber-200' :
+            'border border-rose-200'
+          }`}>
+            <Text className={`text-[10px] font-extrabold uppercase tracking-wider ${
+              card.difficulty === 'Easy' ? 'text-emerald-600' :
+              card.difficulty === 'Medium' ? 'text-amber-600' :
+              'text-rose-600'
+            }`}>{card.difficulty}</Text>
           </View>
+          {card.complexity && (
+            <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
+              <Text className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</Text>
+            </View>
+          )}
         </View>
 
-        {/* Middle Section (Spacious Problem Statement Explanation) */}
-        <View className="flex-1 justify-center my-4">
-          <View className="p-4 gap-y-3 justify-between" style={{ maxHeight: 380, flexShrink: 1 }}>
-            <View className="flex-row items-center justify-between">
-              <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
-            </View>
-            <ScrollView 
-              showsVerticalScrollIndicator={false} 
-              className="mt-1.5"
-              style={{ flexShrink: 1 }}
-              contentContainerStyle={{ flexGrow: 1 }}
-              scrollEnabled={scrollEnabled}
-            >
-              <RichText
-                text={card.explanation || ''}
-                style={{ color: '#334155', fontSize: 18.5, lineHeight: 29, fontWeight: '600' }}
-                boldStyle={{ color: '#0F172A', fontWeight: '900' }}
-              />
-            </ScrollView>
-          </View>
+        {/* Title (Striking, Extremely Large Typographical Focal Point) */}
+        <Text
+          style={{ fontSize: 35, fontWeight: '900', color: '#0F172A', letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
+          numberOfLines={2}
+        >
+          {card.title}
+        </Text>
+
+        {/* Premium Compact Companies Pill (Flat, transparent, zero nested background/border/shadow) */}
+        <View className="mt-1 self-start flex-row items-center gap-x-2">
+          <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8' }}>Companies:</Text>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
+            {companies}
+          </Text>
         </View>
       </View>
 
+      {/* Spacer 1: 1/3 distance (flex: 1) */}
+      <View style={{ flex: 1 }} />
+
+      {/* Middle Section (Spacious Problem Statement Explanation) */}
+      <View style={{ maxHeight: 380, flexShrink: 1 }}>
+        <View className="p-4 gap-y-3 justify-between" style={{ maxHeight: '100%', flexShrink: 1 }}>
+          <View className="flex-row items-center justify-between">
+            <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
+          </View>
+          <ScrollView 
+            showsVerticalScrollIndicator={false} 
+            className="mt-1.5"
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ flexGrow: 1 }}
+            scrollEnabled={scrollEnabled}
+          >
+            <RichText
+              text={card.explanation || ''}
+              style={{ color: '#334155', fontSize: 18.5, lineHeight: 29, fontWeight: '600' }}
+              boldStyle={{ color: '#0F172A', fontWeight: '900' }}
+            />
+          </ScrollView>
+        </View>
+      </View>
+
+      {/* Spacer 2: 2/3 distance (flex: 2) */}
+      <View style={{ flex: 2 }} />
+
       {/* Redesigned Pulsing Interactive Walkthrough CTA */}
-      <Animated.View style={ctaAnimatedStyle} className="mt-auto self-center mb-2">
+      <Animated.View style={ctaAnimatedStyle} className="self-center mb-2">
         <Pressable
           onPressIn={() => {
             ctaScale.value = withSpring(0.96, { damping: 10, stiffness: 350 });
