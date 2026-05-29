@@ -1914,6 +1914,15 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     staleTime: 0,
   });
 
+  useFocusEffect(
+    useCallback(() => {
+      hasScrolledToInitial.current = false;
+      if (isGeneralSessionActive) {
+        refetchReelsFeed();
+      }
+    }, [isGeneralSessionActive, refetchReelsFeed])
+  );
+
 
 
   const { data, isLoading, isFetching, isError, error, refetch } = useGetRevisionCards(query);
