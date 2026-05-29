@@ -481,7 +481,7 @@ export const ReelsSettingsOverlay = React.memo(({
   });
 
   useEffect(() => {
-    if (prefsData?.selectedRootFolderIds) {
+    if (isOpen && prefsData?.selectedRootFolderIds) {
       setSelectedFolderIds(prefsData.selectedRootFolderIds);
     }
   }, [prefsData, isOpen]);
@@ -533,12 +533,15 @@ export const ReelsSettingsOverlay = React.memo(({
       setPrefSaving(true);
       
       // 1. Save folder content preferences to database
-      await reelsFeedService.updateReelPreferences(selectedFolderIds);
+      const updatedPrefs = await reelsFeedService.updateReelPreferences(selectedFolderIds);
       
-      // 2. Explicitly regenerate deterministic reels feed session on backend
+      // 2. Synchronously update query data cache to prevent closing state reverts
+      queryClient.setQueryData(['reelPreferences'], updatedPrefs);
+      
+      // 3. Explicitly regenerate deterministic reels feed session on backend
       await reelsFeedService.regenerateReelQueue();
 
-      // 3. Invalidate queries to refresh general reels deck and seen counts
+      // 4. Invalidate queries to refresh general reels deck and seen counts
       queryClient.invalidateQueries({ queryKey: ['reelsFeed'] });
       queryClient.invalidateQueries({ queryKey: ['folders'] });
       queryClient.invalidateQueries({ queryKey: ['reelPreferences'] });
