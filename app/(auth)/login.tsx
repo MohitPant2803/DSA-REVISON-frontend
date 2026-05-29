@@ -15,6 +15,7 @@ import { Sparkles, ArrowRight, CheckSquare, Square } from 'lucide-react-native';
 import { useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import api from '@/services/api';
 import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable';
 import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
@@ -126,7 +127,9 @@ export default function LoginScreen() {
         }
 
         console.log('[DEBUG] Google Sign-In Successful! Exchanging token with backend...');
-        const res = await api.post('/auth/google', { idToken });
+        const { deviceId, logicalClockSequence } = usePlaylistStateStore.getState();
+        const clockEpoch = String(logicalClockSequence || 0);
+        const res = await api.post('/auth/google', { idToken, deviceId, clockEpoch });
         const { token, user: rawUser } = res.data.data;
 
         const user = {
@@ -135,6 +138,8 @@ export default function LoginScreen() {
           email: rawUser.email,
           avatarUrl: rawUser.profilePicture,
           role: rawUser.role,
+          totalSwipes: rawUser.totalSwipes || 0,
+          totalScrolls: rawUser.totalScrolls || 0,
         };
 
         await login(token, user);

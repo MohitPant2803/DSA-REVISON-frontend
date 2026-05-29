@@ -3,6 +3,7 @@ import { useResumeStore } from '@/store/useResumeStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useUpdateResumeState, useRegisterLoop } from '@/services/useUserProgress';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import Toast from 'react-native-toast-message';
 import { InteractionManager } from 'react-native';
 
@@ -49,7 +50,13 @@ export const useProgressSync = () => {
     }
 
     // Skip database sync for virtual playlists
-    if (type === 'playlist' && (id === 'likes' || id === 'watch-later')) {
+    if (type === 'playlist' && ['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].includes(id)) {
+      return;
+    }
+
+    // Skip database sync for guest users
+    const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    if (isGuest) {
       return;
     }
 
@@ -88,7 +95,24 @@ export const useProgressSync = () => {
     registerLoopCompletion(id);
 
     // Skip database sync for virtual playlists
-    if (type === 'playlist' && (id === 'likes' || id === 'watch-later')) {
+    if (type === 'playlist' && ['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].includes(id)) {
+      if (!isPaused) {
+        InteractionManager.runAfterInteractions(() => {
+          Toast.show({
+            type: 'success',
+            text1: `Loop completed!`,
+            text2: `Successfully saved loop progress for this ${type}.`,
+            position: 'top',
+            visibilityTime: 2000,
+          });
+        });
+      }
+      return;
+    }
+
+    // Skip database sync for guest users
+    const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    if (isGuest) {
       if (!isPaused) {
         InteractionManager.runAfterInteractions(() => {
           Toast.show({

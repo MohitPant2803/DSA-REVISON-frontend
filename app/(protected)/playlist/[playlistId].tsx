@@ -102,11 +102,14 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
 });
 
 export default function PlaylistCardsScreen() {
-  useAppBackHandler();
-
-  // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
-
   const router = useRouter();
+
+  const handleBack = useCallback(() => {
+    router.replace('/(protected)/(tabs)/personal');
+    return true;
+  }, [router]);
+
+  useAppBackHandler(handleBack);
   const queryClient = useQueryClient();
   const params = useLocalSearchParams<{
     playlistId: string;
@@ -155,6 +158,7 @@ export default function PlaylistCardsScreen() {
   } | null>(null);
 
   const swipeableRefs = useRef<Map<string, any>>(new Map());
+  const isLoadingMoreRef = useRef(false);
 
   // Auto-hide Undo banner after 5 seconds
   useEffect(() => {
@@ -177,6 +181,7 @@ export default function PlaylistCardsScreen() {
       if (currentIds !== nextIds) {
         setLocalCards(storeCards);
       }
+      isLoadingMoreRef.current = false;
     }
   }, [storeCards]);
 
@@ -312,15 +317,20 @@ export default function PlaylistCardsScreen() {
 
   const startRevising = useCallback((shuffle = false, resume = false, startCardId?: string) => {
     if (!playlistId) return;
+    if (localCards.length === 0) {
+      Alert.alert('No cards to revise', 'Add cards to this playlist before starting a run.');
+      return;
+    }
     setActivePlaylistId(playlistId);
     router.push({
-      pathname: '/(protected)/(tabs)/reels-player',
+      pathname: '/(protected)/reels-player',
       params: {
+        playlistId,
         shuffle: shuffle ? 'true' : 'false',
         startCardId: startCardId || '',
       },
     });
-  }, [playlistId, setActivePlaylistId, router]);
+  }, [playlistId, localCards.length, setActivePlaylistId, router]);
 
   const renderItem = useCallback(({ item: card, drag, isActive }: RenderItemParams<IPopulatedRevisionCard>) => {
     if (!card || !card._id) return null;
@@ -373,7 +383,7 @@ export default function PlaylistCardsScreen() {
     return (
       <SafeAreaView className="flex-1 bg-[#F8FAFC] justify-center items-center px-6">
         <Text className="text-[#64748B] text-center mb-4">Invalid playlist link.</Text>
-        <TouchableOpacity onPress={() => router.back()} className="px-6 py-3 rounded-full bg-violet-500">
+        <TouchableOpacity onPress={handleBack} className="px-6 py-3 rounded-full bg-violet-500">
           <Text className="text-white">Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -385,7 +395,7 @@ export default function PlaylistCardsScreen() {
       <SyncPauseGate />
       <View className="flex-row items-center px-4 pt-2 pb-2">
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={handleBack}
           className="p-2 mr-2 bg-white rounded-full border border-slate-100"
         >
           <ChevronLeft color="#334155" size={24} />
@@ -450,6 +460,13 @@ export default function PlaylistCardsScreen() {
             offset: 116 * index,
             index,
           })}
+          onEndReached={() => {
+            if (playlistId && !isLoadingMoreRef.current) {
+              isLoadingMoreRef.current = true;
+              usePlaylistStateStore.getState().checkAndLoadMorePlaylistCards(playlistId, localCards.length - 1);
+            }
+          }}
+          onEndReachedThreshold={0.4}
         />
       )}
 

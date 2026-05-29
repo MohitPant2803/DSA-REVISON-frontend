@@ -69,7 +69,7 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated;
+  const hasLocal = hasHydrated || cardIds.length > 0;
 
   return {
     data: hasLocal ? {
@@ -169,7 +169,7 @@ export const useGetCardsByFolder = (
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated;
+  const hasLocal = hasHydrated || filteredCards.length > 0;
 
   return {
     data: hasLocal ? {

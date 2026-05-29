@@ -29,10 +29,7 @@ import { useCardDifficultyMap, useCardsById } from '@/hooks/usePlaylistStoreSele
 import { resolveCardState } from '@/utils/resolveCardState';
 
 export default function FolderCardsScreen() {
-  useAppBackHandler();
-
   // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
-  const resumeSyncGate = usePlaylistStateStore((s) => s.resumeSyncGate);
   const router = useRouter();
   const params = useLocalSearchParams<{
     folderId: string;
@@ -44,6 +41,21 @@ export default function FolderCardsScreen() {
   const { canManageContent, role } = useRole();
 
   const { data: folder } = useGetFolder(folderId || undefined);
+
+  const handleBack = useCallback(() => {
+    if (folder?.parentFolderId) {
+      router.replace({
+        pathname: '/(protected)/folder/[folderId]',
+        params: { folderId: folder.parentFolderId },
+      });
+      return true;
+    } else {
+      router.replace('/(protected)/(tabs)/learn');
+      return true;
+    }
+  }, [folder, folderId, router]);
+
+  useAppBackHandler(handleBack);
   const { data, isLoading, isError, error, refetch, isRefetching } = useGetCardsByFolder(folderId || undefined, {
     limit: 100,
     excludeSlides: 'true',
@@ -78,8 +90,8 @@ export default function FolderCardsScreen() {
 
   const handleRefresh = async () => {
     try {
-      // Use resumeSyncGate to trigger a forced sync flush for pull-to-refresh
-      resumeSyncGate?.();
+      // Trigger a forced sync flush for pull-to-refresh directly in the store
+      usePlaylistStateStore.getState().triggerSync();
     } catch (e) {}
   };
 
@@ -147,7 +159,7 @@ export default function FolderCardsScreen() {
   const startRevising = (startCardId?: string) => {
     if (!folderId) return;
     router.push({
-      pathname: '/(protected)/(tabs)/reels-player',
+      pathname: '/(protected)/reels-player',
       params: {
         folderId,
         ...(startCardId ? { startCardId } : { shuffle: 'true' }),
@@ -163,7 +175,7 @@ export default function FolderCardsScreen() {
         text: 'Edit',
         onPress: () =>
           router.push({
-            pathname: '/(protected)/(tabs)/CreateRevisionScreen',
+            pathname: '/(protected)/CreateRevisionScreen',
             params: { cardId: card._id, folderId },
           }),
       },
@@ -185,7 +197,16 @@ export default function FolderCardsScreen() {
     return (
       <SafeAreaView className="flex-1 bg-[#FAF9F7] justify-center items-center px-6">
         <Text className="text-[#64748B] text-center mb-4">Invalid folder link.</Text>
-        <TouchableOpacity onPress={() => router.back()} className="px-6 py-3 rounded-full bg-violet-500">
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(protected)/(tabs)/learn');
+            }
+          }}
+          className="px-6 py-3 rounded-full bg-violet-500"
+        >
           <Text className="text-white">Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -197,7 +218,7 @@ export default function FolderCardsScreen() {
       <SyncPauseGate />
       <View className="flex-row items-center px-4 pt-2 pb-2">
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={handleBack}
           className="p-2 mr-2 bg-white rounded-full border"
           style={{ borderColor: 'rgba(148,163,184,0.08)' }}
         >
@@ -226,7 +247,7 @@ export default function FolderCardsScreen() {
           <TouchableOpacity
             onPress={() =>
               router.push({
-                pathname: '/(protected)/(tabs)/CreateRevisionScreen',
+                pathname: '/(protected)/CreateRevisionScreen',
                 params: { folderId },
               })
             }
@@ -357,7 +378,7 @@ export default function FolderCardsScreen() {
                 folder={sub}
                 onPress={() =>
                   router.push({
-                    pathname: '/(protected)/(tabs)/folder/[folderId]',
+                    pathname: '/(protected)/folder/[folderId]',
                     params: { folderId: sub._id, title: sub.title },
                   })
                 }

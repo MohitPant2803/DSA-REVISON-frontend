@@ -1,23 +1,23 @@
 import React, { useEffect } from 'react';
-import { Platform, Pressable, View, useWindowDimensions } from 'react-native';
-import { Tabs, useSegments } from 'expo-router';
+import { Platform, Pressable, View, LogBox } from 'react-native';
+import { Tabs, useSegments, useRouter } from 'expo-router';
 import { Home, Layers, Bookmark } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAppBackHandler } from '@/hooks/useAppBackHandler';
+
 import { BottomTabBar } from '@react-navigation/bottom-tabs';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withTiming,
-  withDelay,
-  Easing,
 } from 'react-native-reanimated';
 import { useUIStore } from '@/store/useUIStore';
 
+// Suppress Lucide deep-import warnings caused by Metro package exports enforcement
+LogBox.ignoreLogs(['Attempted to import the module', 'which is not listed in the "exports"']);
+
 interface TabButtonProps {
   focused: boolean;
-  icon: (isFocused: boolean) => React.ReactNode;
+  icon: React.ReactNode;
   onPress?: any;
 }
 
@@ -69,51 +69,67 @@ function TabButton({ focused, icon, onPress }: TabButtonProps) {
         
         {/* Icon */}
         <View style={{ zIndex: 2, marginBottom: 2 }}>
-          {icon(focused)}
+          {icon}
         </View>
-
       </Animated.View>
     </Pressable>
   );
 }
 
 function TabLayoutInner() {
-  useAppBackHandler();
+  // useAppBackHandler(); // This generic handler conflicts with the more specific one below.
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  
-  const isTablet = width > 768;
-  const tabWidth = 420;
-  const horizontalMargin = isTablet ? (width - tabWidth) / 2 : 32;
-  
   const dockBottom = Math.max(insets.bottom, 10) + 6; // Extra padding from bottom for detached floating dock resting on surface
   const segments = useSegments();
   const isReels = segments[segments.length - 1] === 'reels';
   const isReelsPlayer = segments[segments.length - 1] === 'reels-player';
   const isLearn = segments[segments.length - 1] === 'learn';
   const isPersonal = segments[segments.length - 1] === 'personal';
+  const isFolder = segments.some(seg => seg === 'folder');
+  const isPlaylist = segments.some(seg => seg === 'playlist');
+  console.log('SEGMENTS:', JSON.stringify(segments), '| isPlaylist:', isPlaylist);
   const { hasAppBeenAnimated } = useUIStore();
+  const router = useRouter();
 
-  const translateY = useSharedValue(120);
+  const cameFromPlaylist = React.useRef(false);
+  const cameFromFolder = React.useRef(false);
 
   useEffect(() => {
-    const easeOut = Easing.bezier(0.16, 1, 0.3, 1); // Premium smooth Apple ease-out curve
+    if (isPlaylist) cameFromPlaylist.current = true;
+    if (!isPlaylist && !isReelsPlayer) cameFromPlaylist.current = false;
+  }, [isPlaylist, isReelsPlayer]);
 
+  useEffect(() => {
+    if (isFolder) cameFromFolder.current = true;
+    if (!isFolder && !isReelsPlayer) cameFromFolder.current = false;
+  }, [isFolder, isReelsPlayer]);
+
+  // Back navigation is handled by the global useAppBackHandler in (protected)/_layout.tsx
+  // and each screen's own customOnBack handler. No competing BackHandler needed here.
+
+  const translateY = useSharedValue(0);
+  const opacity = useSharedValue(1);
+
+  useEffect(() => {
     if (isReelsPlayer) {
       // Focused Immersive Session: slide down and hide the floating bottom dock
-      translateY.value = withTiming(120, { duration: 350, easing: easeOut });
+      translateY.value = withSpring(120, { damping: 26, stiffness: 180 });
+      opacity.value = withSpring(0, { damping: 22, stiffness: 150 });
     } else if (isLearn && !hasAppBeenAnimated) {
       // Typing/Typewriter Phase: keep the floating bottom dock completely hidden offscreen initially
       translateY.value = 120;
+      opacity.value = 0;
     } else {
-      // Standard tabs: slide floating bottom tab bar back up into focus with absolute zero bounce
-      translateY.value = withDelay(400, withTiming(0, { duration: 450, easing: easeOut }));
+      // Standard tabs or after reveal animation settles: slide floating bottom tab bar back up into focus
+      translateY.value = withSpring(0, { damping: 26, stiffness: 180 });
+      opacity.value = withSpring(1, { damping: 22, stiffness: 150 });
     }
   }, [isReels, isReelsPlayer, isLearn, hasAppBeenAnimated]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
       transform: [{ translateY: translateY.value }],
+      opacity: opacity.value,
     };
   });
 
@@ -129,18 +145,17 @@ function TabLayoutInner() {
       )}
       screenOptions={{
         headerShown: false,
-        freezeOnBlur: false,
         tabBarShowLabel: false, // Cleaner visual appearance like VisionOS
         tabBarStyle: {
           position: 'absolute',
           bottom: dockBottom,
-          left: horizontalMargin,
-          right: horizontalMargin,
+          left: 32,
+          right: 32,
           height: 64,
           borderRadius: 36,
           backgroundColor: '#FFFFFF', // Solid pristine white
           borderWidth: 1,
-          borderColor: 'rgba(15, 23, 42, 0.08)', // Reduced border visibility to elegant slate
+          borderColor: 'rgba(148, 163, 184, 0.05)', // Reduced border visibility
           paddingTop: 4,
           paddingBottom: 4,
           elevation: 2,
@@ -155,66 +170,68 @@ function TabLayoutInner() {
         name="learn"
         options={{
           title: 'Home',
-          tabBarButton: (props) => (
-            <TabButton
-              focused={isLearn}
-              onPress={props.onPress}
-              icon={(isFocused) => (
-                <Home
-                  color={isFocused ? '#0F172A' : '#94A3B8'}
-                  size={20}
-                  strokeWidth={isFocused ? 2.4 : 1.8}
-                />
-              )}
-            />
-          ),
+          tabBarButton: (props) => {
+            const focused = isFolder || (isReelsPlayer && cameFromFolder.current) ? true : (isPlaylist ? false : isLearn);
+            return (
+              <TabButton
+                focused={focused}
+                onPress={props.onPress}
+                icon={
+                  <Home
+                    color={focused ? '#0F172A' : '#94A3B8'}
+                    size={20}
+                    strokeWidth={focused ? 2.4 : 1.8}
+                  />
+                }
+              />
+            );
+          },
         }}
       />
       <Tabs.Screen
         name="reels"
         options={{
           title: 'Reels',
-          tabBarButton: (props) => (
-            <TabButton
-              focused={isReels}
-              onPress={props.onPress}
-              icon={(isFocused) => (
-                <Layers
-                  color={isFocused ? '#0F172A' : '#94A3B8'}
-                  size={20}
-                  strokeWidth={isFocused ? 2.4 : 1.8}
-                />
-              )}
-            />
-          ),
+          tabBarButton: (props) => {
+            const focused = isReels;
+            return (
+              <TabButton
+                focused={focused}
+                onPress={props.onPress}
+                icon={
+                  <Layers
+                    color={focused ? '#0F172A' : '#94A3B8'}
+                    size={20}
+                    strokeWidth={focused ? 2.4 : 1.8}
+                  />
+                }
+              />
+            );
+          },
         }}
       />
       <Tabs.Screen
         name="personal"
         options={{
           title: 'My Space',
-          tabBarButton: (props) => (
-            <TabButton
-              focused={isPersonal}
-              onPress={props.onPress}
-              icon={(isFocused) => (
-                <Bookmark
-                  color={isFocused ? '#0F172A' : '#94A3B8'}
-                  size={20}
-                  strokeWidth={isFocused ? 2.4 : 1.8}
-                />
-              )}
-            />
-          ),
+          tabBarButton: (props) => {
+            const focused = isPlaylist || (isReelsPlayer && cameFromPlaylist.current) ? true : (isFolder ? false : isPersonal);
+            return (
+              <TabButton
+                focused={focused}
+                onPress={props.onPress}
+                icon={
+                  <Bookmark
+                    color={focused ? '#0F172A' : '#94A3B8'}
+                    size={20}
+                    strokeWidth={focused ? 2.4 : 1.8}
+                  />
+                }
+              />
+            );
+          },
         }}
       />
-      <Tabs.Screen name="reels-player" options={{ href: null }} />
-      <Tabs.Screen name="dashboard" options={{ href: null }} />
-      <Tabs.Screen name="CreateRevisionScreen" options={{ href: null }} />
-      <Tabs.Screen name="RevisionForm" options={{ href: null }} />
-      <Tabs.Screen name="RevisionCard" options={{ href: null }} />
-      <Tabs.Screen name="folder/[folderId]" options={{ href: null }} />
-      <Tabs.Screen name="playlist/[playlistId]" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -54,7 +54,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { Image as ExpoImage } from 'expo-image';
 import { useGetRevisionCards, IPopulatedRevisionCard, ISlide } from '@/hooks/useRevisionCards';
 import { useGetFolders } from '@/hooks/useFolders';
-import { RevisionCard } from './RevisionCard';
+import { RevisionCard } from '../RevisionCard';
 import { useUpdateLastViewedCard, useFolderLoops } from '@/services/useUserProgress';
 import { ReelsSettingsOverlay } from '@/components/SettingsOverlay';
 import { PlaylistPickerModal } from '@/components/PlaylistPickerModal';
@@ -64,7 +64,8 @@ import { useResumeStore } from '@/store/useResumeStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useProgressSync } from '@/hooks/useProgressSync';
 import { useRole } from '@/hooks/useRole';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import * as reelsFeedService from '@/services/reelsFeedService';
 import * as revisionService from '@/services/revisionService';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, {
@@ -1592,7 +1593,8 @@ const ReelsRenderItem = React.memo(({
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
     prevProps.scrollEnabled === nextProps.scrollEnabled &&
-    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
+    prevProps.isActiveCardClassified === nextProps.isActiveCardClassified &&
+    prevProps.feedSessionId === nextProps.feedSessionId
   );
 });
 
@@ -1609,6 +1611,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const hasConfirmedExit = useRef(false);
   const feedSessionIdRef = useRef(Date.now().toString());
+
+  const sessionStartIndexRef = useRef(0);
 
   // High-fidelity UI-thread scroll offset tracking
   const scrollY = useSharedValue(0);
@@ -1847,6 +1851,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     clearPlaylistProgress,
   } = useResumeStore();
   const hasPromptedResume = useRef(false);
+  const mountScrollTimer1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountScrollTimer2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     data: playlistCards = [],
@@ -1887,7 +1893,38 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     ...(searchParam ? { search: searchParam } : {}),
   }), [page, folderIdParam, topicParam, tagsParam, difficultyParam, searchParam]);
 
+  const isGeneralSessionActive = !isGuest && !isCustomPlayer;
+
+  const { 
+    data: reelsFeedData, 
+    isLoading: reelsFeedLoading, 
+    isError: reelsFeedError, 
+    error: reelsFeedErrorObj, 
+    refetch: refetchReelsFeed 
+  } = useQuery({
+    queryKey: ['reelsFeed'],
+    queryFn: async () => {
+      const slice = await reelsFeedService.getReelFeedSlice();
+      if (slice.cardsSlice) {
+        usePlaylistStateStore.getState().hydratePlaylistCards('all', slice.cardsSlice);
+      }
+      return slice;
+    },
+    enabled: isGeneralSessionActive,
+    staleTime: 0,
+  });
+
+
+
   const { data, isLoading, isFetching, isError, error, refetch } = useGetRevisionCards(query);
+
+  // Prefetch and cache reelPreferences to render ticks instantly in SettingsOverlay modal
+  useQuery({
+    queryKey: ['reelPreferences'],
+    queryFn: reelsFeedService.getReelPreferences,
+    enabled: !isGuest,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
 
   const { data: folderLoopsData } = useFolderLoops();
   const currentFolderLoops = folderLoopsData?.find((f: any) => f.folderId === folderIdParam)?.completedLoops || 0;
@@ -2278,8 +2315,9 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
                 {
                   text: 'Resume',
                   onPress: () => {
-                    setNavState({ activeIndex: foundIdx, prevIdx: -1 });
-                    sessionQueueService.updateSessionIndex(session._id, foundIdx).catch(console.error);
+                    const resumeTargetIdx = Math.min(foundIdx + 1, slice.orderedCardIds.length - 1);
+                    setNavState({ activeIndex: resumeTargetIdx, prevIdx: -1 });
+                    sessionQueueService.updateSessionIndex(session._id, resumeTargetIdx).catch(console.error);
                     Toast.show({
                       type: 'info',
                       text1: 'Resuming from where you left',
@@ -2458,7 +2496,8 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
                 {
                   text: 'Resume',
                   onPress: () => {
-                    setNavState({ activeIndex: targetIndex, prevIdx: -1 });
+                    const resumeTargetIdx = Math.min(targetIndex + 1, cardsList.length - 1);
+                    setNavState({ activeIndex: resumeTargetIdx, prevIdx: -1 });
                     Toast.show({
                       type: 'info',
                       text1: 'Resuming from where you left',
@@ -2528,7 +2567,19 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   // Synchronize and merge new/updated API pages to the continuous deck
   useEffect(() => {
-    if (activePlaylistId || !data?.results) return;
+    if (activePlaylistId) return;
+    
+    if (isGeneralSessionActive) {
+      if (reelsFeedData?.orderedCardIds) {
+        setAllCards(reelsFeedData.orderedCardIds);
+        if (!hasScrolledToInitial.current) {
+          setNavState({ activeIndex: reelsFeedData.currentIndex || 0, prevIdx: -1 });
+        }
+      }
+      return;
+    }
+
+    if (!data?.results) return;
     
     if (allCards.length === 0) {
       setAllCards(data.results);
@@ -2541,7 +2592,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         return [...prevCards, ...newIds];
       });
     }
-  }, [activePlaylistId, data?.results]);
+  }, [activePlaylistId, data?.results, isGeneralSessionActive, reelsFeedData]);
 
   // Prefetch adjacent pagination pages in background
   useEffect(() => {
@@ -2584,6 +2635,12 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
           });
           pendingProgressRef.current = null;
         }, 600);
+      } else if (isGeneralSessionActive) {
+        // Debounced session index sync for general reels feed
+        if (sessionSyncTimeoutRef.current) clearTimeout(sessionSyncTimeoutRef.current);
+        sessionSyncTimeoutRef.current = setTimeout(() => {
+          reelsFeedService.updateReelIndex(nextIdx).catch(console.error);
+        }, 800);
       }
     }
     setNavState({ activeIndex: nextIdx, prevIdx: -1 });
@@ -2853,7 +2910,19 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   const handleScrollEnd = useCallback((event: any) => {
     const yOffset = event.nativeEvent.contentOffset.y;
-    const index = Math.round(yOffset / Math.round(cardHeight + 16));
+    const snapInterval = Math.round(cardHeight + 16);
+    const minYOffset = sessionStartIndexRef.current * snapInterval;
+
+    // 🛑 TikTok-Style Ceiling: Prevent scrolling upward past the starting card of this session
+    if (yOffset < minYOffset - 2) {
+      flatListRef.current?.scrollToIndex({
+        index: sessionStartIndexRef.current,
+        animated: true,
+      });
+      return;
+    }
+
+    const index = Math.round(yOffset / snapInterval);
     if (index !== activeIndex && index >= 0 && index < cardsList.length) {
       setNavState({ activeIndex: index, prevIdx: activeIndex });
       transitionToCard(index);
@@ -2867,13 +2936,14 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     if (sessionLoading) return; // Wait until session has resolved and index has settled!
     
     if (cardsList.length > 0 && !hasScrolledToInitial.current) {
+      sessionStartIndexRef.current = activeIndex; // Set the session starting index anchor right here!
       if (activeIndex > 0) {
-        setTimeout(() => {
+        mountScrollTimer1Ref.current = setTimeout(() => {
           flatListRef.current?.scrollToIndex({
             index: activeIndex,
             animated: false,
           });
-          setTimeout(() => {
+          mountScrollTimer2Ref.current = setTimeout(() => {
             hasScrolledToInitial.current = true;
           }, 50);
         }, 100);
@@ -2881,6 +2951,11 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         hasScrolledToInitial.current = true;
       }
     }
+
+    return () => {
+      if (mountScrollTimer1Ref.current) clearTimeout(mountScrollTimer1Ref.current);
+      if (mountScrollTimer2Ref.current) clearTimeout(mountScrollTimer2Ref.current);
+    };
   }, [cardsList.length, activeIndex, sessionLoading]);
 
   // Auto-pop reels-player when switching away to another tab
@@ -2950,8 +3025,11 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   };
 
   const isPlaylistLoading = !!activePlaylistId && playlistCardsLoading;
+  const isReelsLoading = isGeneralSessionActive ? reelsFeedLoading : (isLoading || isPlaylistLoading || (isSessionActive && sessionLoading));
+  const isReelsError = isGeneralSessionActive ? reelsFeedError : (isError || (activePlaylistId && playlistCardsError) || (isSessionActive && sessionError));
+  const reelsErrorObj = isGeneralSessionActive ? reelsFeedErrorObj : error;
 
-  if (isLoading || isPlaylistLoading || (isSessionActive && sessionLoading)) {
+  if (isReelsLoading) {
     return (
       <View className="flex-1 bg-[#F5F5F7]" style={{ paddingTop: insets.top || 48 }}>
         <ReelItemSkeleton cardHeight={cardHeight} width={width} />
@@ -2959,7 +3037,7 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     );
   }
 
-  if (isError || (activePlaylistId && playlistCardsError) || (isSessionActive && sessionError)) {
+  if (isReelsError) {
     return (
       <View className="flex-1 justify-center items-center bg-[#F8FAFC] p-6">
         <Text className="text-[#64748B] text-lg text-center mb-4 font-medium">
@@ -2967,11 +3045,13 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
             ? sessionError 
             : activePlaylistId 
               ? 'Could not load playlist' 
-              : error?.message || 'An error occurred'}
+              : reelsErrorObj?.message || 'An error occurred'}
         </Text>
         <TouchableOpacity
           onPress={() => {
-            if (isSessionActive && sessionError) {
+            if (isGeneralSessionActive) {
+              refetchReelsFeed();
+            } else if (isSessionActive && sessionError) {
               setSessionRetryCount(prev => prev + 1);
             } else if (activePlaylistId) {
               refetchPlaylistCards();
@@ -3243,7 +3323,11 @@ The output JSON MUST strictly match this schema:
             ref={flatListRef}
             data={visibleCardsList}
             scrollEnabled={scrollEnabled}
-            initialScrollIndex={activeIndex}
+            initialScrollIndex={
+              activeIndex >= 0 && activeIndex < visibleCardsList.length 
+                ? activeIndex 
+                : undefined
+            }
             renderItem={({ item, index }: { item: any; index: number }) => {
               return (
                 <ReelsRenderItem
@@ -3428,13 +3512,13 @@ The output JSON MUST strictly match this schema:
                   if (isCustomPlayer) {
                     if (folderIdParam) {
                       router.push({
-                        pathname: '/(protected)/(tabs)/folder/[folderId]',
+                        pathname: '/(protected)/folder/[folderId]',
                         params: { folderId: folderIdParam },
                       });
                       return;
                     } else if (activePlaylistId) {
                       router.push({
-                        pathname: '/(protected)/(tabs)/playlist/[playlistId]',
+                        pathname: '/(protected)/playlist/[playlistId]',
                         params: { playlistId: activePlaylistId },
                       });
                       return;

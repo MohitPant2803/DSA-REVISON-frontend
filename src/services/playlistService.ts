@@ -3,6 +3,10 @@ import { cacheStorage, cacheKey } from '@/lib/cache';
 
 export interface ApiPlaylist {
   _id: string;
+  id?: string;
+  mongoId?: string;
+  kind?: 'system' | 'custom';
+  systemKey?: 'easy' | 'medium' | 'hard' | 'skipped';
   name: string;
   description?: string;
   color1?: string;

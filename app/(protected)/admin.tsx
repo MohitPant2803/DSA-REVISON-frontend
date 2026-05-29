@@ -40,7 +40,16 @@ export default function AdminScreen() {
     return (
       <SafeAreaView className="flex-1 bg-[#F5F5F7] items-center justify-center p-8">
         <Text className="text-slate-600 text-center">Superadmin access required.</Text>
-        <TouchableOpacity onPress={() => router.back()} className="mt-4">
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(protected)/(tabs)/learn');
+            }
+          }}
+          className="mt-4"
+        >
           <Text className="text-violet-600 font-semibold">Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -59,7 +68,16 @@ export default function AdminScreen() {
   return (
     <SafeAreaView className="flex-1 bg-[#F5F5F7]" edges={['top']}>
       <View className="flex-row items-center px-4 py-3">
-        <TouchableOpacity onPress={() => router.back()} className="p-2 mr-2">
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(protected)/(tabs)/learn');
+            }
+          }}
+          className="p-2 mr-2"
+        >
           <ChevronLeft size={24} color="#334155" />
         </TouchableOpacity>
         <Text className="text-slate-900 text-xl font-bold">Moderation</Text>

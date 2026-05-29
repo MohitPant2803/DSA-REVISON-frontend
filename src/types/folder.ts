@@ -21,6 +21,7 @@ export interface IFolder {
   order: number;
   parentFolderId?: string | null;
   cardCount?: number;
+  seenCardCount?: number;
   hasSubfolders?: boolean;
   cardIds?: string[];
   createdAt: string;

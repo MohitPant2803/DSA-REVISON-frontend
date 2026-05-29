@@ -269,7 +269,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
     if (isGuest) return promptSignIn();
 
     router.push({
-      pathname: '/(protected)/(tabs)/CreateRevisionScreen',
+      pathname: '/(protected)/CreateRevisionScreen',
       params: { cardId: card._id, folderId, card: JSON.stringify(card) },
     });
   };
@@ -371,8 +371,8 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
       {/* Spacer 1: 1/3 distance (flex: 1) */}
       <View style={{ flex: 1 }} />
 
-      {/* Middle Section (Spacious Problem Statement Explanation) */}
-      <View style={{ maxHeight: 380, flexShrink: 1 }}>
+      {/* Middle Section (Spacious Problem Statement Explanation in a curved light blue box) */}
+      <View style={{ maxHeight: 380, flexShrink: 1, backgroundColor: '#EFF6FF', borderRadius: 24, borderWidth: 1.5, borderColor: '#93C5FD' }}>
         <View className="p-4 gap-y-3 justify-between" style={{ maxHeight: '100%', flexShrink: 1 }}>
           <View className="flex-row items-center justify-between">
             <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
@@ -386,7 +386,7 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
           >
             <RichText
               text={card.explanation || ''}
-              style={{ color: '#334155', fontSize: 18.5, lineHeight: 29, fontWeight: '600' }}
+              style={{ color: '#1E293B', fontSize: 15, lineHeight: 22, fontWeight: '600' }}
               boldStyle={{ color: '#0F172A', fontWeight: '900' }}
             />
           </ScrollView>

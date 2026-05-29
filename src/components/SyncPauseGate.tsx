@@ -1,25 +1,20 @@
-import { useCallback } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useEffect } from 'react';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 
 /**
- * Zero-render component that pauses sync when mounted/focused
- * and resumes sync on blur. Place inside any interaction zone screen.
- * This isolates the Zustand subscription from the parent component tree,
- * preventing unnecessary rerenders of heavy screen components.
+ * Zero-render component that pauses sync when mounted
+ * and resumes sync on unmount. Place inside any interaction zone screen.
+ * This directly sets the isLiveSyncPaused state in the Zustand store.
+ * Because it has no selectors, it is a pure zero-render component that
+ * never rerenders, completely preventing recursive update crashes.
  */
 export function SyncPauseGate() {
-  const pauseSyncGate = usePlaylistStateStore((s) => s.pauseSyncGate);
-  const resumeSyncGate = usePlaylistStateStore((s) => s.resumeSyncGate);
-
-  useFocusEffect(
-    useCallback(() => {
-      pauseSyncGate?.();
-      return () => {
-        resumeSyncGate?.();
-      };
-    }, [pauseSyncGate, resumeSyncGate])
-  );
+  useEffect(() => {
+    usePlaylistStateStore.getState().setLiveSyncPaused(true);
+    return () => {
+      usePlaylistStateStore.getState().setLiveSyncPaused(false);
+    };
+  }, []);
 
   return null; // Zero render — no DOM output
 }

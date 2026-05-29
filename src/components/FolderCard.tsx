@@ -29,11 +29,10 @@ interface FolderCardProps {
   folder: IFolder;
   onPress: () => void;
   onLongPress?: () => void;
-  completedLoops?: number;
   hideCardCount?: boolean;
 }
 
-function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0, hideCardCount = false }: FolderCardProps) {
+function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = false }: FolderCardProps) {
   const IconComponent = ICON_MAP[folder.icon] || Folder;
   const count = folder.cardCount ?? 0;
   const accent = folder.color || '#8B5CF6';
@@ -74,13 +73,6 @@ function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0,
           <Text className="text-[#0B1327] text-[16px] font-bold tracking-tight" numberOfLines={1}>
             {folder.title}
           </Text>
-          {completedLoops > 0 && (
-            <View 
-              className="px-2 py-0.5 rounded-full self-start border bg-[#F3E8FF] border-[#E9D5FF]/30"
-            >
-              <Text className="text-[#8B5CF6] text-[8px] font-black tracking-wider">LOOP {completedLoops}</Text>
-            </View>
-          )}
         </View>
 
         {folder.description ? (
@@ -103,7 +95,6 @@ function FolderCardComponent({ folder, onPress, onLongPress, completedLoops = 0,
 
 export const FolderCard = React.memo(FolderCardComponent, (prevProps, nextProps) => {
   return (
-    prevProps.completedLoops === nextProps.completedLoops &&
     prevProps.hideCardCount === nextProps.hideCardCount &&
     prevProps.folder._id === nextProps.folder._id &&
     prevProps.folder.title === nextProps.folder.title &&

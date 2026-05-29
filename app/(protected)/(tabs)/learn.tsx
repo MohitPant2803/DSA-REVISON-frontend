@@ -36,7 +36,6 @@ import {
 } from '@/hooks/useFolders';
 import { useDashboard } from '@/hooks/useDashboard';
 import Svg, { Circle } from 'react-native-svg';
-import { useFolderLoops } from '@/services/useUserProgress';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { usePlaylists } from '@/hooks/usePlaylists';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
@@ -149,11 +148,10 @@ const FolderCardSkeleton = () => {
 
 export default function LearnScreen() {
   useAppBackHandler();
-  const resumeSyncGate = usePlaylistStateStore((s) => s.resumeSyncGate);
   useFocusEffect(
     useCallback(() => {
-      resumeSyncGate?.();
-    }, [resumeSyncGate])
+      usePlaylistStateStore.getState().setLiveSyncPaused(false);
+    }, [])
   );
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -179,7 +177,6 @@ export default function LearnScreen() {
   const createFolder = useCreateFolder();
   const updateFolder = useUpdateFolder();
   const deleteFolder = useDeleteFolder();
-  const { data: folderLoopsData } = useFolderLoops();
 
   const folders = useMemo(() => data?.results ?? [], [data]);
 
@@ -596,16 +593,14 @@ export default function LearnScreen() {
             </>
           ) : (
             folders.map((folder, index) => {
-              const completedLoops = folderLoopsData?.find((f: any) => f.folderId === folder._id)?.completedLoops || 0;
               return (
                 <StaggeredCard key={folder._id} index={index} timelineProgress={timelineProgress}>
                   <FolderCard
                     folder={folder}
-                    completedLoops={completedLoops}
                     hideCardCount={true}
                     onPress={() =>
                       router.push({
-                        pathname: '/(protected)/(tabs)/folder/[folderId]',
+                        pathname: '/(protected)/folder/[folderId]',
                         params: { folderId: folder._id, title: folder.title },
                       })
                     }

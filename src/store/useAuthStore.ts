@@ -11,6 +11,8 @@ export interface User {
   email: string;
   avatarUrl?: string;
   role?: 'user' | 'admin' | 'superadmin';
+  totalSwipes?: number;
+  totalScrolls?: number;
 }
 
 interface AuthState {
@@ -21,6 +23,8 @@ interface AuthState {
   isAuthReady: boolean;
   isSessionExpired: boolean;
   targetDeepLink: string | null;
+  isLoggingOut: boolean;
+  sessionGenerationId: number;
   setTargetDeepLink: (link: string | null) => void;
   setSessionExpired: (expired: boolean) => void;
   login: (token: string, user: User) => Promise<void>;
@@ -39,6 +43,8 @@ function sanitizeUser(user: Partial<User> | null | undefined): User | null {
     email: String(user.email ?? ''),
     avatarUrl: user.avatarUrl ? String(user.avatarUrl) : undefined,
     role: user.role || 'user',
+    totalSwipes: typeof user.totalSwipes === 'number' ? user.totalSwipes : 0,
+    totalScrolls: typeof user.totalScrolls === 'number' ? user.totalScrolls : 0,
   };
 }
 
@@ -101,6 +107,123 @@ const SecureStorage = {
   },
 };
 
+export async function getOrCreateInstallationUUID(): Promise<string> {
+  const INSTALLATION_UUID_KEY = 'installation_uuid';
+  try {
+    let uuid = await SecureStore.getItemAsync(INSTALLATION_UUID_KEY);
+    if (!uuid) {
+      uuid = `uuid-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      await SecureStore.setItemAsync(INSTALLATION_UUID_KEY, uuid);
+    }
+    return uuid;
+  } catch {
+    return 'default-fallback-uuid';
+  }
+}
+
+async function alignStoreUserSession(targetUserId: string, serverSwipes: number = 0, serverScrolls: number = 0) {
+  console.log(`[AuthStore] Aligning local stores for user session: ${targetUserId} (Server Swipes: ${serverSwipes}, Scrolls: ${serverScrolls})`);
+  
+  // Wipe other store states in-memory synchronously to prevent leakage before new session
+  const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+  usePlaylistStateStore.getState().hardResetStore();
+  
+  const { useResumeStore } = require('./useResumeStore');
+  useResumeStore.getState().clearAll();
+  
+  const { useTrackingStore } = require('./useTrackingStore');
+  useTrackingStore.getState().resetSession();
+
+  // Set new userId in store
+  usePlaylistStateStore.setState({ userId: targetUserId });
+
+  // Preheat encryption key for synchronous decryption
+  try {
+    const { initializeEncryptionKey } = require('@/utils/sqliteSyncBridge');
+    await initializeEncryptionKey();
+  } catch (err) {
+    console.warn('[AuthStore] Failed eager encryption key preheat:', err);
+  }
+
+  // Load state from SQLite for the target user partition
+  try {
+    const { loadStateFromSQLite, loadUserMetricsFromSQLite, saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
+    
+    const sqliteData = await loadStateFromSQLite(targetUserId);
+    if (sqliteData) {
+      const { foldersById, playlistsById, cardsById, offlineActionQueue } = sqliteData;
+      
+      // Construct playlistCardOrderMap from loaded playlistsById
+      const nextPlaylistCardOrderMap: Record<string, string[]> = {};
+      Object.keys(playlistsById).forEach((id) => {
+        const p = playlistsById[id];
+        if (p && !['easy', 'medium', 'hard', 'skipped'].includes(id)) {
+          const cardIds = p.cardIds || p.orderedCardIds || [];
+          nextPlaylistCardOrderMap[id] = cardIds.map((cid: string) => cid.split('-loop-')[0]).filter(Boolean);
+        }
+      });
+
+      // Rebuild cardDifficultyMap from persisted card difficultyState values
+      const nextDifficultyMap: Record<string, { difficulty: any; originalDifficulty: any; updatedAt: number; optimistic: boolean }> = {};
+      Object.keys(cardsById).forEach((cardId) => {
+        const card = cardsById[cardId] as any;
+        if (card && card.difficultyState) {
+          nextDifficultyMap[cardId] = {
+            difficulty: card.difficultyState,
+            originalDifficulty: card.difficultyState,
+            updatedAt: new Date(card.updatedAt || 0).getTime(),
+            optimistic: false,
+          };
+        }
+      });
+
+      usePlaylistStateStore.setState({
+        foldersById: { ...foldersById },
+        playlistsById: { ...playlistsById },
+        cardsById: { ...cardsById },
+        playlistCardOrderMap: nextPlaylistCardOrderMap,
+        cardDifficultyMap: nextDifficultyMap,
+        offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : [],
+        lastSyncedRevision: sqliteData.lastSyncedRevision || 0,
+        lastSyncedAt: sqliteData.lastSyncedAt || null,
+      });
+      console.log(`[AuthStore] SQLite user partition loaded into Zustand successfully for: ${targetUserId} | Classifications: ${Object.keys(nextDifficultyMap).length} | Revision: ${sqliteData.lastSyncedRevision || 0}`);
+    }
+    
+    const metrics = loadUserMetricsFromSQLite(targetUserId);
+    if (metrics) {
+      // Conflict-Free Merge: select the maximum of local and remote aggregates
+      const mergedSwipes = Math.max(metrics.totalSwipes || 0, serverSwipes);
+      const mergedScrolls = Math.max(metrics.totalScrolls || 0, serverScrolls);
+
+      const nextMetrics = {
+        totalSwipes: mergedSwipes,
+        totalScrolls: mergedScrolls,
+        unsyncedSwipes: metrics.unsyncedSwipes || 0,
+        unsyncedScrolls: metrics.unsyncedScrolls || 0,
+      };
+
+      saveUserMetricsToSQLite(targetUserId, nextMetrics);
+      useTrackingStore.getState().setMetrics(nextMetrics);
+      console.log(`[AuthStore] SQLite user metrics merged conflict-free into Zustand for: ${targetUserId}`);
+    } else {
+      // Fresh install / new device: populate SQLite and Zustand directly from server state
+      const defaultMetrics = {
+        totalSwipes: serverSwipes,
+        totalScrolls: serverScrolls,
+        unsyncedSwipes: 0,
+        unsyncedScrolls: 0,
+      };
+      saveUserMetricsToSQLite(targetUserId, defaultMetrics);
+      useTrackingStore.getState().setMetrics(defaultMetrics);
+      console.log(`[AuthStore] Fresh session. SQLite user metrics initialized from server for: ${targetUserId}`);
+    }
+    console.log(`[USER SESSION] Activated partition for ${targetUserId} | Local SQLite sync preheated.`);
+  } catch (e) {
+    console.warn('[AuthStore] Failed loading target user SQLite state/metrics:', e);
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
@@ -109,6 +232,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthReady: false,
   isSessionExpired: false,
   targetDeepLink: null,
+  isLoggingOut: false,
+  sessionGenerationId: 0,
 
   setTargetDeepLink: (link) => set({ targetDeepLink: link }),
   setSessionExpired: (expired) => set({ isSessionExpired: expired }),
@@ -119,24 +244,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       throw new Error('Invalid login payload');
     }
     
-    // Proactive Synchronous Account-Switching Flush Guard
-    const oldUser = get().user;
-    if (oldUser && oldUser.id !== safeUser.id) {
-      console.log('[AuthStore] Account switch detected! Sync purging old user session data...');
-      
-      // WIPE other store states in-memory synchronously to prevent leakage before new session
-      const { usePlaylistStateStore } = require('./usePlaylistStateStore');
-      usePlaylistStateStore.getState().hardResetStore();
-      
-      const { useResumeStore } = require('./useResumeStore');
-      useResumeStore.getState().clearAll();
-      
-      const { useTrackingStore } = require('./useTrackingStore');
-      useTrackingStore.getState().resetSession();
-
-      // WIPE our own auth state synchronously first so that no components render with old user
-      set({ token: null, user: null, isAuthenticated: false, isSessionExpired: false, isAuthReady: false });
-    }
+    // Proactive Synchronous Account-Switching and Metrics Hydration Guard
+    await alignStoreUserSession(safeUser.id, safeUser.totalSwipes || 0, safeUser.totalScrolls || 0);
 
     if (token) {
       await SecureStorage.setToken(token);
@@ -148,6 +257,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    set({ isLoggingOut: true });
     // Check for pending unsynced work before destroying session
     const pendingCount = (() => {
       try {
@@ -175,14 +285,67 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       } catch (flushErr) {
         console.warn('[AuthStore] Emergency flush failed. Queue preserved for next login.', flushErr);
-        // Queue survives in AsyncStorage — will be available when user logs back in
       }
     }
+
+    // Attempt full catalog sync before logout so playlist truth reaches MongoDB.
+    try {
+      const token = get().token;
+      if (token) {
+        const { syncManager } = require('@/utils/syncManager');
+        await Promise.race([
+          syncManager.sync(true),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Emergency catalog sync timeout')), 5000)),
+        ]);
+        console.log('[AuthStore] Emergency catalog sync succeeded before logout.');
+      }
+    } catch (catalogErr) {
+      console.warn('[AuthStore] Emergency catalog sync failed before logout:', catalogErr);
+    }
+
+    // Attempt emergency analytics sync before logout
+    try {
+      const { syncAnalyticsOnly } = require('../hooks/useSyncEngine');
+      const token = get().token;
+      if (token) {
+        await Promise.race([
+          syncAnalyticsOnly(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Emergency analytics sync timeout')), 3000)),
+        ]);
+        console.log('[AuthStore] Emergency analytics sync succeeded before logout.');
+      }
+    } catch (analyticsErr) {
+      console.warn('[AuthStore] Emergency analytics sync failed before logout:', analyticsErr);
+    }
+
+    // Clear only in-memory/session state. SQLite rows are partitioned by userId and must remain
+    // available so switching accounts does not mix or lose local Personal tab data.
+    try {
+      const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+      usePlaylistStateStore.getState().hardResetStore();
+      
+      const { useResumeStore } = require('@/store/useResumeStore');
+      useResumeStore.getState().clearAll();
+      
+      const { useTrackingStore } = require('./useTrackingStore');
+      useTrackingStore.getState().resetSession();
+      useTrackingStore.getState().setMetrics({ totalSwipes: 0, totalScrolls: 0, unsyncedSwipes: 0, unsyncedScrolls: 0 });
+    } catch (sqlPurgeErr) {
+      console.warn('[AuthStore] Local memory reset error during logout:', sqlPurgeErr);
+    }
+
     await SecureStorage.removeToken();
     await SecureStorage.removeUser();
-    const { useResumeStore } = require('@/store/useResumeStore');
-    useResumeStore.getState().clearAll();
-    set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: false, isSessionExpired: false });
+    set((state) => ({
+      token: null,
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      isAuthReady: false,
+      isSessionExpired: false,
+      isLoggingOut: false,
+      sessionGenerationId: state.sessionGenerationId + 1,
+    }));
   },
 
   restoreSession: async () => {
@@ -199,6 +362,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       if (isOffline) {
         if (user && token) {
+          await alignStoreUserSession(user.id, user.totalSwipes || 0, user.totalScrolls || 0);
           console.log('[Session Recovery] Network offline. Instantly recovered cached session locally! (<50ms)');
           set({ token, user, isAuthenticated: user.id !== 'guest-user', isLoading: false, isAuthReady: true, isSessionExpired: false });
           return;
@@ -209,6 +373,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       if (user?.id === 'guest-user') {
+        await alignStoreUserSession(user.id, user.totalSwipes || 0, user.totalScrolls || 0);
         set({ token: '', user, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
         return;
       }
@@ -246,6 +411,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           const cachedToken = await SecureStorage.getToken();
           
           if (cachedUser && cachedToken) {
+            await alignStoreUserSession(cachedUser.id, cachedUser.totalSwipes || 0, cachedUser.totalScrolls || 0);
             console.log('[Session Recovery] Successfully recovered session locally in Offline Mode!');
             set({ token: cachedToken, user: cachedUser, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
             return;
@@ -261,6 +427,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
 
+      await alignStoreUserSession(freshUser.id, freshUser.totalSwipes || 0, freshUser.totalScrolls || 0);
       await SecureStorage.setUser(freshUser);
       set({ token, user: freshUser, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
     } catch (error: any) {
@@ -283,7 +450,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const { idToken } = userInfo.data;
         if (!idToken) throw new Error('No ID Token returned during silent sign-in.');
 
-        const res = await api.post('/auth/google', { idToken });
+        const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+        const { deviceId, logicalClockSequence } = usePlaylistStateStore.getState();
+        const clockEpoch = String(logicalClockSequence || 0);
+
+        const res = await api.post('/auth/google', { idToken, deviceId, clockEpoch });
         const { token, user: rawUser } = res.data.data;
         
         const user = {
@@ -292,8 +463,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           email: rawUser.email,
           avatarUrl: rawUser.profilePicture,
           role: rawUser.role,
+          totalSwipes: rawUser.totalSwipes || 0,
+          totalScrolls: rawUser.totalScrolls || 0,
         };
 
+        await alignStoreUserSession(user.id, user.totalSwipes || 0, user.totalScrolls || 0);
         await SecureStorage.setToken(token);
         await SecureStorage.setUser(user);
         set({ token, user, isAuthenticated: true, isSessionExpired: false, isAuthReady: true });

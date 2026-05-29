@@ -20,8 +20,10 @@ import { useTrackingStore } from '@/store/useTrackingStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useGetFolders } from '@/hooks/useFolders';
 import { useSyncEngine } from '@/hooks/useSyncEngine';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { syncManager } from '@/utils/syncManager';
 import * as reelsFeedService from '@/services/reelsFeedService';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -215,6 +217,8 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
             email: rawUser.email,
             avatarUrl: rawUser.profilePicture,
             role: rawUser.role,
+            totalSwipes: rawUser.totalSwipes || 0,
+            totalScrolls: rawUser.totalScrolls || 0,
           };
 
           await login(token, user);
@@ -304,13 +308,44 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                         text: "Refresh",
                         onPress: async () => {
                           try {
-                            // Trigger a forced offline local seed refresh
+                            // 1. Wipe all user-derived tables from SQLite
+                            const activeUserId = useAuthStore.getState().user?.id || 'guest-user';
+                            const { clearAllDataFromSQLite } = require('@/utils/sqliteSyncBridge');
+                            clearAllDataFromSQLite(activeUserId);
+                            
+                            // 2. Wipe from Zustand memory cache instantly
+                            usePlaylistStateStore.setState({
+                              foldersById: {},
+                              playlistsById: {},
+                              cardsById: {},
+                              playlistCardOrderMap: {
+                                easy: [],
+                                medium: [],
+                                hard: [],
+                                skipped: [],
+                                likes: [],
+                                'watch-later': [],
+                                all: [],
+                              },
+                              cardDifficultyMap: {},
+                              offlineActionQueue: [],
+                              deadLetterQueue: [],
+                              smartPlaylistDeltaCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
+                              initialSmartCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
+                              lastSyncedRevision: 0,
+                              lastSyncedAt: null,
+                              hydratedPlaylists: {},
+                              fullPlaylistCards: {},
+                              hydratedPlaylistCardCounts: {},
+                            });
+
+                            // 3. Trigger full background sync and local seed refresh
                             await triggerBackgroundSync(true);
 
                             Toast.show({
                               type: 'success',
                               text1: 'Content Refreshed',
-                              text2: 'All offline cards and folders have been updated.',
+                              text2: 'Stale collections cleared and database resynced.',
                             });
                             
                             onClose();
@@ -370,7 +405,7 @@ export const ReelsSettingsOverlay = React.memo(({
   showReelContentSelect = true,
 }: ReelsSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
-  const { currentMode, setMode } = useTrackingStore();
+  const { currentMode, setMode, totalSwipes, totalScrolls } = useTrackingStore();
   const { user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const queryClient = useQueryClient();
@@ -380,32 +415,81 @@ export const ReelsSettingsOverlay = React.memo(({
     return foldersData?.results?.filter((f: any) => f.parentFolderId === null || !f.parentFolderId) || [];
   }, [foldersData]);
 
-  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
-  const [prefLoading, setPrefLoading] = useState(false);
+  const cardsById = usePlaylistStateStore((s) => s.cardsById);
+  const foldersById = usePlaylistStateStore((s) => s.foldersById);
+
+  const rootFoldersWithCounts = React.useMemo(() => {
+    const directCardCounts = new Map<string, number>();
+    Object.values(cardsById).forEach((card: any) => {
+      const folderId = card.folderId ? card.folderId.toString() : null;
+      if (folderId) {
+        directCardCounts.set(folderId, (directCardCounts.get(folderId) || 0) + 1);
+      }
+    });
+
+    const childrenMap = new Map<string, string[]>();
+    Object.values(foldersById).forEach((f: any) => {
+      if (f.parentFolderId) {
+        const pId = f.parentFolderId.toString();
+        const existing = childrenMap.get(pId) || [];
+        existing.push(f._id.toString());
+        childrenMap.set(pId, existing);
+      }
+    });
+
+    const getDescendantFolderIds = (folderId: string): string[] => {
+      const ids: string[] = [folderId];
+      const queue: string[] = [folderId];
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const children = childrenMap.get(curr) || [];
+        children.forEach((child) => {
+          if (!ids.includes(child)) {
+            ids.push(child);
+            queue.push(child);
+          }
+        });
+      }
+      return ids;
+    };
+
+    return rootFolders.map((rootFolder: any) => {
+      const rootId = rootFolder._id.toString();
+      const descendants = getDescendantFolderIds(rootId);
+      
+      let totalCards = 0;
+      descendants.forEach((dId) => {
+        totalCards += directCardCounts.get(dId) || 0;
+      });
+
+      return {
+        ...rootFolder,
+        cardCount: totalCards,
+      };
+    });
+  }, [cardsById, foldersById, rootFolders]);
+
+  const { data: prefsData } = useQuery({
+    queryKey: ['reelPreferences'],
+    queryFn: reelsFeedService.getReelPreferences,
+    enabled: !isGuest,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
+
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>(() => {
+    return prefsData?.selectedRootFolderIds || [];
+  });
 
   useEffect(() => {
-    if (isGuest) return;
-    
-    const fetchPrefs = async () => {
-      try {
-        if (selectedFolderIds.length === 0) {
-          setPrefLoading(true);
-        }
-        const prefs = await reelsFeedService.getReelPreferences();
-        if (prefs?.selectedRootFolderIds) {
-          setSelectedFolderIds(prefs.selectedRootFolderIds);
-        }
-      } catch (err) {
-        console.error('[Prefs Fetch Error]', err);
-      } finally {
-        setPrefLoading(false);
-      }
-    };
-    
-    fetchPrefs();
-  }, [isOpen, isGuest]);
+    if (prefsData?.selectedRootFolderIds) {
+      setSelectedFolderIds(prefsData.selectedRootFolderIds);
+    }
+  }, [prefsData, isOpen]);
 
-  const handleToggleFolder = async (folderId: string) => {
+  const [prefSaving, setPrefSaving] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{ title: string; message: string } | null>(null);
+
+  const handleToggleFolder = (folderId: string) => {
     if (isGuest) return;
     const isAlreadySelected = selectedFolderIds.includes(folderId);
     let nextSelected: string[];
@@ -413,11 +497,10 @@ export const ReelsSettingsOverlay = React.memo(({
     if (isAlreadySelected) {
       nextSelected = selectedFolderIds.filter(id => id !== folderId);
       if (nextSelected.length === 0) {
-        if (Platform.OS === 'web') {
-          alert('You must select at least one folder for study content.');
-        } else {
-          Alert.alert('Selection Locked', 'You must select at least one folder for study content.');
-        }
+        setCustomAlert({
+          title: 'Selection Locked',
+          message: 'You must select at least one folder for study content.'
+        });
         return;
       }
     } else {
@@ -425,38 +508,45 @@ export const ReelsSettingsOverlay = React.memo(({
     }
 
     // Calculate total cards in the next selection
-    const totalCardsInNextSelection = rootFolders
+    const totalCardsInNextSelection = rootFoldersWithCounts
       .filter((f: any) => nextSelected.includes(f._id))
       .reduce((sum: number, f: any) => sum + (f.cardCount || 0), 0);
 
     if (totalCardsInNextSelection === 0) {
-      if (Platform.OS === 'web') {
-        alert('Warning: No cards will be available to preview in the selected folder(s).');
-      } else {
-        Alert.alert(
-          'Empty Selection Warning', 
-          'Warning: The selected folder(s) contain 0 cards. Please select at least one folder with cards to study.'
-        );
-      }
+      setCustomAlert({
+        title: 'Empty Selection Warning',
+        message: 'Warning: The remaining selected folder(s) contain 0 cards. Please select folder with cards inside to study.'
+      });
       return;
     }
 
     setSelectedFolderIds(nextSelected);
+  };
 
+  const handleSavePreferences = async () => {
+    if (isGuest) {
+      onClose();
+      return;
+    }
+    
     try {
-      await reelsFeedService.updateReelPreferences(nextSelected);
-      queryClient.invalidateQueries({ queryKey: ['reelFeed'] });
-      Toast.show({
-        type: 'info',
-        text1: 'Preferences Updated',
-        text2: 'This reels content preference will be applied after 5-10 reels',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      setPrefSaving(true);
+      
+      // 1. Save folder content preferences to database
+      await reelsFeedService.updateReelPreferences(selectedFolderIds);
+      
+      // 2. Explicitly regenerate deterministic reels feed session on backend
+      await reelsFeedService.regenerateReelQueue();
+
+      // 3. Invalidate queries to refresh general reels deck and seen counts
+      queryClient.invalidateQueries({ queryKey: ['reelsFeed'] });
+      queryClient.invalidateQueries({ queryKey: ['folders'] });
+      queryClient.invalidateQueries({ queryKey: ['reelPreferences'] });
     } catch (err) {
-      console.error('[Prefs Save Error]', err);
-      // Rollback
-      setSelectedFolderIds(selectedFolderIds);
+      console.warn('[Prefs Save Warning] Failed to update preferences on server, closing overlay anyway:', err);
+    } finally {
+      setPrefSaving(false);
+      onClose();
     }
   };
 
@@ -517,27 +607,19 @@ export const ReelsSettingsOverlay = React.memo(({
             {/* Session Stats Section */}
             <View style={styles.statsPanel}>
               <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Session Timer</Text>
+                <Text style={styles.statLabel}>Session Time</Text>
                 <Text style={styles.statValue}>{sessionTimer}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Revised Cards</Text>
+                <Text style={styles.statLabel}>This Session</Text>
                 <Text style={styles.statValue}>{questionsRevised}</Text>
               </View>
-            </View>
-
-            {/* Playback Mode */}
-            <View style={styles.settingGroup}>
-              <Text style={styles.groupLabel}>Playback Mode</Text>
-              <SegmentedControl
-                options={[
-                  { id: 'sequential', label: 'Order' },
-                  { id: 'shuffle', label: 'Shuffle' },
-                ]}
-                activeId={currentMode === 'shuffle' ? 'shuffle' : 'sequential'}
-                onChange={(id) => setMode(id as 'sequential' | 'shuffle')}
-              />
+              <View style={styles.statDivider} />
+              <View style={styles.statBox}>
+                <Text style={styles.statLabel}>Total Revised</Text>
+                <Text style={styles.statValue}>{totalSwipes + totalScrolls}</Text>
+              </View>
             </View>
 
             {/* Content Mode */}
@@ -579,32 +661,65 @@ export const ReelsSettingsOverlay = React.memo(({
                 <View style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(226, 232, 240, 0.6)', padding: 12, gap: 10 }}>
                   {isGuest ? (
                     <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginVertical: 8 }}>Sign in to filter reels by folder</Text>
-                  ) : rootFolders.length === 0 ? (
+                  ) : rootFoldersWithCounts.length === 0 ? (
                     <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginVertical: 8 }}>No folders created yet. Create folders to filter your reels.</Text>
                   ) : (
-                    rootFolders.map((folder: any) => {
-                      const isChecked = selectedFolderIds.includes(folder._id);
-                      return (
-                        <TouchableOpacity
-                          key={folder._id}
-                          onPress={() => handleToggleFolder(folder._id)}
-                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                            <FolderIcon size={16} color={folder.color || '#7c3aed'} />
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0F172A' }}>
-                              {folder.title} ({folder.cardCount ?? 0})
-                            </Text>
-                          </View>
-                          {isChecked ? (
-                            <CheckSquare size={18} color="#8B5CF6" strokeWidth={2.5} />
-                          ) : (
-                            <Square size={18} color="#94A3B8" strokeWidth={2} />
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })
+                    <>
+                      {rootFoldersWithCounts.map((folder: any) => {
+                        const isChecked = selectedFolderIds.includes(folder._id);
+                        return (
+                          <TouchableOpacity
+                            key={folder._id}
+                            onPress={() => handleToggleFolder(folder._id)}
+                            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}
+                            activeOpacity={0.7}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                              <FolderIcon size={16} color={folder.color || '#7c3aed'} />
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: '#0F172A' }}>
+                                {folder.title} ({folder.cardCount ?? 0})
+                              </Text>
+                            </View>
+                            {isChecked ? (
+                              <CheckSquare size={18} color="#8B5CF6" strokeWidth={2.5} />
+                            ) : (
+                              <Square size={18} color="#94A3B8" strokeWidth={2} />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+
+                      {/* Save Preferences Button */}
+                      <TouchableOpacity
+                        onPress={handleSavePreferences}
+                        disabled={prefSaving}
+                        activeOpacity={0.8}
+                        style={{
+                          backgroundColor: '#8B5CF6',
+                          borderRadius: 16,
+                          height: 40,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginTop: 10,
+                          flexDirection: 'row',
+                          gap: 8,
+                          shadowColor: '#8B5CF6',
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.15,
+                          shadowRadius: 10,
+                          elevation: 2,
+                          opacity: prefSaving ? 0.7 : 1,
+                        }}
+                      >
+                        {prefSaving ? (
+                          <ActivityIndicator color="#ffffff" size="small" />
+                        ) : (
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                            Save Preferences
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </>
                   )}
                 </View>
               </View>
@@ -612,6 +727,81 @@ export const ReelsSettingsOverlay = React.memo(({
           </ScrollView>
         </Animated.View>
       </View>
+
+      {/* Premium Custom Alert Popup Modal */}
+      {customAlert && (
+        <Modal transparent visible={!!customAlert} animationType="fade" onRequestClose={() => setCustomAlert(null)}>
+          <View style={{
+            flex: 1,
+            backgroundColor: 'rgba(15, 23, 42, 0.45)', // Premium dark blur overlay
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 24,
+          }}>
+            <View style={{
+              width: '100%',
+              maxWidth: 290,
+              backgroundColor: '#ffffff',
+              borderRadius: 24,
+              padding: 20,
+              alignItems: 'center',
+              shadowColor: '#0F172A',
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.08,
+              shadowRadius: 24,
+              elevation: 6,
+              borderWidth: 1,
+              borderColor: 'rgba(226, 232, 240, 0.8)',
+            }}>
+              {/* Sleek Alert Title */}
+              <Text style={{
+                fontSize: 15,
+                fontWeight: '800',
+                color: '#0F172A',
+                textAlign: 'center',
+                marginBottom: 8,
+                letterSpacing: -0.1,
+              }}>
+                {customAlert.title}
+              </Text>
+              
+              {/* Message */}
+              <Text style={{
+                fontSize: 12,
+                color: '#64748B',
+                textAlign: 'center',
+                lineHeight: 17,
+                marginBottom: 18,
+              }}>
+                {customAlert.message}
+              </Text>
+
+              {/* Action Button */}
+              <TouchableOpacity
+                onPress={() => setCustomAlert(null)}
+                activeOpacity={0.8}
+                style={{
+                  width: '100%',
+                  height: 38,
+                  backgroundColor: '#8B5CF6',
+                  borderRadius: 14,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 8,
+                  elevation: 1,
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 12.5, fontWeight: '700' }}>
+                  Acknowledge
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
     </Modal>
   );
 });

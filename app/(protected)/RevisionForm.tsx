@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Controller, Control, FieldError } from 'react-hook-form';
 import { z } from 'zod';
-import { DifficultyLevels, ComplexityLevels } from '../../../src/types/revision';
+import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
 import type { IFolder } from '@/types/folder';
 
 export const cardFormSchema = z.object({

@@ -5,6 +5,24 @@ import { syncTelemetry } from './syncTelemetry';
 const DATABASE_NAME = 'dsa_reels.db';
 const BACKUP_DATABASE_NAME = 'sqlite_backups/dsa_reels_backup.db';
 
+class Mutex {
+  private queue: Promise<any> = Promise.resolve();
+
+  async acquire(): Promise<() => void> {
+    let release: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const current = this.queue;
+    this.queue = current.then(() => next);
+    await current;
+    return release!;
+  }
+}
+
+export const sqliteLock = new Mutex();
+export const hydrationLock = new Mutex();
+
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let isSqliteSupported: boolean | null = null;
 
@@ -206,6 +224,7 @@ export function setupDatabaseTables(): void {
     db.execSync(`
       CREATE TABLE IF NOT EXISTS folders (
         id TEXT PRIMARY KEY NOT NULL,
+        userId TEXT NOT NULL DEFAULT '',
         title TEXT NOT NULL,
         description TEXT,
         icon TEXT DEFAULT 'folder',
@@ -220,9 +239,16 @@ export function setupDatabaseTables(): void {
         ackedLogicalSequence INTEGER DEFAULT 0,
         serverLogicalSequence INTEGER DEFAULT 0,
         clockEpoch TEXT NOT NULL,
-        updatedAt TEXT NOT NULL
+        updatedAt TEXT NOT NULL,
+        isDeleted INTEGER DEFAULT 0,
+        deletedAt TEXT
       );
     `);
+
+    // Self-healing migrations for folders
+    try { db.execSync('ALTER TABLE folders ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
+    try { db.execSync('ALTER TABLE folders ADD COLUMN isDeleted INTEGER DEFAULT 0;'); } catch {}
+    try { db.execSync('ALTER TABLE folders ADD COLUMN deletedAt TEXT;'); } catch {}
 
     // E: Playlists Table
     db.execSync(`
@@ -241,14 +267,20 @@ export function setupDatabaseTables(): void {
         ackedLogicalSequence INTEGER DEFAULT 0,
         serverLogicalSequence INTEGER DEFAULT 0,
         clockEpoch TEXT NOT NULL,
-        updatedAt TEXT NOT NULL
+        updatedAt TEXT NOT NULL,
+        isDeleted INTEGER DEFAULT 0,
+        deletedAt TEXT
       );
     `);
+
+    // Self-healing migrations for playlists
+    try { db.execSync('ALTER TABLE playlists ADD COLUMN isDeleted INTEGER DEFAULT 0;'); } catch {}
+    try { db.execSync('ALTER TABLE playlists ADD COLUMN deletedAt TEXT;'); } catch {}
 
     // F: Spaced Repetition Card Progress (Logical clocks only)
     db.execSync(`
       CREATE TABLE IF NOT EXISTS card_progress (
-        cardId TEXT PRIMARY KEY NOT NULL,
+        cardId TEXT NOT NULL,
         userId TEXT NOT NULL,
         completed INTEGER CHECK(completed IN (0, 1)) DEFAULT 0,
         revisionCount INTEGER DEFAULT 0,
@@ -263,14 +295,52 @@ export function setupDatabaseTables(): void {
         difficultyAckedSequence INTEGER DEFAULT 0,
         difficultyServerSequence INTEGER DEFAULT 0,
         difficultyClockEpoch TEXT,
-        updatedAt TEXT NOT NULL
+        updatedAt TEXT NOT NULL,
+        PRIMARY KEY (cardId, userId)
       );
     `);
+
+    // Self-healing migration for composite primary key in case card_progress was created with cardId primary key
+    try {
+      const tableInfo = db.getAllSync<any>('PRAGMA table_info(card_progress);');
+      const pkColumns = tableInfo.filter((col: any) => col.pk > 0);
+      if (pkColumns.length === 1 && pkColumns[0].name === 'cardId') {
+        console.log('[SQLite Database] Migrating card_progress to composite PRIMARY KEY(cardId, userId)...');
+        db.execSync(`
+          CREATE TABLE IF NOT EXISTS card_progress_new (
+            cardId TEXT NOT NULL,
+            userId TEXT NOT NULL,
+            completed INTEGER CHECK(completed IN (0, 1)) DEFAULT 0,
+            revisionCount INTEGER DEFAULT 0,
+            favorite INTEGER CHECK(favorite IN (0, 1)) DEFAULT 0,
+            difficultyState TEXT CHECK(difficultyState IN ('easy', 'medium', 'hard', 'skipped', NULL)),
+            revision INTEGER DEFAULT 0,
+            favoritePendingSequence INTEGER DEFAULT 0,
+            favoriteAckedSequence INTEGER DEFAULT 0,
+            favoriteServerSequence INTEGER DEFAULT 0,
+            favoriteClockEpoch TEXT,
+            difficultyPendingSequence INTEGER DEFAULT 0,
+            difficultyAckedSequence INTEGER DEFAULT 0,
+            difficultyServerSequence INTEGER DEFAULT 0,
+            difficultyClockEpoch TEXT,
+            updatedAt TEXT NOT NULL,
+            PRIMARY KEY (cardId, userId)
+          );
+        `);
+        db.execSync('INSERT OR IGNORE INTO card_progress_new SELECT * FROM card_progress;');
+        db.execSync('DROP TABLE card_progress;');
+        db.execSync('ALTER TABLE card_progress_new RENAME TO card_progress;');
+        console.log('[SQLite Database] Migration: card_progress converted to composite PRIMARY KEY successfully.');
+      }
+    } catch (migErr: any) {
+      console.warn('[SQLite Database Migration Warning] Failed to migrate card_progress primary key:', migErr.message);
+    }
 
     // G: Durable Offline Queue Table
     db.execSync(`
       CREATE TABLE IF NOT EXISTS offline_queue (
         id TEXT PRIMARY KEY NOT NULL,
+        userId TEXT NOT NULL DEFAULT '',
         action TEXT NOT NULL,
         payload TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
@@ -282,10 +352,26 @@ export function setupDatabaseTables(): void {
       );
     `);
 
+    // Self-healing migrations for offline_queue
+    try { db.execSync('ALTER TABLE offline_queue ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
+
+    // G2: User Metrics Table (for swipes and scrolls)
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS user_metrics (
+        userId TEXT PRIMARY KEY NOT NULL,
+        totalSwipes INTEGER NOT NULL DEFAULT 0,
+        totalScrolls INTEGER NOT NULL DEFAULT 0,
+        unsyncedSwipes INTEGER NOT NULL DEFAULT 0,
+        unsyncedScrolls INTEGER NOT NULL DEFAULT 0,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
+
     // H: Sync Transactions Table
     db.execSync(`
       CREATE TABLE IF NOT EXISTS sync_transactions (
         transactionId TEXT PRIMARY KEY NOT NULL,
+        userId TEXT NOT NULL DEFAULT '',
         startedAt INTEGER NOT NULL,
         batchPayload TEXT NOT NULL,
         acknowledged INTEGER CHECK(acknowledged IN (0, 1)) DEFAULT 0,
@@ -293,10 +379,14 @@ export function setupDatabaseTables(): void {
       );
     `);
 
+    // Self-healing migrations for sync_transactions
+    try { db.execSync('ALTER TABLE sync_transactions ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
+
     // I: Delta Stream Checkpoints Table
     db.execSync(`
       CREATE TABLE IF NOT EXISTS delta_stream_checkpoints (
         transactionId TEXT PRIMARY KEY NOT NULL,
+        userId TEXT NOT NULL DEFAULT '',
         bucket TEXT NOT NULL,
         revision INTEGER NOT NULL,
         pageNumber INTEGER NOT NULL,
@@ -305,13 +395,66 @@ export function setupDatabaseTables(): void {
       );
     `);
 
+    // Self-healing migrations for delta_stream_checkpoints
+    try { db.execSync('ALTER TABLE delta_stream_checkpoints ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
+
     // J: Translations Ledger
     db.execSync(`
       CREATE TABLE IF NOT EXISTS id_translations (
         tempId TEXT PRIMARY KEY NOT NULL,
         realId TEXT NOT NULL,
         mutationId TEXT NOT NULL,
-        createdAt INTEGER NOT NULL
+        createdAt INTEGER NOT NULL,
+        userId TEXT NOT NULL DEFAULT ''
+      );
+    `);
+
+    // Self-healing migrations for id_translations
+    try { db.execSync('ALTER TABLE id_translations ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
+
+    // K: Sync Cursors Table (Resolves Loophole 52)
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS sync_cursors (
+        userId TEXT PRIMARY KEY NOT NULL,
+        lastPulledRevision INTEGER DEFAULT 0,
+        lastAppliedMutationId TEXT,
+        lastServerCheckpoint TEXT,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
+
+    // L: Replay Traces Table (Resolves Loophole 72)
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS replay_traces (
+        id TEXT PRIMARY KEY NOT NULL,
+        userId TEXT NOT NULL,
+        installationUUID TEXT NOT NULL,
+        mutationId TEXT NOT NULL,
+        sequenceChain INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        reconciliationOutcome TEXT
+      );
+    `);
+
+    // M: Queue Snapshots Table (Resolves Loophole 94)
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS queue_snapshots (
+        userId TEXT PRIMARY KEY NOT NULL,
+        snapshotPayload TEXT NOT NULL,
+        checkpointSequence INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+    `);
+
+    // N: Durable deletion tombstones. These are the local "never resurrect" facts.
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS deleted_entities (
+        userId TEXT NOT NULL,
+        entityId TEXT NOT NULL,
+        entityType TEXT CHECK(entityType IN ('folder', 'playlist', 'card')) NOT NULL,
+        deletedAt TEXT NOT NULL,
+        revision INTEGER DEFAULT 0,
+        PRIMARY KEY (userId, entityId, entityType)
       );
     `);
 
@@ -320,9 +463,17 @@ export function setupDatabaseTables(): void {
     db.execSync('CREATE INDEX IF NOT EXISTS idx_folders_revision ON folders(revision);');
     db.execSync('CREATE INDEX IF NOT EXISTS idx_playlists_revision ON playlists(revision);');
     db.execSync('CREATE INDEX IF NOT EXISTS idx_progress_revision ON card_progress(revision);');
+    db.execSync('CREATE INDEX IF NOT EXISTS idx_playlists_user_rev ON playlists(userId, revision);');
+    db.execSync('CREATE INDEX IF NOT EXISTS idx_progress_user ON card_progress(userId, cardId);');
+    db.execSync('CREATE INDEX IF NOT EXISTS idx_deleted_entities_user_type ON deleted_entities(userId, entityType);');
   });
 
   console.log('[SQLite Database] Schema DDL, tables, and high-performance indexes created successfully.');
+  try {
+    runStartupRecoveryJournal();
+  } catch (err: any) {
+    console.warn('[SQLite Database Startup Recovery Warning] Failed:', err.message);
+  }
 }
 
 /**
@@ -351,5 +502,22 @@ export function getOrCreateClockEpoch(): string {
   } catch (err: any) {
     console.error('[SQLite Epoch Error] Failed to read/create epoch:', err.message);
     return 'default-epoch';
+  }
+}
+
+/**
+ * Processes Startup Recovery Journal to roll back or safely clean up interrupted sync sessions.
+ */
+export function runStartupRecoveryJournal(): void {
+  if (!isSQLiteAvailable()) return;
+  const db = getDatabase();
+  try {
+    db.withTransactionSync(() => {
+      // 1. If any sync transaction was left uncommitted, mark it aborted/deleted
+      db.runSync('DELETE FROM sync_transactions WHERE committed = 0;');
+      console.log('[SQLite Recovery Journal] Wiped uncommitted sync transactions.');
+    });
+  } catch (err: any) {
+    console.error('[SQLite Recovery Journal Error] Startup recovery run crashed:', err.message);
   }
 }

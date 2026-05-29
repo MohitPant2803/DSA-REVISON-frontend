@@ -62,7 +62,7 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated;
+  const hasLocal = hasHydrated || Object.keys(foldersById).length > 0;
 
   return {
     data: hasLocal ? {

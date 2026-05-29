@@ -17,8 +17,10 @@ import {
   enqueueActionInSQLite,
   removeProcessedActionsFromSQLite,
   clearOfflineActionsInSQLite,
+  isEntityDeletedInSQLite,
 } from '../utils/sqliteSyncBridge';
 import { getOrCreateClockEpoch } from '../utils/sqliteDatabase';
+import { logPersonalAction } from '@/utils/personalActionLogger';
 
 
 export interface OfflineAction {
@@ -181,8 +183,9 @@ interface PlaylistState {
   incrementSyncGeneration: () => number;
   currentRevisionCounter: number;
   deadLetterQueue: OfflineAction[];
-  pauseSyncGate: (() => void) | null;
-  resumeSyncGate: (() => void) | null;
+  syncTriggerCount: number;
+  triggerSync: () => void;
+  userId: string | null;
 
   // Phase 0 Migration & Observability
   storeSchemaVersion: number;
@@ -203,6 +206,8 @@ interface PlaylistState {
   initialSmartCounts: Record<string, number>;
   smartPlaylistDeltaCounts: Record<string, number>;
   hydratedPlaylists: Record<string, boolean>;
+  fullPlaylistCards: Record<string, IPopulatedRevisionCard[]>;
+  hydratedPlaylistCardCounts: Record<string, number>;
 
   // Observability & Recovery Metrics
   lastSuccessfulSyncAt: number | null;
@@ -215,6 +220,7 @@ interface PlaylistState {
 
   // Actions
   hydratePlaylistCards: (playlistId: string, cards: IPopulatedRevisionCard[]) => void;
+  checkAndLoadMorePlaylistCards: (playlistId: string, activeIndex: number) => void;
   hydrateSmartCounts: (counts: Record<string, number>) => void;
   setPlaylistCardOrder: (playlistId: string, cardIds: string[]) => void;
   hydrateCustomPlaylistOrder: (playlistId: string, cardIds: string[]) => void;
@@ -248,7 +254,8 @@ interface PlaylistState {
 
   // Persistent Offline Action Queue & Compaction
   offlineActionQueue: OfflineAction[];
-  enqueueOfflineAction: (action: Omit<OfflineAction, 'id'>) => void;
+  poisonActionIds: string[];
+  enqueueOfflineAction: (action: Omit<OfflineAction, 'id' | 'retryCount' | 'localRevision' | 'deviceId' | 'logicalSequence'>) => void;
   clearOfflineActions: () => void;
   removeProcessedActions: (processedIds: string[]) => void;
   isolatePoisonActions: (failedIds: string[]) => void;
@@ -290,8 +297,8 @@ const DEFAULT_STATE = {
   syncGenerationId: 0,
   currentRevisionCounter: 0,
   deadLetterQueue: [],
-  pauseSyncGate: null,
-  resumeSyncGate: null,
+  syncTriggerCount: 0,
+  userId: null,
   storeSchemaVersion: 3,
   enableRevisionSync: false,
   enableStrictContiguity: false,
@@ -306,7 +313,10 @@ const DEFAULT_STATE = {
   initialSmartCounts: {},
   smartPlaylistDeltaCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
   hydratedPlaylists: {},
+  fullPlaylistCards: {},
+  hydratedPlaylistCardCounts: {},
   offlineActionQueue: [],
+  poisonActionIds: [],
   lastSyncedAt: null,
   lastSuccessfulSyncAt: null,
   lastCatalogIntegrityCheck: null,
@@ -326,6 +336,20 @@ const DEFAULT_STATE = {
   dbVersion: null,
 };
 
+const cleanCardIds = (cardIds: string[]) => {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  cardIds.forEach((id) => {
+    const cleanId = String(id || '').split('-loop-')[0];
+    if (!cleanId || seen.has(cleanId)) return;
+    seen.add(cleanId);
+    output.push(cleanId);
+  });
+
+  return output;
+};
+
 export const usePlaylistStateStore = create<PlaylistState>()(
   persist(
     (set, get) => ({
@@ -335,6 +359,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       setBootstrapStatus: (status) => set({ bootstrapStatus: status }),
       setSyncStatus: (status) => set({ syncStatus: status }),
       setLiveSyncPaused: (val) => set({ isLiveSyncPaused: val }),
+      triggerSync: () => set((state) => ({ syncTriggerCount: state.syncTriggerCount + 1 })),
       setHasSyncedThisSession: (val) => set({ hasSyncedThisSession: val }),
       setSeniorQuotes: (quotes) => set({ seniorQuotes: quotes }),
       incrementQuoteIndex: (quotesCount) => {
@@ -360,9 +385,10 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       applyQueueRewrite: (newQueue) => {
         set({ offlineActionQueue: [...newQueue] });
         try {
-          clearOfflineActionsInSQLite();
+          const activeUserId = get().userId || 'guest-user';
+          clearOfflineActionsInSQLite(activeUserId);
           const epoch = getOrCreateClockEpoch();
-          newQueue.forEach(a => enqueueActionInSQLite(a, epoch));
+          newQueue.forEach(a => enqueueActionInSQLite(a, activeUserId, epoch));
         } catch (err: any) {
           console.error('[SQLite Bridge Error] applyQueueRewrite failed:', err.message);
         }
@@ -379,7 +405,38 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       hydrateSmartCounts: (counts) => {
         set((state) => {
           if (__DEV__) console.log(`[Zustand] hydrateSmartCounts:`, counts);
-          const nextCounts = { ...state.initialSmartCounts, ...counts };
+          
+          // Deduct current optimistic deltas from the incoming counts to get the correct base counts.
+          // This avoids double-counting since the incoming counts are computed (base + delta).
+          const adjustedCounts: Record<string, number> = {};
+          let changed = false;
+
+          Object.keys(counts).forEach((key) => {
+            const passedCount = counts[key];
+            const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(key);
+
+            if (isSmart) {
+              const delta = state.smartPlaylistDeltaCounts[key] || 0;
+              const baseCount = Math.max(0, passedCount - delta);
+              adjustedCounts[key] = baseCount;
+
+              if (state.initialSmartCounts[key] !== baseCount) {
+                changed = true;
+              }
+            } else {
+              adjustedCounts[key] = passedCount;
+              if (state.initialSmartCounts[key] !== passedCount) {
+                changed = true;
+              }
+            }
+          });
+
+          // Avoid triggering unnecessary store state updates if the counts are identical.
+          if (!changed) {
+            return {};
+          }
+
+          const nextCounts = { ...state.initialSmartCounts, ...adjustedCounts };
           const nextDifficultyMap = { ...state.cardDifficultyMap };
           
           Object.keys(nextDifficultyMap).forEach((cardId) => {
@@ -413,12 +470,36 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       hydratePlaylistCards: (playlistId, cards) => {
         set((state) => {
-          if (__DEV__) console.log(`[Zustand] hydratePlaylistCards for Playlist: "${playlistId}" | Count: ${cards.length}`);
+          const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+          const activeUserId = state.userId || 'guest-user';
+          const safeCards = cards.filter((card) => {
+            if (!card?._id) return false;
+            return !isEntityDeletedInSQLite(activeUserId, 'card', card._id);
+          });
+          
+          // Store complete cards list in memory
+          const nextFullPlaylistCards = {
+            ...state.fullPlaylistCards,
+            [playlistId]: safeCards
+          };
+
+          const initialLoadCount = Math.min(20, safeCards.length);
+          const initialCards = safeCards.slice(0, initialLoadCount);
+
+          if (__DEV__) {
+            console.log(`[Zustand] hydratePlaylistCards for Playlist: "${playlistId}" | Initial count hydrated: ${initialLoadCount} of ${cards.length}`);
+          }
+
           const nextCardsById = { ...state.cardsById };
           const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
           const nextHydratedPlaylists = { ...state.hydratedPlaylists, [playlistId]: true };
+          const nextHydratedPlaylistCardCounts = {
+            ...state.hydratedPlaylistCardCounts,
+            [playlistId]: initialLoadCount
+          };
 
-          cards.forEach((card) => {
+          // Hydrate the initial 20 cards
+          initialCards.forEach((card) => {
             if (!card || !card._id) return;
             const cleanId = card._id.split('-loop-')[0];
             const existingCard = nextCardsById[cleanId];
@@ -427,32 +508,86 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             nextCardsById[cleanId] = mergeCardState(local, existingCard, card);
           });
 
-          const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
           if (!isSmart) {
-            const cleanIds = cards.map((c) => c._id.split('-loop-')[0]).filter(Boolean);
-            const existingOrder = nextPlaylistCardOrderMap[playlistId];
-
-            if (!existingOrder) {
-              nextPlaylistCardOrderMap[playlistId] = cleanIds;
-            } else {
-              const existingSet = new Set(existingOrder);
-              const newIds = cleanIds.filter((id) => !existingSet.has(id));
-              nextPlaylistCardOrderMap[playlistId] = [...existingOrder, ...newIds];
-            }
+            const cleanIds = cleanCardIds(safeCards.map((c) => c._id));
+            nextPlaylistCardOrderMap[playlistId] = cleanIds;
           }
 
           return {
             cardsById: nextCardsById,
             playlistCardOrderMap: nextPlaylistCardOrderMap,
             hydratedPlaylists: nextHydratedPlaylists,
+            fullPlaylistCards: nextFullPlaylistCards,
+            hydratedPlaylistCardCounts: nextHydratedPlaylistCardCounts,
           };
+        });
+      },
+
+      checkAndLoadMorePlaylistCards: (playlistId, activeIndex) => {
+        set((state) => {
+          const fullCards = state.fullPlaylistCards[playlistId];
+          if (!fullCards || fullCards.length === 0) return {};
+
+          const hydratedCount = state.hydratedPlaylistCardCounts[playlistId] || 0;
+          const totalCards = fullCards.length;
+
+          if (hydratedCount >= totalCards) return {};
+
+          const remainingCount = totalCards - hydratedCount;
+          const remainingFromActive = hydratedCount - activeIndex;
+
+          // When less than 10 cards remain in the hydrated portion
+          if (remainingFromActive < 10) {
+            // "if less that 10 card remains then take as many as left"
+            const loadCount = remainingCount < 10 ? remainingCount : 10;
+            const nextHydratedCount = hydratedCount + loadCount;
+            
+            const newCardsToHydrate = fullCards.slice(hydratedCount, nextHydratedCount);
+            
+            if (__DEV__) {
+              console.log(`[Zustand Store] Lazy hydrating next ${loadCount} cards. Hydrated: ${nextHydratedCount}/${totalCards}. Remaining: ${remainingCount - loadCount}`);
+            }
+
+            const nextCardsById = { ...state.cardsById };
+            const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
+            const nextHydratedPlaylistCardCounts = {
+              ...state.hydratedPlaylistCardCounts,
+              [playlistId]: nextHydratedCount
+            };
+
+            newCardsToHydrate.forEach((card) => {
+              if (!card || !card._id) return;
+              const cleanId = card._id.split('-loop-')[0];
+              const existingCard = nextCardsById[cleanId];
+              const local = state.cardDifficultyMap[cleanId];
+              
+              nextCardsById[cleanId] = mergeCardState(local, existingCard, card);
+            });
+
+            const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
+            if (!isSmart) {
+              const cleanIds = newCardsToHydrate.map((c) => c._id.split('-loop-')[0]).filter(Boolean);
+              const existingOrder = nextPlaylistCardOrderMap[playlistId] || [];
+              const existingSet = new Set(existingOrder);
+              const newIds = cleanIds.filter((id) => !existingSet.has(id));
+              nextPlaylistCardOrderMap[playlistId] = [...existingOrder, ...newIds];
+            }
+
+            return {
+              cardsById: nextCardsById,
+              playlistCardOrderMap: nextPlaylistCardOrderMap,
+              hydratedPlaylistCardCounts: nextHydratedPlaylistCardCounts,
+            };
+          }
+
+          return {};
         });
       },
 
       setPlaylistCardOrder: (playlistId, cardIds) => {
         set((state) => {
           const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
-          const cleanIds = cardIds.map(id => id.split('-loop-')[0]).filter(Boolean);
+          const cleanIds = cleanCardIds(cardIds);
           nextPlaylistCardOrderMap[playlistId] = cleanIds;
 
           const nextPlaylists = { ...state.playlistsById };
@@ -465,6 +600,11 @@ export const usePlaylistStateStore = create<PlaylistState>()(
               dirty: true,
               localRevision: nextRev,
             };
+            try {
+              savePlaylistsToSQLite([nextPlaylists[playlistId]], state.userId || 'guest-user');
+            } catch (err: any) {
+              console.error('[SQLite Bridge Error] setPlaylistCardOrder failed to save to SQLite:', err.message);
+            }
             return {
               playlistCardOrderMap: nextPlaylistCardOrderMap,
               playlistsById: nextPlaylists,
@@ -495,7 +635,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             return {};
           }
 
-          const cleanIds = cardIds.map(id => id.split('-loop-')[0]).filter(Boolean);
+          const cleanIds = cleanCardIds(cardIds);
           const nextPlaylistCardOrderMap = {
             ...state.playlistCardOrderMap,
             [playlistId]: cleanIds,
@@ -538,9 +678,15 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             'likes': newList,
           };
 
+          if (!value) {
+            import('@/services/sessionQueueService')
+              .then(mod => mod.invalidateSession('likes'))
+              .catch(err => console.error('[Dynamic Import Failure] Invalidate likes session failed:', err));
+          }
+
           try {
             if (nextCardsById[cleanId]) {
-              saveCardsToSQLite([nextCardsById[cleanId]]);
+              saveCardsToSQLite([nextCardsById[cleanId]], state.userId || 'guest-user');
             }
           } catch (err: any) {
             console.error('[SQLite Bridge Error] toggleFavoriteInStore failed:', err.message);
@@ -588,9 +734,15 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             trackingState.setWatchLater(trackingState.watchLaterCardIds.filter(id => id !== cleanId));
           }
 
+          if (!value) {
+            import('@/services/sessionQueueService')
+              .then(mod => mod.invalidateSession('watch-later'))
+              .catch(err => console.error('[Dynamic Import Failure] Invalidate watch-later session failed:', err));
+          }
+
           try {
             if (nextCardsById[cleanId]) {
-              saveCardsToSQLite([nextCardsById[cleanId]]);
+              saveCardsToSQLite([nextCardsById[cleanId]], state.userId || 'guest-user');
             }
           } catch (err: any) {
             console.error('[SQLite Bridge Error] toggleWatchLaterInStore failed:', err.message);
@@ -610,11 +762,11 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const nextRev = state.currentRevisionCounter + 1;
           const nextPlaylists = { ...state.playlistsById };
           
-          const currentList = state.playlistCardOrderMap[playlistId] || [];
+          const currentList = cleanCardIds(state.playlistCardOrderMap[playlistId] || []);
           let newList = currentList;
           if (value) {
             if (!currentList.includes(cleanId)) {
-              newList = [cleanId, ...currentList];
+              newList = [...currentList, cleanId];
             }
           } else {
             newList = currentList.filter(id => id !== cleanId);
@@ -635,10 +787,38 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             ...state.playlistCardOrderMap,
             [playlistId]: newList,
           };
+          const nextFullPlaylistCards = { ...state.fullPlaylistCards };
+          const nextHydratedPlaylistCardCounts = { ...state.hydratedPlaylistCardCounts };
+
+          if (!value && nextFullPlaylistCards[playlistId]) {
+            nextFullPlaylistCards[playlistId] = nextFullPlaylistCards[playlistId]
+              .filter((card) => card?._id?.split('-loop-')[0] !== cleanId);
+            nextHydratedPlaylistCardCounts[playlistId] = Math.min(
+              nextHydratedPlaylistCardCounts[playlistId] || 0,
+              nextFullPlaylistCards[playlistId].length
+            );
+          } else if (value && state.cardsById[cleanId] && nextFullPlaylistCards[playlistId]) {
+            const exists = nextFullPlaylistCards[playlistId]
+              .some((card) => card?._id?.split('-loop-')[0] === cleanId);
+            if (!exists) {
+              nextFullPlaylistCards[playlistId] = [
+                ...nextFullPlaylistCards[playlistId],
+                state.cardsById[cleanId],
+              ];
+              nextHydratedPlaylistCardCounts[playlistId] = nextFullPlaylistCards[playlistId].length;
+            }
+          }
+
+          // If a card was removed, invalidate active session queue to avoid out of bounds crash
+          if (!value) {
+            import('@/services/sessionQueueService')
+              .then(mod => mod.invalidateSession(playlistId))
+              .catch(err => console.error('[Dynamic Import Failure] Invalidate custom playlist session failed:', err));
+          }
 
           try {
             if (nextPlaylists[playlistId]) {
-              savePlaylistsToSQLite([nextPlaylists[playlistId]]);
+              savePlaylistsToSQLite([nextPlaylists[playlistId]], state.userId || 'guest-user');
             }
           } catch (err: any) {
             console.error('[SQLite Bridge Error] toggleCustomPlaylistItemInStore failed:', err.message);
@@ -647,6 +827,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           return {
             playlistCardOrderMap: nextPlaylistCardOrderMap,
             playlistsById: nextPlaylists,
+            fullPlaylistCards: nextFullPlaylistCards,
+            hydratedPlaylistCardCounts: nextHydratedPlaylistCardCounts,
             currentRevisionCounter: nextRev,
           };
         });
@@ -739,7 +921,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           }
 
           try {
-            saveCardsToSQLite([nextCardsById[cleanId]]);
+            saveCardsToSQLite([nextCardsById[cleanId]], state.userId || 'guest-user');
           } catch (err: any) {
             console.error('[SQLite Bridge Error] transferCard failed:', err.message);
           }
@@ -831,7 +1013,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
           try {
             if (nextCardsById[cleanId]) {
-              saveCardsToSQLite([nextCardsById[cleanId]]);
+              saveCardsToSQLite([nextCardsById[cleanId]], state.userId || 'guest-user');
             }
           } catch (err: any) {
             console.error('[SQLite Bridge Error] revertTransfer failed:', err.message);
@@ -880,7 +1062,6 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         });
       },
 
-      offlineActionQueue: [],
       enqueueOfflineAction: (action) => {
         set((state) => {
           const nextRev = state.currentRevisionCounter + 1;
@@ -940,9 +1121,10 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           compactedQueue.push(newAction);
 
           try {
-            clearOfflineActionsInSQLite();
+            const activeUserId = state.userId || 'guest-user';
+            clearOfflineActionsInSQLite(activeUserId);
             const epoch = getOrCreateClockEpoch();
-            compactedQueue.forEach(a => enqueueActionInSQLite(a, epoch));
+            compactedQueue.forEach(a => enqueueActionInSQLite(a, activeUserId, epoch));
           } catch (err: any) {
             console.error('[SQLite Bridge Error] enqueueOfflineAction failed:', err.message);
           }
@@ -951,8 +1133,6 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             console.log(`[Offline Queue] Enqueued with Monotonic Rev ${nextRev} & Logical Seq ${nextSeq}:`, newAction, `| Queue Size: ${compactedQueue.length}`);
           }
 
-          // Fix #4: Critical write durability - synchronously trigger write flush to AsyncStorage
-          // so the enqueued offline action survives any sudden app exit/kill!
           setTimeout(() => {
             try {
               const { flushPendingWrites } = require('@/utils/StorageEngine');
@@ -970,16 +1150,16 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       clearOfflineActions: () => {
         try {
-          clearOfflineActionsInSQLite();
+          clearOfflineActionsInSQLite(get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] clearOfflineActions failed:', err.message);
         }
-        set({ offlineActionQueue: [] });
+        set({ offlineActionQueue: [], poisonActionIds: [] });
       },
 
       removeProcessedActions: (processedIds) => {
         try {
-          removeProcessedActionsFromSQLite(processedIds);
+          removeProcessedActionsFromSQLite(processedIds, get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] removeProcessedActions failed:', err.message);
         }
@@ -990,7 +1170,6 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const nextCards = { ...state.cardsById };
           const nextDifficultyMap = { ...state.cardDifficultyMap };
 
-          // Fix #3: Reset optimistic dirty flags for successfully committed entities
           state.offlineActionQueue.forEach((a) => {
             if (!idsSet.has(a.id)) return;
             const payload = a.payload;
@@ -1000,6 +1179,11 @@ export const usePlaylistStateStore = create<PlaylistState>()(
               const pId = payload.playlistId || payload.tempId;
               if (pId && nextPlaylists[pId]) {
                 nextPlaylists[pId] = { ...nextPlaylists[pId], dirty: false, localRevision: undefined };
+              }
+            } else if (a.action === 'DELETE_PLAYLIST') {
+              const pId = payload.playlistId;
+              if (pId) {
+                delete nextPlaylists[pId];
               }
             } else if (a.action === 'CREATE_FOLDER' || a.action === 'UPDATE_FOLDER') {
               const fId = payload.folderId || payload.tempId || payload.dto?._id;
@@ -1024,8 +1208,6 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             console.log(`[Offline Queue] Removed ${processedIds.length} acknowledged actions. Remaining: ${nextQueue.length}`);
           }
 
-          // Fix #4: Critical write durability - synchronously trigger write flush to AsyncStorage
-          // for the queue update so it survives sudden crashes/app-kills!
           setTimeout(() => {
             try {
               const { flushPendingWrites } = require('@/utils/StorageEngine');
@@ -1045,30 +1227,17 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       isolatePoisonActions: (failedIds) => {
         set((state) => {
-          const failedSet = new Set(failedIds);
-          const nextQueue: OfflineAction[] = [];
-          const nextDLQ = [...state.deadLetterQueue];
-
+          const idsSet = new Set(failedIds);
+          let nextPoison = [...state.poisonActionIds];
+          let nextQueue = [...state.offlineActionQueue];
+          
           state.offlineActionQueue.forEach((a) => {
-            if (failedSet.has(a.id)) {
-              const retry = (a.retryCount || 0) + 1;
-              if (retry > 3) {
-                nextDLQ.push({ ...a, retryCount: retry });
-                if (__DEV__) {
-                  console.warn(`[Poison Queue] Action ${a.action} (${a.id}) isolated to Dead Letter Queue after 3 failures.`);
-                }
-              } else {
-                nextQueue.push({ ...a, retryCount: retry });
-              }
-            } else {
-              nextQueue.push(a);
+            if (idsSet.has(a.id)) {
+              if (!nextPoison.includes(a.id)) nextPoison.push(a.id);
             }
           });
-
-          return {
-            offlineActionQueue: nextQueue,
-            deadLetterQueue: nextDLQ,
-          };
+          nextQueue = state.offlineActionQueue.filter(a => !idsSet.has(a.id));
+          return { poisonActionIds: nextPoison, offlineActionQueue: nextQueue };
         });
       },
 
@@ -1083,14 +1252,16 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       },
 
       hydrateFolders: (folders) => {
+        const activeUserId = get().userId || 'guest-user';
+        const safeFolders = folders.filter((f) => f?._id && !isEntityDeletedInSQLite(activeUserId, 'folder', f._id));
         try {
-          saveFoldersToSQLite(folders);
+          saveFoldersToSQLite(safeFolders, activeUserId);
         } catch (err: any) {
           console.error('[SQLite Bridge Error] hydrateFolders failed:', err.message);
         }
         set((state) => {
           const nextFolders = { ...state.foldersById };
-          folders.forEach((f) => {
+          safeFolders.forEach((f) => {
             if (f && f._id) nextFolders[f._id] = f;
           });
           return { foldersById: nextFolders };
@@ -1098,8 +1269,10 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       },
 
       hydratePlaylists: (playlists) => {
+        const activeUserId = get().userId || 'guest-user';
+        const safePlaylists = playlists.filter((p) => p?._id && !isEntityDeletedInSQLite(activeUserId, 'playlist', p._id));
         try {
-          savePlaylistsToSQLite(playlists);
+          savePlaylistsToSQLite(safePlaylists, activeUserId);
         } catch (err: any) {
           console.error('[SQLite Bridge Error] hydratePlaylists failed:', err.message);
         }
@@ -1107,7 +1280,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const nextPlaylists = { ...state.playlistsById };
           const activeQueue = state.offlineActionQueue;
 
-          playlists.forEach((p) => {
+          safePlaylists.forEach((p) => {
             if (!p || !p._id) return;
 
             const localPlaylist = state.playlistsById[p._id];
@@ -1136,16 +1309,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           localRevision: nextRev,
         };
         try {
-          savePlaylistsToSQLite([newPlaylist]);
+          savePlaylistsToSQLite([newPlaylist], get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] createPlaylistInStore failed:', err.message);
         }
         set((state) => {
-          return {
+          const nextState = {
+            ...state,
             playlistsById: {
               ...state.playlistsById,
               [playlist._id]: newPlaylist,
             },
+            currentRevisionCounter: nextRev,
+          };
+          logPersonalAction('playlist.created.local', {
+            playlistId: playlist._id,
+            name: playlist.name,
+          }, nextState);
+          return {
+            playlistsById: nextState.playlistsById,
             currentRevisionCounter: nextRev,
           };
         });
@@ -1153,24 +1335,51 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       deletePlaylistInStore: (playlistId) => {
         try {
-          deletePlaylistFromSQLite(playlistId);
+          deletePlaylistFromSQLite(playlistId, get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] deletePlaylistInStore failed:', err.message);
         }
         set((state) => {
-          const nextPlaylists = { ...state.playlistsById };
-          delete nextPlaylists[playlistId];
+          const playlist = state.playlistsById[playlistId];
+          if (!playlist) return {};
+
+          const nextPlaylists = {
+            ...state.playlistsById,
+            [playlistId]: {
+              ...playlist,
+              isDeleted: true,
+              deletedAt: new Date().toISOString(),
+            }
+          };
           
           const nextOrderMap = { ...state.playlistCardOrderMap };
           delete nextOrderMap[playlistId];
           
           const nextHydrated = { ...state.hydratedPlaylists };
           delete nextHydrated[playlistId];
+          const nextFullPlaylistCards = { ...state.fullPlaylistCards };
+          delete nextFullPlaylistCards[playlistId];
+          const nextHydratedCounts = { ...state.hydratedPlaylistCardCounts };
+          delete nextHydratedCounts[playlistId];
 
+          const nextState = {
+            ...state,
+            playlistsById: nextPlaylists,
+            playlistCardOrderMap: nextOrderMap,
+            hydratedPlaylists: nextHydrated,
+            fullPlaylistCards: nextFullPlaylistCards,
+            hydratedPlaylistCardCounts: nextHydratedCounts,
+          };
+          logPersonalAction('playlist.deleted.local', {
+            playlistId,
+            name: playlist.name,
+          }, nextState);
           return {
             playlistsById: nextPlaylists,
             playlistCardOrderMap: nextOrderMap,
             hydratedPlaylists: nextHydrated,
+            fullPlaylistCards: nextFullPlaylistCards,
+            hydratedPlaylistCardCounts: nextHydratedCounts,
           };
         });
       },
@@ -1182,15 +1391,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const nextRev = state.currentRevisionCounter + 1;
           const updatedPlaylist = { ...playlist, name, dirty: true, localRevision: nextRev };
           try {
-            savePlaylistsToSQLite([updatedPlaylist]);
+            savePlaylistsToSQLite([updatedPlaylist], state.userId || 'guest-user');
           } catch (err: any) {
             console.error('[SQLite Bridge Error] updatePlaylistInStore failed:', err.message);
           }
+          const nextPlaylists = {
+            ...state.playlistsById,
+            [playlistId]: updatedPlaylist,
+          };
+          const nextState = {
+            ...state,
+            playlistsById: nextPlaylists,
+            currentRevisionCounter: nextRev,
+          };
+          logPersonalAction('playlist.updated.local', {
+            playlistId,
+            name,
+          }, nextState);
           return {
-            playlistsById: {
-              ...state.playlistsById,
-              [playlistId]: updatedPlaylist,
-            },
+            playlistsById: nextPlaylists,
             currentRevisionCounter: nextRev,
           };
         });
@@ -1204,7 +1423,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           localRevision: nextRev,
         };
         try {
-          saveFoldersToSQLite([newFolder]);
+          saveFoldersToSQLite([newFolder], get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] createFolderInStore failed:', err.message);
         }
@@ -1221,7 +1440,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       deleteFolderInStore: (folderId) => {
         try {
-          deleteFolderFromSQLite(folderId);
+          deleteFolderFromSQLite(folderId, get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] deleteFolderInStore failed:', err.message);
         }
@@ -1276,7 +1495,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       deleteCardInStore: (cardId) => {
         try {
-          deleteCardFromSQLite(cardId);
+          deleteCardFromSQLite(cardId, get().userId || 'guest-user');
         } catch (err: any) {
           console.error('[SQLite Bridge Error] deleteCardInStore failed:', err.message);
         }
@@ -1327,7 +1546,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const nextRev = state.currentRevisionCounter + 1;
           const updatedFolder = { ...folder, ...updateData, dirty: true, localRevision: nextRev } as IFolder;
           try {
-            saveFoldersToSQLite([updatedFolder]);
+            saveFoldersToSQLite([updatedFolder], state.userId || 'guest-user');
           } catch (err: any) {
             console.error('[SQLite Bridge Error] updateFolderInStore failed:', err.message);
           }
@@ -1377,7 +1596,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       storage: createJSONStorage(() => storageEngine),
       version: 3,
       partialize: (state) => ({
+        userId: state.userId,
         offlineActionQueue: state.offlineActionQueue,
+        poisonActionIds: state.poisonActionIds,
         deadLetterQueue: state.deadLetterQueue,
         currentRevisionCounter: state.currentRevisionCounter,
         foldersById: state.foldersById,
@@ -1399,6 +1620,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         lastSyncedRevision: state.lastSyncedRevision,
         deviceId: state.deviceId,
         logicalClockSequence: state.logicalClockSequence,
+        fullPlaylistCards: state.fullPlaylistCards,
+        hydratedPlaylistCardCounts: state.hydratedPlaylistCardCounts,
       }),
       migrate: (persistedState: any, version: number) => {
         if (__DEV__) console.log(`[Schema Migration] Migrating from version ${version} to 3`);
@@ -1422,6 +1645,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             enableRevisionSync: false,
             enableStrictContiguity: false,
             lastSyncedRevision: 0,
+            offlineActionQueue: state.offlineActionQueue || [],
+            poisonActionIds: [],
           };
         }
         return state;
@@ -1447,31 +1672,83 @@ export const usePlaylistStateStore = create<PlaylistState>()(
                 console.log(`[Zustand Rehydration Completed] Took ${duration.toFixed(2)}ms.`);
               }
 
-              // 1. Verify integrity & Setup SQLite Tables
-              try {
-                const { isSQLiteAvailable, verifyDatabaseIntegrity, setupDatabaseTables } = require('../utils/sqliteDatabase');
-                if (isSQLiteAvailable()) {
-                  verifyDatabaseIntegrity();
-                  setupDatabaseTables();
-                  const epoch = getOrCreateClockEpoch();
-                  
-                  // 2. Load latest relational state from SQLite canonical truth
-                  const { loadStateFromSQLite } = require('../utils/sqliteSyncBridge');
-                  const sqliteData = loadStateFromSQLite();
-                  if (sqliteData) {
-                    const { foldersById, playlistsById, cardsById, offlineActionQueue } = sqliteData;
-                    usePlaylistStateStore.setState({
-                      foldersById: { ...rehydratedState.foldersById, ...foldersById },
-                      playlistsById: { ...rehydratedState.playlistsById, ...playlistsById },
-                      cardsById: { ...rehydratedState.cardsById, ...cardsById },
-                      offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : rehydratedState.offlineActionQueue,
-                    });
-                    console.log('[Zustand SQLite Rehydration] Canonical relational tables loaded successfully.');
+                // 1. Verify integrity & Setup SQLite Tables
+                (async () => {
+                  try {
+                    const { isSQLiteAvailable, verifyDatabaseIntegrity, setupDatabaseTables } = require('../utils/sqliteDatabase');
+                    if (isSQLiteAvailable()) {
+                      verifyDatabaseIntegrity();
+                      setupDatabaseTables();
+                      const epoch = getOrCreateClockEpoch();
+                      
+                      const activeUserId = rehydratedState.userId || 'guest-user';
+                      const authStore = require('./useAuthStore').useAuthStore;
+                      const capturedGenId = authStore.getState().sessionGenerationId;
+                      
+                      // 2. Load latest relational state from SQLite canonical truth
+                      const { loadStateFromSQLite } = require('../utils/sqliteSyncBridge');
+                      const sqliteData = await loadStateFromSQLite(activeUserId);
+                      
+                      // Cancel guard check: if session changed mid-load, discard loaded state
+                      if (capturedGenId !== authStore.getState().sessionGenerationId) {
+                        console.log('[Zustand SQLite Rehydration] Aborting hydration commit: session switched mid-load.');
+                        return;
+                      }
+
+                      if (sqliteData) {
+                        const { foldersById, playlistsById, cardsById, offlineActionQueue } = sqliteData;
+                        const currentState = usePlaylistStateStore.getState();
+
+                        // Construct playlistCardOrderMap from loaded playlistsById
+                        const nextPlaylistCardOrderMap = { ...currentState.playlistCardOrderMap };
+                        Object.keys(playlistsById).forEach((id) => {
+                          const p = playlistsById[id];
+                          if (p && !['easy', 'medium', 'hard', 'skipped'].includes(id)) {
+                            const cardIds = p.cardIds || p.orderedCardIds || [];
+                            nextPlaylistCardOrderMap[id] = cardIds.map((cid: string) => cid.split('-loop-')[0]).filter(Boolean);
+                          }
+                        });
+
+                        // Rebuild cardDifficultyMap from persisted card difficultyState values
+                        const allCards = { ...currentState.cardsById, ...cardsById };
+                        const nextDifficultyMap: Record<string, any> = { ...currentState.cardDifficultyMap };
+                        Object.keys(allCards).forEach((cardId) => {
+                          const card = allCards[cardId] as any;
+                          if (card && card.difficultyState) {
+                            // Only set if there's no existing optimistic entry
+                            if (!nextDifficultyMap[cardId]?.optimistic) {
+                              nextDifficultyMap[cardId] = {
+                                difficulty: card.difficultyState,
+                                originalDifficulty: card.difficultyState,
+                                updatedAt: new Date(card.updatedAt || 0).getTime(),
+                                optimistic: false,
+                              };
+                            }
+                          }
+                        });
+
+                        usePlaylistStateStore.setState({
+                          foldersById: { ...currentState.foldersById, ...foldersById },
+                          playlistsById: { ...currentState.playlistsById, ...playlistsById },
+                          cardsById: allCards,
+                          playlistCardOrderMap: nextPlaylistCardOrderMap,
+                          cardDifficultyMap: nextDifficultyMap,
+                          offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : currentState.offlineActionQueue,
+                          lastSyncedRevision: sqliteData.lastSyncedRevision || 0,
+                          lastSyncedAt: sqliteData.lastSyncedAt || null,
+                        });
+                        console.log(`[Zustand SQLite Rehydration] Canonical relational tables loaded successfully. Classifications: ${Object.keys(nextDifficultyMap).length} | Revision: ${sqliteData.lastSyncedRevision || 0}`);
+                      }
+                    }
+                  } catch (sqlErr: any) {
+                    console.error('[Zustand SQLite Rehydration Error] Setup failed:', sqlErr.message);
+                  } finally {
+                    // Set hasHydrated to true in the finally block so that it is guaranteed to run after SQLite loads,
+                    // even if there is an error in the SQLite process!
+                    const latestState = usePlaylistStateStore.getState();
+                    latestState.setHasHydrated(true);
                   }
-                }
-              } catch (sqlErr: any) {
-                console.error('[Zustand SQLite Rehydration Error] Setup failed:', sqlErr.message);
-              }
+                })();
               
               // Auto-generate stable deviceId if not present
               if (!rehydratedState.deviceId) {
@@ -1485,8 +1762,6 @@ export const usePlaylistStateStore = create<PlaylistState>()(
                 usePlaylistStateStore.setState({ deviceId: devId });
                 console.log(`[Zustand DeviceId] Generated stable deviceId: ${devId}`);
               }
-              
-              rehydratedState.setHasHydrated(true);
             }
           }
         };

@@ -143,7 +143,11 @@ export default function CreateRevisionScreen() {
 
     const onDone = () => {
       Toast.show({ type: 'success', text1: isEditMode ? 'Card updated successfully' : 'Card created successfully' });
-      router.back();
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(protected)/(tabs)/learn');
+      }
     };
 
     if (isEditMode && cardToEdit) {

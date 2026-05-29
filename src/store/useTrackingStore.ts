@@ -43,6 +43,7 @@ interface TrackingState {
   incrementSwipe: () => void;
   incrementScroll: () => void;
   clearUnsyncedAnalytics: () => void;
+  setMetrics: (metrics: { totalSwipes: number; totalScrolls: number; unsyncedSwipes: number; unsyncedScrolls: number }) => void;
 }
 
 export const useTrackingStore = create<TrackingState>()(
@@ -137,19 +138,71 @@ export const useTrackingStore = create<TrackingState>()(
         completedCardIds: {},
       }),
       
-      incrementSwipe: () => set((state) => ({
-        totalSwipes: state.totalSwipes + 1,
-        unsyncedSwipes: state.unsyncedSwipes + 1,
-      })),
+      incrementSwipe: () => set((state) => {
+        const nextSwipes = state.totalSwipes + 1;
+        const nextUnsynced = state.unsyncedSwipes + 1;
+        
+        // Save to SQLite instantly in background
+        const authStore = require('./useAuthStore').useAuthStore;
+        const userId = authStore.getState().user?.id || 'guest-user';
+        const { saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
+        saveUserMetricsToSQLite(userId, {
+          totalSwipes: nextSwipes,
+          totalScrolls: state.totalScrolls,
+          unsyncedSwipes: nextUnsynced,
+          unsyncedScrolls: state.unsyncedScrolls,
+        });
+
+        return {
+          totalSwipes: nextSwipes,
+          unsyncedSwipes: nextUnsynced,
+        };
+      }),
       
-      incrementScroll: () => set((state) => ({
-        totalScrolls: state.totalScrolls + 1,
-        unsyncedScrolls: state.unsyncedScrolls + 1,
-      })),
+      incrementScroll: () => set((state) => {
+        const nextScrolls = state.totalScrolls + 1;
+        const nextUnsynced = state.unsyncedScrolls + 1;
+        
+        // Save to SQLite instantly in background
+        const authStore = require('./useAuthStore').useAuthStore;
+        const userId = authStore.getState().user?.id || 'guest-user';
+        const { saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
+        saveUserMetricsToSQLite(userId, {
+          totalSwipes: state.totalSwipes,
+          totalScrolls: nextScrolls,
+          unsyncedSwipes: state.unsyncedSwipes,
+          unsyncedScrolls: nextUnsynced,
+        });
+
+        return {
+          totalScrolls: nextScrolls,
+          unsyncedScrolls: nextUnsynced,
+        };
+      }),
       
-      clearUnsyncedAnalytics: () => set({
-        unsyncedSwipes: 0,
-        unsyncedScrolls: 0,
+      clearUnsyncedAnalytics: () => set((state) => {
+        // Save to SQLite instantly in background
+        const authStore = require('./useAuthStore').useAuthStore;
+        const userId = authStore.getState().user?.id || 'guest-user';
+        const { saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
+        saveUserMetricsToSQLite(userId, {
+          totalSwipes: state.totalSwipes,
+          totalScrolls: state.totalScrolls,
+          unsyncedSwipes: 0,
+          unsyncedScrolls: 0,
+        });
+
+        return {
+          unsyncedSwipes: 0,
+          unsyncedScrolls: 0,
+        };
+      }),
+
+      setMetrics: (metrics) => set({
+        totalSwipes: metrics.totalSwipes,
+        totalScrolls: metrics.totalScrolls,
+        unsyncedSwipes: metrics.unsyncedSwipes,
+        unsyncedScrolls: metrics.unsyncedScrolls,
       }),
     }),
     {
@@ -160,10 +213,6 @@ export const useTrackingStore = create<TrackingState>()(
         infiniteLoop: state.infiniteLoop,
         watchLaterCardIds: state.watchLaterCardIds,
         loopsCompleted: state.loopsCompleted,
-        totalSwipes: state.totalSwipes,
-        totalScrolls: state.totalScrolls,
-        unsyncedSwipes: state.unsyncedSwipes,
-        unsyncedScrolls: state.unsyncedScrolls,
       }),
     }
   )

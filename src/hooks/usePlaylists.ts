@@ -8,6 +8,7 @@ import { useTrackingStore } from '@/store/useTrackingStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { usePlaylistCards as useStorePlaylistCards } from '@/hooks/usePlaylistStoreSelectors';
 import type { ApiPlaylist } from '@/services/playlistService';
+import { resolveCardState } from '@/utils/resolveCardState';
 
 export const PLAYLISTS_KEY = 'playlists';
 export const PLAYLIST_DETAIL_KEY = 'playlistDetail';
@@ -43,6 +44,59 @@ export function mapApiPlaylist(p: ApiPlaylist, index = 0): UIPlaylist {
   };
 }
 
+export const SYSTEM_PLAYLISTS = [
+  { id: 'easy', name: 'Easy', color1: '#10B981', color2: '#059669', description: 'Dynamic list of cards you marked as Easy' },
+  { id: 'medium', name: 'Medium', color1: '#F59E0B', color2: '#D97706', description: 'Dynamic list of cards you marked as Medium' },
+  { id: 'hard', name: 'Hard', color1: '#EF4444', color2: '#DC2626', description: 'Dynamic list of cards you marked as Hard' },
+  { id: 'skipped', name: 'Skipped', color1: '#64748B', color2: '#475569', description: 'Dynamic list of cards you skipped' },
+];
+
+export function buildSystemPlaylists() {
+  const state = usePlaylistStateStore.getState();
+
+  return SYSTEM_PLAYLISTS.map(p => {
+    const playlistId = p.id;
+    
+    // Helper to compute live unique count from cache
+    const getLiveCount = () => {
+      const cardDifficultyMap = state.cardDifficultyMap;
+      const resolved = Object.keys(state.cardsById)
+        .map((cardId) => state.cardsById[cardId])
+        .filter(Boolean)
+        .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById))
+        .filter((resolvedCard) => resolvedCard.difficultyState === playlistId);
+
+      const seenTitles = new Set<string>();
+      const uniqueResolved = resolved.filter((card) => {
+        if (!card.title) return false;
+        const titleKey = card.title.trim().toLowerCase();
+        if (seenTitles.has(titleKey)) return false;
+        seenTitles.add(titleKey);
+        return true;
+      });
+
+      return uniqueResolved.length;
+    };
+
+    const liveCount = getLiveCount();
+    const fallbackCount = Math.max(0, (state.initialSmartCounts[playlistId] || 0) + (state.smartPlaylistDeltaCounts[playlistId] || 0));
+    
+    let itemCount = fallbackCount;
+    if (state.hydratedPlaylists[playlistId]) {
+      itemCount = liveCount;
+    } else if (liveCount > 0 && (liveCount >= fallbackCount || fallbackCount === 0)) {
+      itemCount = liveCount;
+    }
+
+    return {
+      ...p,
+      itemCount,
+      completedLoops: useTrackingStore.getState().loopsCompleted[p.id] ?? 0,
+      orderedCardIds: [],
+    };
+  });
+}
+
 // 1. Authoritative Local-First Hybrid Reads for Playlists
 export const usePlaylists = () => {
   const playlistsById = usePlaylistStateStore((s) => s.playlistsById);
@@ -52,15 +106,20 @@ export const usePlaylists = () => {
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const uiPlaylists = useMemo(() => {
+    const smart = buildSystemPlaylists();
+
     if (!isAuthenticated) {
-      return [
-        { id: 'easy', name: 'Easy', color1: '#10B981', color2: '#059669', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['easy'] ?? 0, orderedCardIds: [] },
-        { id: 'medium', name: 'Medium', color1: '#F59E0B', color2: '#D97706', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['medium'] ?? 0, orderedCardIds: [] },
-        { id: 'hard', name: 'Hard', color1: '#EF4444', color2: '#DC2626', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['hard'] ?? 0, orderedCardIds: [] },
-        { id: 'skipped', name: 'Skipped', color1: '#64748B', color2: '#475569', itemCount: 0, completedLoops: useTrackingStore.getState().loopsCompleted['skipped'] ?? 0, orderedCardIds: [] },
-      ];
+      return smart;
     }
-    return Object.values(playlistsById).map((p, i) => mapApiPlaylist(p, i));
+
+    const localPlaylists = Object.values(playlistsById)
+      .filter((p: any) => !p.isDeleted)
+      .map((p, i) => mapApiPlaylist(p, i));
+    const customPlaylists = localPlaylists.filter(
+      (p) => !['easy', 'medium', 'hard', 'skipped'].includes(p.id)
+    );
+
+    return [...smart, ...customPlaylists];
   }, [playlistsById, isAuthenticated]);
 
   const queryResult = useQuery({
@@ -82,12 +141,13 @@ export const usePlaylists = () => {
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated || !isAuthenticated;
+  const hasLocal = hasHydrated || !isAuthenticated || Object.keys(playlistsById).length > 0;
 
   return {
     data: hasLocal ? uiPlaylists : queryResult.data || [],
     isLoading: queryResult.isLoading && !hasLocal,
     isError: queryResult.isError && !hasLocal,
+    isFetched: queryResult.isFetched || hasLocal,
     error: queryResult.error,
     refetch: queryResult.refetch,
   };
@@ -190,7 +250,7 @@ export const useCreatePlaylist = () => {
         payload: { tempId, name, color1, color2 },
         timestamp: Date.now(),
       });
-      if (__DEV__) console.log('[useCreatePlaylist] Local-first mode active. Enqueued for later sync.');
+      console.log(`[MUTATION] CREATE_PLAYLIST | ID: ${tempId} | Name: ${name}`);
       return Promise.resolve(tempPlaylist);
     },
   });
@@ -211,7 +271,7 @@ export const useDeletePlaylist = () => {
         payload: { playlistId },
         timestamp: Date.now(),
       });
-      if (__DEV__) console.log('[useDeletePlaylist] Local-first mode active. Enqueued for later sync.');
+      console.log(`[MUTATION] DELETE_PLAYLIST | ID: ${playlistId}`);
       return Promise.resolve();
     },
   });
@@ -232,7 +292,7 @@ export const useUpdatePlaylist = () => {
         payload: { playlistId, name },
         timestamp: Date.now(),
       });
-      if (__DEV__) console.log('[useUpdatePlaylist] Local-first mode active. Enqueued for later sync.');
+      console.log(`[MUTATION] UPDATE_PLAYLIST | ID: ${playlistId} | Name: ${name}`);
       return Promise.resolve({ _id: playlistId, name } as ApiPlaylist);
     },
   });
@@ -295,7 +355,7 @@ export const useTogglePlaylistItem = () => {
         payload: { playlistId, cardId: revisionCardId, value: nextValue },
         timestamp: Date.now(),
       });
-      if (__DEV__) console.log('[useTogglePlaylistItem] Local-first mode active. Enqueued for later sync.');
+      console.log(`[MUTATION] TOGGLE_PLAYLIST_ITEM | Playlist: ${playlistId} | Card: ${revisionCardId} | Value: ${nextValue}`);
       return Promise.resolve();
     },
   });
@@ -312,7 +372,7 @@ export const useReorderPlaylist = () => {
         payload: { playlistId, cardIds },
         timestamp: Date.now(),
       });
-      if (__DEV__) console.log('[useReorderPlaylist] Local-first mode active. Enqueued for later sync.');
+      console.log(`[MUTATION] REORDER_PLAYLIST | ID: ${playlistId} | Cards: ${cardIds.length}`);
       return Promise.resolve({ _id: playlistId, cardIds } as ApiPlaylist);
     },
     onError: (_, { playlistId }) => {

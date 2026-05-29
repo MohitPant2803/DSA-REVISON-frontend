@@ -90,9 +90,18 @@ export function usePlaylistCard(cardId: string): IPopulatedRevisionCard | undefi
   );
 }
 
+// Selector cache to guarantee 100% stable references for React's getSnapshot / useSyncExternalStore
+const playlistCardsCache = new Map<string, {
+  cards: IPopulatedRevisionCard[];
+  dependencies: {
+    orderStr: string;
+    difficultiesStr: string;
+  };
+}>();
+
 /**
  * Hook to retrieve the interactive, resolved cards list for a specific playlist ID.
- * Returns a shallow-compared array of resolved card structures.
+ * Returns a stable reference resolved card array from the local-first cache.
  */
 export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
   return usePlaylistStateStore(
@@ -100,47 +109,88 @@ export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
       useCallback((state) => {
         const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
         const cardDifficultyMap = state.cardDifficultyMap;
+        const cacheKey = `${playlistId}:${isSmart ? 'smart' : 'custom'}`;
+
+        let orderStr = '';
+        let difficultiesStr = '';
 
         if (!isSmart) {
           // Resolve custom playlist card order strictly in stored order from cardsById cache
           const ids = state.playlistCardOrderMap[playlistId] || [];
+          orderStr = ids.join(',');
+          difficultiesStr = ids.map(id => {
+            const cleanId = id.split('-loop-')[0];
+            const diff = cardDifficultyMap[cleanId]?.difficulty || '';
+            const cardUpdated = state.cardsById[cleanId]?.updatedAt || '';
+            return `${cleanId}:${diff}:${cardUpdated}`;
+          }).join('|');
+
+          const cachedEntry = playlistCardsCache.get(cacheKey);
+          if (cachedEntry && cachedEntry.dependencies.orderStr === orderStr && cachedEntry.dependencies.difficultiesStr === difficultiesStr) {
+            return cachedEntry.cards;
+          }
+
+          // Resolve custom cards
           const resolved = ids
             .map((id) => state.cardsById[id])
             .filter(Boolean)
             .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById));
-          
-          return resolved;
-        }
 
-        // Derives smart playlist items on the fly
-        const resolved = Object.keys(state.cardsById)
-          .map((cardId) => state.cardsById[cardId])
-          .filter(Boolean)
-          .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById))
-          .filter((resolvedCard) => resolvedCard.difficultyState === playlistId);
-
-        // Deduplicate smart playlist cards by unique title to resolve seed data overlapping document duplicates
-        const seenTitles = new Set<string>();
-        const uniqueResolved = resolved.filter((card) => {
-          if (!card.title) return false;
-          const titleKey = card.title.trim().toLowerCase();
-          if (seenTitles.has(titleKey)) return false;
-          seenTitles.add(titleKey);
-          return true;
-        });
-
-        // Sort by manual order if it exists
-        const order = state.playlistCardOrderMap[playlistId] || [];
-        if (order.length > 0) {
-          const orderMap = new Map<string, number>(order.map((id, index) => [id, index]));
-          uniqueResolved.sort((a, b) => {
-            const idxA = orderMap.has(a._id) ? orderMap.get(a._id)! : 9999;
-            const idxB = orderMap.has(b._id) ? orderMap.get(b._id)! : 9999;
-            return idxA - idxB;
+          playlistCardsCache.set(cacheKey, {
+            cards: resolved,
+            dependencies: { orderStr, difficultiesStr }
           });
-        }
 
-        return uniqueResolved;
+          return resolved;
+        } else {
+          // Derives smart playlist items on the fly
+          const resolved = Object.keys(state.cardsById)
+            .map((cardId) => state.cardsById[cardId])
+            .filter(Boolean)
+            .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById))
+            .filter((resolvedCard) => resolvedCard.difficultyState === playlistId);
+
+          // Deduplicate smart playlist cards by unique title
+          const seenTitles = new Set<string>();
+          const uniqueResolved = resolved.filter((card) => {
+            if (!card.title) return false;
+            const titleKey = card.title.trim().toLowerCase();
+            if (seenTitles.has(titleKey)) return false;
+            seenTitles.add(titleKey);
+            return true;
+          });
+
+          // Sort by manual order if it exists
+          const order = state.playlistCardOrderMap[playlistId] || [];
+          if (order.length > 0) {
+            const orderMap = new Map<string, number>(order.map((id, index) => [id, index]));
+            uniqueResolved.sort((a, b) => {
+              const idxA = orderMap.has(a._id) ? orderMap.get(a._id)! : 9999;
+              const idxB = orderMap.has(b._id) ? orderMap.get(b._id)! : 9999;
+              return idxA - idxB;
+            });
+          }
+
+          orderStr = uniqueResolved.map(c => c._id).join(',');
+          difficultiesStr = uniqueResolved.map(c => {
+            const cleanId = c._id.split('-loop-')[0];
+            const diff = cardDifficultyMap[cleanId]?.difficulty || '';
+            const cardUpdated = c.updatedAt || '';
+            return `${cleanId}:${diff}:${cardUpdated}`;
+          }).join('|');
+
+          const cachedEntry = playlistCardsCache.get(cacheKey);
+          if (cachedEntry && cachedEntry.dependencies.orderStr === orderStr && cachedEntry.dependencies.difficultiesStr === difficultiesStr) {
+            return cachedEntry.cards;
+          }
+
+          playlistCardsCache.set(cacheKey, {
+            cards: uniqueResolved,
+            dependencies: { orderStr, difficultiesStr }
+          });
+
+          return uniqueResolved;
+        }
       }, [playlistId])
     )
   );

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { View, Text, ActivityIndicator } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -85,8 +86,18 @@ function SyncEngineMount() {
   return null;
 }
 
+function ToastWrapper() {
+  try {
+    const { useSafeAreaInsets } = require('react-native-safe-area-context');
+    const insets = useSafeAreaInsets();
+    return <Toast bottomOffset={insets.bottom + 80} topOffset={Math.max(insets.top, 40) + 10} />;
+  } catch (e) {
+    return <Toast />;
+  }
+}
+
 export default function RootLayout() {
-  const { isAuthenticated, isLoading, restoreSession, user, token, logout } = useAuthStore();
+  const { isAuthenticated, isLoading, restoreSession, user, token, logout, isLoggingOut } = useAuthStore();
   const { isOnboarded } = useOnboardingStore();
   const segments = useSegments();
   const router = useRouter();
@@ -154,21 +165,19 @@ export default function RootLayout() {
       if (expired && token) {
         const online = await isNetworkConnected();
         if (online) {
-          // Check if there's unsynced work before force-logout
-          const pendingCount = usePlaylistStateStore.getState().offlineActionQueue.length;
-          if (pendingCount > 0) {
-            if (__DEV__) console.log(`[Auth Layout] Token expired but ${pendingCount} actions pending. Attempting silent refresh first.`);
-            const refreshed = await useAuthStore.getState().silentTokenRefresh();
-            if (refreshed) {
-              if (__DEV__) console.log('[Auth Layout] Token refreshed. Pending work preserved.');
-              return; // Don't logout — token was refreshed
-            }
+          if (__DEV__) console.log('[Auth Layout] Token expired. Attempting silent credential refresh...');
+          const refreshed = await useAuthStore.getState().silentTokenRefresh();
+          if (refreshed) {
+            if (__DEV__) console.log('[Auth Layout] Token refreshed successfully. Session extended.');
+            return; // Don't logout — token was refreshed
           }
-          // No pending work or refresh failed — proceed with logout
+          
+          // Silent refresh failed — proceed with logout
+          console.warn('[Auth Layout] Token expired and silent refresh failed. Logging out.');
           await logout();
           router.replace("/(auth)/login");
         } else {
-          if (__DEV__) console.log('[Auth Layout] Token expired while offline. Study studies allowed...');
+          if (__DEV__) console.log('[Auth Layout] Token expired while offline. Study session allowed...');
         }
       }
     };
@@ -183,6 +192,20 @@ export default function RootLayout() {
     return null;
   }
 
+  if (isLoggingOut) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FAF9F7', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#8B5CF6" />
+        <Text style={{ marginTop: 20, color: '#0B1327', fontSize: 18, fontWeight: '900', letterSpacing: -0.5 }}>
+          Clearing local data...
+        </Text>
+        <Text style={{ marginTop: 8, color: '#7F8A9E', fontSize: 13, fontWeight: '600' }}>
+          Securing your revision desk
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
@@ -193,7 +216,7 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(protected)" options={{ animation: 'none' }} />
           </Stack>
-          <Toast />
+          <ToastWrapper />
           <ExitConfirmationModal />
         </QueryProvider>
       </SafeAreaProvider>

@@ -34,7 +34,7 @@ import {
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuthStore } from '@/store/useAuthStore';
-import { usePlaylists, useCreatePlaylist, useDeletePlaylist, useUpdatePlaylist, useDuplicatePlaylist } from '@/hooks/usePlaylists';
+import { usePlaylists, useCreatePlaylist, useDeletePlaylist, useUpdatePlaylist } from '@/hooks/usePlaylists';
 import { useDashboard } from '@/hooks/useDashboard';
 import { MySpaceSettingsOverlay } from '@/components/SettingsOverlay';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
@@ -366,7 +366,9 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
         }
 
         console.log('[DEBUG] Google Sign-In Successful! Exchanging token with backend...');
-        const res = await api.post('/auth/google', { idToken });
+        const { deviceId, logicalClockSequence } = usePlaylistStateStore.getState();
+        const clockEpoch = String(logicalClockSequence || 0);
+        const res = await api.post('/auth/google', { idToken, deviceId, clockEpoch });
         const { token, user: rawUser } = res.data.data;
 
         const user = {
@@ -375,6 +377,8 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
           email: rawUser.email,
           avatarUrl: rawUser.profilePicture,
           role: rawUser.role,
+          totalSwipes: rawUser.totalSwipes || 0,
+          totalScrolls: rawUser.totalScrolls || 0,
         };
 
         await login(token, user);
@@ -500,6 +504,13 @@ const AnalyticsStatsRow = React.memo(() => {
 
 
 
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+};
+
 // -------------------------------------------------------------
 // PRIMARY REVISION BRAIN DASHBOARD
 // -------------------------------------------------------------
@@ -512,13 +523,12 @@ export default function PersonalScreen() {
 
   // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
 
-  const { data: playlists = [], isLoading: playlistsLoading, isError: playlistsError, refetch } = usePlaylists();
+  const { data: playlists = [], isLoading: playlistsLoading, isError: playlistsError, isFetched, refetch } = usePlaylists();
   const { data: stats, isLoading: statsLoading } = useDashboard();
 
   // Mutations
   const deletePlaylistMutation = useDeletePlaylist();
   const updatePlaylistMutation = useUpdatePlaylist();
-  const duplicatePlaylistMutation = useDuplicatePlaylist();
 
   const easyCount = usePlaylistCount('easy');
   const mediumCount = usePlaylistCount('medium');
@@ -577,7 +587,11 @@ export default function PersonalScreen() {
   }, [playlists, easyCount, mediumCount, hardCount, skippedCount]);
 
   const customPlaylists = useMemo(() => {
-    return playlists.filter((p) => !['easy', 'medium', 'hard', 'skipped'].includes(p.id));
+    return playlists.filter((p) => 
+      p && 
+      !['easy', 'medium', 'hard', 'skipped'].includes(p.id) &&
+      !['easy', 'medium', 'hard', 'skipped'].includes(p.name?.toLowerCase())
+    );
   }, [playlists]);
 
   const handlePressSettings = () => {
@@ -588,25 +602,6 @@ export default function PersonalScreen() {
   const handleLongPressPlaylist = (pl: any) => {
     setSelectedPlaylist(pl);
     setIsMenuOpen(true);
-  };
-
-  const handleDuplicate = () => {
-    if (!selectedPlaylist) return;
-    lightHaptic();
-    duplicatePlaylistMutation.mutate(selectedPlaylist.id, {
-      onSuccess: () => {
-        Toast.show({ type: 'success', text1: `Duplicated "${selectedPlaylist.name}"` });
-        setIsMenuOpen(false);
-        setSelectedPlaylist(null);
-      },
-      onError: (err) => {
-        Toast.show({
-          type: 'error',
-          text1: 'Could not duplicate',
-          text2: err instanceof Error ? err.message : 'Try again',
-        });
-      }
-    });
   };
 
   const handleDelete = () => {
@@ -780,7 +775,7 @@ export default function PersonalScreen() {
               </View>
 
               <Text className="text-[#0B1327] text-base font-bold tracking-tight">
-                Good evening, {user?.name ? user.name.split(' ')[0] : 'Mohit'}
+                {getGreeting()}, {user?.name ? user.name.split(' ')[0] : 'there'}
               </Text>
               
               {/* Dynamic Analytics Stats Row (Isolated to avoid page rerenders) */}
@@ -899,7 +894,7 @@ export default function PersonalScreen() {
                   playlist={pl}
                   onPress={() => {
                       router.push({
-                        pathname: '/(protected)/(tabs)/playlist/[playlistId]',
+                        pathname: '/(protected)/playlist/[playlistId]',
                         params: { playlistId: pl.id }
                       });
                   }}
@@ -961,7 +956,7 @@ export default function PersonalScreen() {
                   playlist={pl}
                   onPress={() => {
                     router.push({
-                      pathname: '/(protected)/(tabs)/playlist/[playlistId]',
+                      pathname: '/(protected)/playlist/[playlistId]',
                       params: { playlistId: pl.id }
                     });
                   }}
@@ -971,7 +966,7 @@ export default function PersonalScreen() {
             </View>
           )}
 
-          {!playlistsLoading && customPlaylists.length === 0 && (
+          {!playlistsLoading && isFetched && customPlaylists.length === 0 && (
             <View 
               className="py-9 items-center bg-white rounded-[30px] border px-6"
               style={{
@@ -1108,15 +1103,6 @@ export default function PersonalScreen() {
                 style={{ borderColor: 'rgba(148,163,184,0.08)' }}
               >
                 <Text className="text-[#0F172A] text-sm font-semibold">Rename collection</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handleDuplicate}
-                activeOpacity={0.85}
-                className="w-full py-3.5 rounded-2xl bg-[#FAF9F7] border items-center"
-                style={{ borderColor: 'rgba(148,163,184,0.08)' }}
-              >
-                <Text className="text-[#0F172A] text-sm font-semibold">Duplicate collection</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
