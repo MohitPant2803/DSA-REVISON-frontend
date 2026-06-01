@@ -49,7 +49,7 @@ function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = fal
       onLongPress={onLongPress}
       className="rounded-[30px] p-5 border mb-4 flex-row items-center bg-white"
       style={{
-        borderColor: 'rgba(148, 163, 184, 0.08)',
+        borderColor: '#E2E8F0',
         shadowColor: '#0F172A',
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.03,
@@ -60,35 +60,35 @@ function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = fal
       <View
         className="w-11 h-11 rounded-2xl mr-4 justify-center items-center border"
         style={{ 
-          backgroundColor: accent + '08', 
-          borderColor: 'rgba(148, 163, 184, 0.04)',
+          backgroundColor: accent + '10', 
+          borderColor: 'rgba(15, 23, 42, 0.04)',
           opacity: 0.8
         }}
       >
         <IconComponent color={accent} size={18} strokeWidth={2.0} />
       </View>
-
+ 
       <View className="flex-1 justify-center pr-3">
         <View className="flex-row items-center gap-2 mb-1">
-          <Text className="text-[#0B1327] text-[16px] font-bold tracking-tight" numberOfLines={1}>
+          <Text className="text-[#0F172A] text-[16px] font-bold tracking-tight" numberOfLines={1}>
             {folder.title}
           </Text>
         </View>
-
+ 
         {folder.description ? (
-          <Text className="text-[#7F8A9E] text-xs leading-relaxed mb-1.5" numberOfLines={2}>
+          <Text className="text-[#475569] text-xs leading-relaxed mb-1.5" numberOfLines={2}>
             {folder.description}
           </Text>
         ) : null}
-
+ 
         {shouldShowCardCount && (
           <Text className="text-[#8B5CF6] text-[11px] font-bold">
             {cardLabel}
           </Text>
         )}
       </View>
-
-      <ChevronRight color="#E2E8F0" size={18} strokeWidth={2.2} />
+ 
+      <ChevronRight color="rgba(15, 23, 42, 0.18)" size={18} strokeWidth={2.2} />
     </SpringPressable>
   );
 }

@@ -1,5 +1,13 @@
 import React, { useEffect } from 'react';
-import { Platform, Pressable, View, LogBox } from 'react-native';
+import { Platform, Pressable, View, LogBox, Vibration } from 'react-native';
+
+const lightHaptic = () => {
+  if (Platform.OS === 'android') {
+    Vibration.vibrate(10);
+  } else {
+    Vibration.vibrate(6);
+  }
+};
 import { Tabs, useSegments, useRouter } from 'expo-router';
 import { Home, Layers, Bookmark } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,54 +32,20 @@ interface TabButtonProps {
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function TabButton({ focused, icon, onPress }: TabButtonProps) {
-  const scale = useSharedValue(focused ? 1.08 : 0.95);
-  const activeBgOpacity = useSharedValue(focused ? 1 : 0);
-
-  useEffect(() => {
-    scale.value = focused ? 1.08 : 0.95;
-    activeBgOpacity.value = focused ? 1 : 0;
-  }, [focused]);
-
-  const containerStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: scale.value }],
-    };
-  });
-
-  const bgStyle = useAnimatedStyle(() => {
-    return {
-      opacity: activeBgOpacity.value,
-      transform: [{ scale: activeBgOpacity.value }],
-    };
-  });
-
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        lightHaptic(); // Trigger responsive tactile click instantly on tab tap
+        if (onPress) onPress();
+      }}
       style={{ flex: 1, height: '100%', alignItems: 'center', justifyContent: 'center' }}
     >
-      <Animated.View style={[{ alignItems: 'center', justifyContent: 'center', width: 56, height: 46 }, containerStyle]}>
-        {/* Dynamic active morph pill background */}
-        <Animated.View
-          style={[
-            {
-              position: 'absolute',
-              width: 52,
-              height: 38,
-              borderRadius: 19,
-              backgroundColor: 'rgba(15, 23, 42, 0.05)',
-              borderWidth: 1,
-              borderColor: 'rgba(15, 23, 42, 0.08)',
-            },
-            bgStyle,
-          ]}
-        />
-        
+      <View style={{ alignItems: 'center', justifyContent: 'center', width: 56, height: 46 }}>
         {/* Icon */}
         <View style={{ zIndex: 2, marginBottom: 2 }}>
           {icon}
         </View>
-      </Animated.View>
+      </View>
     </Pressable>
   );
 }
@@ -112,17 +86,17 @@ function TabLayoutInner() {
 
   useEffect(() => {
     if (isReelsPlayer) {
-      // Focused Immersive Session: slide down and hide the floating bottom dock
-      translateY.value = withSpring(120, { damping: 26, stiffness: 180 });
-      opacity.value = withSpring(0, { damping: 22, stiffness: 150 });
+      // Focused Immersive Session: hide the floating bottom dock instantly
+      translateY.value = 120;
+      opacity.value = 0;
     } else if (isLearn && !hasAppBeenAnimated) {
       // Typing/Typewriter Phase: keep the floating bottom dock completely hidden offscreen initially
       translateY.value = 120;
       opacity.value = 0;
     } else {
-      // Standard tabs or after reveal animation settles: slide floating bottom tab bar back up into focus
-      translateY.value = withSpring(0, { damping: 26, stiffness: 180 });
-      opacity.value = withSpring(1, { damping: 22, stiffness: 150 });
+      // Standard tabs or after reveal animation settles: show floating bottom tab bar instantly
+      translateY.value = 0;
+      opacity.value = 1;
     }
   }, [isReels, isReelsPlayer, isLearn, hasAppBeenAnimated]);
 

@@ -13,6 +13,8 @@ import { mergeCardState } from '@/utils/resolveCardState';
 import type { IFolder } from '@/types/folder';
 import type { ApiPlaylist } from '@/services/playlistService';
 import offlineSeed from '../constants/offlineSeed.json';
+import { interactionScheduler } from '@/utils/interactionScheduler';
+import { sqliteWriteManager } from '@/utils/sqliteWriteManager';
 import {
   saveCardsToSQLite,
   saveFoldersToSQLite,
@@ -21,7 +23,7 @@ import {
   deletePlaylistFromSQLite,
   deleteCardFromSQLite,
   saveDeletedEntityToSQLite,
-  isEntityDeletedInSQLite,
+  getDeletedEntityIdsFromSQLite,
 } from '@/utils/sqliteSyncBridge';
 
 
@@ -38,9 +40,17 @@ const isEntityDirty = (queue: OfflineAction[], entityId: string): boolean => {
 };
 
 // Helper: Calculate deterministic SHA-256 local catalog checksum
-const calculateLocalChecksum = async (playlistsById: any, foldersById: any): Promise<string> => {
-  const playlistIds = Object.keys(playlistsById).sort();
-  const folderIds = Object.keys(foldersById).sort();
+const calculateLocalChecksum = async (playlistsById: any, foldersById: any, userId: string): Promise<string> => {
+  const playlistIds = Object.values(playlistsById)
+    .filter((p: any) => p && p.userId === userId && p.kind !== 'system' && !p.isDeleted)
+    .map((p: any) => p._id.toString())
+    .sort();
+
+  const folderIds = Object.values(foldersById)
+    .filter((f: any) => f && f.createdBy === userId && !f.isDeleted)
+    .map((f: any) => f._id.toString())
+    .sort();
+
   const hashInput = JSON.stringify({ playlistIds, folderIds });
   try {
     const Crypto = require('expo-crypto');
@@ -74,6 +84,9 @@ function mergeEntityState<T extends { _id: string; updatedAt?: string | number; 
   return serverTime > localTime ? server : local;
 }
 
+// Module-level persistent session flag to survive layout unmounts/remounts during boot transitions
+const globalStartupSyncTriggered = new Map<string, boolean>();
+
 export function useSyncEngine() {
   const queryClient = useQueryClient();
   const { isAuthenticated, isAuthReady } = useAuthStore();
@@ -81,12 +94,12 @@ export function useSyncEngine() {
   const currentDelayRef = useRef<number>(2000); // Backoff base
   const isSyncInFlight = useRef(false);
   const appStateRef = useRef(AppState.currentState);
-  const startupSyncTriggered = useRef(false);
 
   // Ref to resolve mutual recursion between scheduleRetry and triggerBackgroundSync in TS
   const triggerBackgroundSyncRef = useRef<((force?: boolean) => Promise<void>) | null>(null);
 
   const {
+    userId,
     offlineActionQueue,
     clearOfflineActions,
     lastSyncedAt,
@@ -102,6 +115,7 @@ export function useSyncEngine() {
     setLastSuccessfulSyncAt,
     setLastCatalogIntegrityCheck,
     setSyncStatus,
+    setSyncProgress,
     lastSyncedRevision,
     setLastSyncedRevision,
     enableRevisionSync,
@@ -109,6 +123,7 @@ export function useSyncEngine() {
     applyQueueRewrite
   } = usePlaylistStateStore(
     useShallow((s) => ({
+      userId: s.userId,
       offlineActionQueue: s.offlineActionQueue,
       clearOfflineActions: s.clearOfflineActions,
       lastSyncedAt: s.lastSyncedAt,
@@ -124,6 +139,7 @@ export function useSyncEngine() {
       setLastSuccessfulSyncAt: s.setLastSuccessfulSyncAt,
       setLastCatalogIntegrityCheck: s.setLastCatalogIntegrityCheck,
       setSyncStatus: s.setSyncStatus,
+      setSyncProgress: s.setSyncProgress,
       lastSyncedRevision: s.lastSyncedRevision,
       setLastSyncedRevision: s.setLastSyncedRevision,
       enableRevisionSync: s.enableRevisionSync,
@@ -204,7 +220,19 @@ export function useSyncEngine() {
   const executeFullResync = useCallback(async (forcedByChecksum = false) => {
     const user = useAuthStore.getState().user;
     if (!user || user.id === 'guest-user') return;
+
+    if (interactionScheduler.isInteracting()) {
+      if (__DEV__) {
+        console.log('[Sync Trigger] Deferring Full Resync due to active user interaction.');
+      }
+      interactionScheduler.runWhenIdle(() => executeFullResync(forcedByChecksum));
+      return;
+    }
+
     if (isSyncInFlight.current) return;
+    if (__DEV__) {
+      console.log(`[Sync Trigger] Full Resync | Reason: Checksum Mismatch | Forced: ${forcedByChecksum} | In-Flight: ${isSyncInFlight.current}`);
+    }
     const currentGenerationId = useAuthStore.getState().sessionGenerationId;
     isSyncInFlight.current = true;
     setSyncStatus('syncing');
@@ -216,7 +244,10 @@ export function useSyncEngine() {
       const freshState = usePlaylistStateStore.getState();
       const activeUserId = useAuthStore.getState().user?.id || 'guest-user';
       
+      setSyncProgress(10, 'Contacting backend server...');
+      
       // Request complete clean revision fetch
+      setSyncProgress(25, 'Downloading playlists, folders, and cards from MongoDB...');
       const response = await api.get('/sync?sinceRevision=0&since=');
       const payload = response.data?.data;
       console.log('[DEBUG] Playlists in payload:', JSON.stringify(payload?.delta?.playlists ?? 'undefined'));
@@ -230,6 +261,11 @@ export function useSyncEngine() {
           a.payload?.cardId === id ||
           a.payload?.tempId === id
         );
+
+        // Fetch deleted entities in a single batch asynchronously to avoid synchronous promise checking bugs
+        const deletedCardIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'card');
+        const deletedFolderIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'folder');
+        const deletedPlaylistIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'playlist');
 
         // Local-first shadow structures: start from Zustand/SQLite truth, then accept Mongo as additive sync input.
         const shadowCards = { ...freshState.cardsById };
@@ -247,16 +283,16 @@ export function useSyncEngine() {
         };
 
         if (allowRemoteDestructiveSync) {
-          payload.delta?.deletedEntities?.forEach((del: any) => {
-            if (!del?.entityId || !del?.entityType) return;
-            saveDeletedEntityToSQLite(
+          for (const del of (payload.delta?.deletedEntities || [])) {
+            if (!del?.entityId || !del?.entityType) continue;
+            await saveDeletedEntityToSQLite(
               del.entityId,
               del.entityType,
               activeUserId,
               del.deletedAt || new Date(),
               del.revision || 0
             );
-          });
+          }
 
           payload.delta?.deletedEntities?.forEach((del: any) => {
             if (!del?.entityId) return;
@@ -278,7 +314,7 @@ export function useSyncEngine() {
         payload.delta?.cards?.forEach((c: any) => {
           if (!c?._id) return;
           const cleanId = c._id.split('-loop-')[0];
-          if (isEntityDeletedInSQLite(activeUserId, 'card', cleanId) || isDirty(cleanId) || shadowCards[cleanId]?.dirty) return;
+          if (deletedCardIds.has(cleanId) || isDirty(cleanId) || shadowCards[cleanId]?.dirty) return;
           const localTime = new Date(shadowCards[cleanId]?.updatedAt || 0).getTime();
           const remoteTime = new Date(c.updatedAt || 0).getTime();
           if (!shadowCards[cleanId] || remoteTime > localTime) {
@@ -288,7 +324,20 @@ export function useSyncEngine() {
 
         payload.delta?.folders?.forEach((f: any) => {
           if (!f?._id) return;
-          if (isEntityDeletedInSQLite(activeUserId, 'folder', f._id) || isDirty(f._id) || shadowFolders[f._id]?.dirty) return;
+          if (deletedFolderIds.has(f._id) || isDirty(f._id) || shadowFolders[f._id]?.dirty) return;
+
+          // Reconcile and replace temporary folder with real server folder:
+          const localTempDuplicate = Object.values(freshState.foldersById).find(
+            (localF: any) => localF.title === f.title && String(localF._id).startsWith('temp-') && !localF.isDeleted
+          ) as any;
+          
+          if (localTempDuplicate) {
+            delete shadowFolders[localTempDuplicate._id];
+            const { getDatabase } = require('../utils/sqliteDatabase');
+            const db = getDatabase();
+            db.runAsync('DELETE FROM folders WHERE id = ?;', [localTempDuplicate._id]).catch(() => {});
+          }
+
           const localTime = new Date(shadowFolders[f._id]?.updatedAt || 0).getTime();
           const remoteTime = new Date(f.updatedAt || 0).getTime();
           if (!shadowFolders[f._id] || remoteTime > localTime) {
@@ -298,7 +347,29 @@ export function useSyncEngine() {
 
         payload.delta?.playlists?.forEach((p: any) => {
           if (!p?._id) return;
-          if (isEntityDeletedInSQLite(activeUserId, 'playlist', p._id) || isDirty(p._id) || shadowPlaylists[p._id]?.dirty) return;
+          if (deletedPlaylistIds.has(p._id) || isDirty(p._id) || shadowPlaylists[p._id]?.dirty) return;
+
+          // Reconcile temporary playlist with server real playlist:
+          const localTempDuplicate = Object.values(freshState.playlistsById).find(
+            (localP: any) => localP.name === p.name && String(localP._id).startsWith('temp-') && !localP.isDeleted
+          ) as any;
+          
+          if (localTempDuplicate) {
+            delete shadowPlaylists[localTempDuplicate._id];
+            delete shadowOrderMap[localTempDuplicate._id];
+            
+            const localOrder = freshState.playlistCardOrderMap[localTempDuplicate._id] || [];
+            const cardIds = p.cardIds || p.orderedCardIds || localOrder || [];
+            const finalCardIds = cardIds.map((id: string) => id.split('-loop-')[0]).filter(Boolean);
+            
+            p.cardIds = finalCardIds;
+            p.orderedCardIds = finalCardIds;
+            
+            const { getDatabase } = require('../utils/sqliteDatabase');
+            const db = getDatabase();
+            db.runAsync('DELETE FROM playlists WHERE id = ?;', [localTempDuplicate._id]).catch(() => {});
+          }
+
           const cardIds = (p.cardIds || p.orderedCardIds || []).map((id: string) => id.split('-loop-')[0]).filter(Boolean);
           const localTime = new Date((shadowPlaylists[p._id] as any)?.updatedAt || 0).getTime();
           const remoteTime = new Date(p.updatedAt || 0).getTime();
@@ -435,36 +506,92 @@ export function useSyncEngine() {
           }
         });
 
-        // Persist to SQLite canonical storage (AFTER all stamps are applied)
+        // Persist to SQLite canonical storage (AFTER all stamps are applied) using serialized write manager
         try {
-          saveCardsToSQLite(Object.values(shadowCards), activeUserId);
-          saveFoldersToSQLite(Object.values(shadowFolders), activeUserId);
-          savePlaylistsToSQLite(Object.values(shadowPlaylists), activeUserId);
-
-          // Durably update sync cursor in SQLite so we don't re-download full catalog on next launch
-          const { getDatabase } = require('@/utils/sqliteDatabase');
-          const db = getDatabase();
-          db.runSync(
-            `INSERT INTO sync_cursors (userId, lastPulledRevision, updatedAt) VALUES (?, ?, ?)
-             ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`,
-            [activeUserId, payload.toRevision || payload.currentRevision || 0, Date.now()]
-          );
+          if (__DEV__) {
+            console.log(`[SQLite Save] Full Resync Shadow Cache swap to SQLite | Cards: ${Object.keys(shadowCards).length} | Folders: ${Object.keys(shadowFolders).length} | Playlists: ${Object.keys(shadowPlaylists).length}`);
+          }
+          
+          setSyncProgress(45, 'Saving custom folders to SQLite...');
+          
+          // FIX: Replace concurrent writes with serialized write manager to prevent WAL contention
+          await sqliteWriteManager.enqueue({
+            id: `fullresync-cards-${Date.now()}`,
+            type: 'cards',
+            userId: activeUserId,
+            data: Object.values(shadowCards),
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
+          
+          setSyncProgress(65, 'Saving custom playlists to SQLite...');
+          
+          await sqliteWriteManager.enqueue({
+            id: `fullresync-folders-${Date.now()}`,
+            type: 'folders',
+            userId: activeUserId,
+            data: Object.values(shadowFolders),
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
+          
+          setSyncProgress(80, 'Installing revision cards to database...');
+          
+          await sqliteWriteManager.enqueue({
+            id: `fullresync-playlists-${Date.now()}`,
+            type: 'playlists',
+            userId: activeUserId,
+            data: Object.values(shadowPlaylists),
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
+          
+          setSyncProgress(92, 'Finalizing database transactions...');
+ 
+          // Durably update sync cursor in SQLite using write manager as well
+          await sqliteWriteManager.enqueue({
+            id: `sync-cursor-${Date.now()}`,
+            type: 'custom',
+            userId: activeUserId,
+            data: {
+              executor: async (db: any) => {
+                await db.runAsync(
+                  `INSERT INTO sync_cursors (userId, lastPulledRevision, updatedAt) VALUES (?, ?, ?)
+                   ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`,
+                  [activeUserId, payload.toRevision || payload.currentRevision || 0, Date.now()]
+                );
+              },
+            },
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
         } catch (sqlErr: any) {
           console.error('[SQLite Sync Engine Error] Full resync SQLite persistence failed:', sqlErr.message);
         }
-
-        // Swap caches instantly in a single React tick!
-        usePlaylistStateStore.setState({
-          cardsById: shadowCards,
-          foldersById: shadowFolders,
-          playlistsById: shadowPlaylists,
-          playlistCardOrderMap: shadowOrderMap,
-          cardDifficultyMap: shadowDifficultyMap,
-          lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
-          lastSyncedAt: payload.timestamp || new Date().toISOString(),
-          lastSuccessfulSyncAt: Date.now(),
-          syncFailureCount: 0,
-        });
+ 
+        const commitStateSwap = () => {
+          setSyncProgress(100, 'Completed');
+          usePlaylistStateStore.setState({
+            cardsById: shadowCards,
+            foldersById: shadowFolders,
+            playlistsById: shadowPlaylists,
+            playlistCardOrderMap: shadowOrderMap,
+            cardDifficultyMap: shadowDifficultyMap,
+            lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
+            lastSyncedAt: payload.timestamp || new Date().toISOString(),
+            lastSuccessfulSyncAt: Date.now(),
+            syncFailureCount: 0,
+          });
+        };
+ 
+        if (interactionScheduler.isInteracting()) {
+          if (__DEV__) {
+            console.log('[Sync Engine] UI is active. Deferring Full Resync state swap until idle.');
+          }
+          interactionScheduler.runWhenIdle(commitStateSwap);
+        } else {
+          commitStateSwap();
+        }
 
         const duration = performance.now() - startTime;
         syncTelemetry.logSyncSuccess(duration, activeQueue.length, {
@@ -515,24 +642,71 @@ export function useSyncEngine() {
     const hasAccess = isAuthenticated || isGuest;
     if (!hasAccess || !isAuthReady) return;
 
+    if (interactionScheduler.isInteracting()) {
+      if (__DEV__) {
+        console.log('[Sync Trigger] Deferring Background/Delta Sync due to active user interaction.');
+      }
+      interactionScheduler.runWhenIdle(() => triggerBackgroundSync(force));
+      return;
+    }
+
+    if (__DEV__) {
+      console.log(`[Sync Trigger] Background/Delta Sync | Force: ${!!force} | In-Flight: ${isSyncInFlight.current}`);
+    }
+
     if (isSyncInFlight.current) return;
 
     isSyncInFlight.current = true;
     setSyncStatus('syncing');
-    setBootstrapStatus('in_progress');
+    
+    // Only transition bootstrapStatus if we haven't successfully bootstrapped the app yet
+    const currentBootstrap = usePlaylistStateStore.getState().bootstrapStatus;
+    const shouldUpdateBootstrap = currentBootstrap !== 'completed';
+    if (shouldUpdateBootstrap) {
+      setBootstrapStatus('in_progress');
+    }
 
     try {
       const state = usePlaylistStateStore.getState();
       const currentDbVersion = state.dbVersion;
       const targetDbVersion = offlineSeed.dbVersion;
 
-      // Check if we need local seeding
-      const needsSeeding = force || !currentDbVersion || currentDbVersion !== targetDbVersion || Object.keys(state.cardsById).length === 0 || !state.cardsById['6a1655fbb129b168bb16bb45']?.slides;
+      // ============================================================================
+      // CRITICAL FIX: STRICT VERSION EQUALITY CHECK
+      // Prevents catastrophic reseeding when versions are identical.
+      // 
+      // If currentDbVersion === targetDbVersion, NEVER reseed unless explicitly forced.
+      // Previous bug: reseeds even when version unchanged, triggering:
+      //   - 608 card rewrites
+      //   - 90 folder rewrites
+      //   - Multiple playlist rewrites
+      //   - WAL contention
+      //   - Transaction deadlocks
+      // ============================================================================
+      
+      const versionMismatch = currentDbVersion !== targetDbVersion;
+      const noLocalData = Object.keys(state.cardsById).length === 0;
+      const neverSeeded = !currentDbVersion;
+      
+      // RESEED ONLY IF:
+      // 1. Explicitly forced by user/checksum mismatch, OR
+      // 2. Version actually changed, OR
+      // 3. Never seeded before (cold start), OR
+      // 4. Local data is missing (corrupted state)
+      const needsSeeding = force || versionMismatch || neverSeeded || noLocalData;
 
       if (needsSeeding) {
-        if (__DEV__) console.log(`[Offline Sync] Local seeding triggered. Version: ${currentDbVersion} -> ${targetDbVersion}`);
+        if (__DEV__) {
+          const reason = force ? 'FORCED' : versionMismatch ? `VERSION_MISMATCH: ${currentDbVersion} -> ${targetDbVersion}` : neverSeeded ? 'COLD_START' : 'MISSING_LOCAL_DATA';
+          console.log(`[Offline Sync] Local seeding triggered. Reason: ${reason}`);
+        }
         const activeUserId = useAuthStore.getState().user?.id || 'guest-user';
         
+        // Fetch deleted entities in a single batch asynchronously to avoid synchronous promise checking bugs
+        const deletedCardIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'card');
+        const deletedFolderIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'folder');
+        const deletedPlaylistIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'playlist');
+
         const existingCards = state.cardsById || {};
         const existingFolders = state.foldersById || {};
         const existingPlaylists = state.playlistsById || {};
@@ -544,21 +718,21 @@ export function useSyncEngine() {
         const nextOrderMap = { ...existingOrderMap };
 
         offlineSeed.folders.forEach((f: any) => {
-          if (isEntityDeletedInSQLite(activeUserId, 'folder', f._id)) return;
+          if (deletedFolderIds.has(f._id)) return;
           nextFolders[f._id] = f;
         });
 
         offlineSeed.playlists.forEach((p: any) => {
-          if (isEntityDeletedInSQLite(activeUserId, 'playlist', p._id)) return;
+          if (deletedPlaylistIds.has(p._id)) return;
           nextPlaylists[p._id] = p;
           if (!nextOrderMap[p._id]) {
             nextOrderMap[p._id] = (p.cardIds || [])
-              .filter((id: string) => !isEntityDeletedInSQLite(activeUserId, 'card', id));
+              .filter((id: string) => !deletedCardIds.has(id));
           }
         });
 
         offlineSeed.revisionCards.forEach((c: any) => {
-          if (isEntityDeletedInSQLite(activeUserId, 'card', c._id)) return;
+          if (deletedCardIds.has(c._id)) return;
           const existingCard = existingCards[c._id] as any;
           if (existingCard) {
             nextCards[c._id] = {
@@ -575,7 +749,7 @@ export function useSyncEngine() {
 
         const allCardIds = offlineSeed.revisionCards
           .map((c: any) => c._id)
-          .filter((id: string) => !isEntityDeletedInSQLite(activeUserId, 'card', id));
+          .filter((id: string) => !deletedCardIds.has(id));
         nextOrderMap['all'] = allCardIds;
 
         ['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].forEach(key => {
@@ -604,30 +778,71 @@ export function useSyncEngine() {
           return;
         }
 
-        // Persist local seed values to SQLite canonical storage
+        // Persist local seed values to SQLite canonical storage using serialized write manager
         try {
-          saveCardsToSQLite(Object.values(nextCards), activeUserId);
-          saveFoldersToSQLite(Object.values(nextFolders), activeUserId);
-          savePlaylistsToSQLite(Object.values(nextPlaylists), activeUserId);
+          if (__DEV__) {
+            console.log(`[SQLite Save] Seeding local offline seed to SQLite | Cards: ${Object.keys(nextCards).length} | Folders: ${Object.keys(nextFolders).length} | Playlists: ${Object.keys(nextPlaylists).length}`);
+          }
+          
+          // FIX: Replace concurrent writes with serialized write manager to prevent WAL contention
+          await sqliteWriteManager.enqueue({
+            id: `seed-cards-${Date.now()}`,
+            type: 'cards',
+            userId: activeUserId,
+            data: Object.values(nextCards),
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
+          
+          await sqliteWriteManager.enqueue({
+            id: `seed-folders-${Date.now()}`,
+            type: 'folders',
+            userId: activeUserId,
+            data: Object.values(nextFolders),
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
+          
+          await sqliteWriteManager.enqueue({
+            id: `seed-playlists-${Date.now()}`,
+            type: 'playlists',
+            userId: activeUserId,
+            data: Object.values(nextPlaylists),
+            timestamp: Date.now(),
+            priority: 'critical',
+          });
         } catch (sqlErr: any) {
           console.error('[SQLite Sync Engine Error] Local seeding SQLite persistence failed:', sqlErr.message);
         }
 
-        usePlaylistStateStore.setState({
-          cardsById: nextCards,
-          foldersById: nextFolders,
-          playlistsById: nextPlaylists,
-          playlistCardOrderMap: nextOrderMap,
-          seniorQuotes,
-          dbVersion: targetDbVersion,
-          lastSyncedAt: safeBootstrapCheckpoint,
-          lastSyncedRevision: 0, // Reset revision sweep to ensure a clean delta sync sweep
-          lastSuccessfulSyncAt: Date.now(),
-        });
+        const commitSeedingState = () => {
+          usePlaylistStateStore.setState({
+            cardsById: nextCards,
+            foldersById: nextFolders,
+            playlistsById: nextPlaylists,
+            playlistCardOrderMap: nextOrderMap,
+            seniorQuotes,
+            dbVersion: targetDbVersion,
+            lastSyncedAt: safeBootstrapCheckpoint,
+            lastSyncedRevision: 0, // Reset revision sweep to ensure a clean delta sync sweep
+            lastSuccessfulSyncAt: Date.now(),
+          });
+        };
+
+        if (interactionScheduler.isInteracting()) {
+          if (__DEV__) {
+            console.log('[Sync Engine] UI is active. Deferring local seeding state swap until idle.');
+          }
+          interactionScheduler.runWhenIdle(commitSeedingState);
+        } else {
+          commitSeedingState();
+        }
       }
 
       validateEntityIntegrity();
-      setBootstrapStatus('completed');
+      if (shouldUpdateBootstrap) {
+        setBootstrapStatus('completed');
+      }
       setLastSuccessfulSyncAt(Date.now());
       if (!isAuthenticated || isGuest) {
         setLastSyncedAt(new Date().toISOString());
@@ -700,7 +915,9 @@ export function useSyncEngine() {
 
     } catch (err) {
       console.error('[Offline Sync] Background sync cycle aborted:', err);
-      setBootstrapStatus('failed');
+      if (shouldUpdateBootstrap) {
+        setBootstrapStatus('failed');
+      }
       setSyncStatus('offline');
       incrementSyncFailure();
       scheduleRetry();
@@ -732,6 +949,10 @@ export function useSyncEngine() {
   useEffect(() => {
     if (syncTriggerCount > 0) {
       if (__DEV__) console.log('[Sync Engine] Manual sync trigger received. Flushing...');
+      
+      // Reset the trigger count back to 0 instantly so it doesn't fire again on remounts!
+      usePlaylistStateStore.setState({ syncTriggerCount: 0 });
+      
       triggerBackgroundSyncRef.current?.(true);
     }
   }, [syncTriggerCount]);
@@ -739,16 +960,16 @@ export function useSyncEngine() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
-        if (__DEV__) console.log('[Sync Engine] App entering foreground. Triggering opportunistic sync...');
-        triggerBackgroundSyncRef.current?.(false);
+        if (__DEV__) console.log('[Sync Engine] App entering foreground.');
       } else if (appStateRef.current === 'active' && nextAppState !== 'active') {
         if (retryTimeoutRef.current) {
           clearTimeout(retryTimeoutRef.current);
           retryTimeoutRef.current = null;
         }
-        // Eagerly trigger full background sync (playlists, folders, and analytics) when the app closes or goes to background
-        if (__DEV__) console.log('[Sync Engine] App closing / suspending. Triggering full background sync flush...');
-        triggerBackgroundSyncRef.current?.(false);
+        // Force flush regardless of write contention
+        // This is the LAST chance to save data before process is killed
+        const { forceFlushOnClose } = require('../utils/syncManager');
+        forceFlushOnClose().catch((err: any) => console.error('[Sync Engine Close] Force flush failed:', err));
       }
       appStateRef.current = nextAppState;
     });
@@ -758,18 +979,20 @@ export function useSyncEngine() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      startupSyncTriggered.current = false;
-    }
-  }, [isAuthenticated]);
+    const activeUserId = userId || 'guest-user';
+    if (__DEV__) console.log(`[Sync Engine] Resetting startup sync ref due to auth/user change (User: ${activeUserId})`);
+    globalStartupSyncTriggered.set(activeUserId, false);
+  }, [isAuthenticated, userId]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
+    const activeUserId = userId || 'guest-user';
     const isGuest = useAuthStore.getState().user?.id === 'guest-user';
-    const shouldSync = (isAuthenticated || isGuest) && isAuthReady && (!startupSyncTriggered.current || bootstrapStatus === 'not_started');
+    const hasTriggered = !!globalStartupSyncTriggered.get(activeUserId);
+    const shouldSync = (isAuthenticated || isGuest) && isAuthReady && (!hasTriggered || bootstrapStatus === 'not_started');
     
     if (shouldSync) {
-      startupSyncTriggered.current = true;
+      globalStartupSyncTriggered.set(activeUserId, true);
       timer = setTimeout(() => {
         triggerBackgroundSyncRef.current?.(false);
       }, 500);
@@ -782,7 +1005,7 @@ export function useSyncEngine() {
         retryTimeoutRef.current = null;
       }
     };
-  }, [isAuthenticated, isAuthReady, bootstrapStatus]);
+  }, [isAuthenticated, isAuthReady, bootstrapStatus, userId]);
 
   useEffect(() => {
     if (!isAuthenticated || !isAuthReady) return;
@@ -795,7 +1018,8 @@ export function useSyncEngine() {
       const currentState = usePlaylistStateStore.getState();
 
       if (isConnected && !currentState.hasSyncedThisSession) {
-        triggerBackgroundSyncRef.current?.(false);
+        if (__DEV__) console.log('[Sync Engine] Network connected. [DEFERRED] Skipping opportunistic sync to prevent write contention.');
+        // triggerBackgroundSyncRef.current?.(false);
       }
     });
 

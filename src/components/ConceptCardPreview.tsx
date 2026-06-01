@@ -431,3 +431,120 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
     prevProps.scrollEnabled === nextProps.scrollEnabled
   );
 });
+
+interface ConceptCardPreviewStaticProps {
+  card: IPopulatedRevisionCard;
+  scrollEnabled?: boolean;
+}
+
+export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true }: ConceptCardPreviewStaticProps) => {
+  const { companies } = useMemo(() => {
+    const hash = card.title.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const knownCompanies = ['Google', 'Meta', 'Amazon', 'Microsoft', 'Apple', 'Netflix', 'Uber', 'Airbnb', 'Adobe', 'Atlassian'];
+    const found = card.tags?.filter(t => knownCompanies.some(c => t.toLowerCase() === c.toLowerCase())) || [];
+    const companiesList = found.length > 0 ? found.join(' • ') : ['Google', 'Meta', 'Amazon', 'Microsoft', 'Uber'][hash % 4] + ' • ' + ['Google', 'Meta', 'Amazon', 'Microsoft', 'Uber'][(hash + 1) % 4] + ' • ' + ['Google', 'Meta', 'Amazon', 'Microsoft', 'Uber'][(hash + 2) % 4];
+
+    return { companies: companiesList };
+  }, [card.title, card.tags]);
+
+  const { preferences } = useUserPreferencesStore();
+  const slideCount = useMemo(() => {
+    const baseSlides = getSlidesForCard(card);
+    const introSlide = baseSlides.find(s => s.type === 'intro');
+    let otherSlides = baseSlides.filter(s => s.type !== 'intro');
+    
+    if (preferences.hideCertainBlockTypes && preferences.hideCertainBlockTypes.length > 0) {
+      otherSlides = otherSlides.filter(s => s.type ? !preferences.hideCertainBlockTypes.includes(s.type) : true);
+    }
+    
+    return (introSlide ? 1 : 0) + otherSlides.length;
+  }, [card, preferences.hideCertainBlockTypes]);
+
+  return (
+    <View className="flex-1 bg-transparent h-full pb-11 pr-14" style={{ flexDirection: 'column' }}>
+      {/* Top Section */}
+      <View className="gap-y-3">
+        {/* Modern Apple-style Capsule Tags */}
+        <View className="flex-row flex-wrap gap-2 items-center">
+          <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
+            <Text className="text-slate-600 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
+          </View>
+          <View className={`px-3 py-1 rounded-full bg-transparent ${
+            card.difficulty === 'Easy' ? 'border border-emerald-200' :
+            card.difficulty === 'Medium' ? 'border border-amber-200' :
+            'border border-rose-200'
+          }`}>
+            <Text className={`text-[10px] font-extrabold uppercase tracking-wider ${
+              card.difficulty === 'Easy' ? 'text-emerald-600' :
+              card.difficulty === 'Medium' ? 'text-amber-600' :
+              'text-rose-600'
+            }`}>{card.difficulty}</Text>
+          </View>
+          {card.complexity && (
+            <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
+              <Text className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Title */}
+        <Text
+          style={{ fontSize: 35, fontWeight: '900', color: '#0F172A', letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
+          numberOfLines={2}
+        >
+          {card.title}
+        </Text>
+
+        {/* Companies Pill */}
+        <View className="mt-1 self-start flex-row items-center gap-x-2">
+          <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8' }}>Companies:</Text>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
+            {companies}
+          </Text>
+        </View>
+      </View>
+
+      {/* Spacer 1 */}
+      <View style={{ flex: 1 }} />
+
+      {/* Middle Section */}
+      <View style={{ maxHeight: 380, flexShrink: 1, backgroundColor: '#EFF6FF', borderRadius: 24, borderWidth: 1.5, borderColor: '#93C5FD' }}>
+        <View className="p-4 gap-y-3 justify-between" style={{ maxHeight: '100%', flexShrink: 1 }}>
+          <View className="flex-row items-center justify-between">
+            <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
+          </View>
+          <ScrollView 
+            showsVerticalScrollIndicator={false} 
+            className="mt-1.5"
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ flexGrow: 1 }}
+            scrollEnabled={scrollEnabled}
+          >
+            <Text style={{ color: '#1E293B', fontSize: 15, lineHeight: 22, fontWeight: '600' }}>
+              {card.explanation || ''}
+            </Text>
+          </ScrollView>
+        </View>
+      </View>
+
+      {/* Spacer 2 */}
+      <View style={{ flex: 3.5 }} />
+
+      {/* Static Walkthrough CTA */}
+      <View className="self-center mb-2">
+        <View
+          className="flex-row items-center justify-center py-2.5 bg-violet-500 rounded-full px-6 shadow-sm shadow-violet-500/10"
+        >
+          <Text className="text-white text-[12px] font-extrabold tracking-wider uppercase text-center">
+            {slideCount} slides {'>'}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.card._id === nextProps.card._id &&
+    prevProps.scrollEnabled === nextProps.scrollEnabled
+  );
+});

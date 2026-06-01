@@ -58,7 +58,11 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
       }
     },
     enabled: !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60,
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 60,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: 'stale',
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -101,6 +105,7 @@ export const useGetFolder = (folderId: string | undefined) => {
       }
     },
     enabled: !!folderId && !hasSyncedThisSession && !isGuest,
+    staleTime: 1000 * 60 * 10,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);

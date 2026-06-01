@@ -10,12 +10,14 @@ import { RichText } from '@/components/RichText';
 
 import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useAuthStore } from '@/store/useAuthStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { useUpdateCardProgress, useUpdatePlaylistMembership } from '@/services/useProgress';
 import { canModifyItem, UserRole } from '@/utils/permissions';
 import { usePlaylists } from '@/hooks/usePlaylists';
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import { useDeleteRevisionCard } from '@/hooks/useRevisionCards';
 import { useRole } from '@/hooks/useRole';
+import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 
 // Inlined Atom One Dark theme to fix Metro bundler path resolution bugs
 const atomOneDark = {
@@ -146,17 +148,28 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
 
   const { user } = useAuthStore();
   const { role } = useRole();
+  const { preferences } = useUserPreferencesStore();
+  const lowEndDeviceMode = !!preferences.lowEndDeviceMode;
+
+  const hydrateCardContentOnDemand = usePlaylistStateStore((s) => s.hydrateCardContentOnDemand);
+
+  React.useEffect(() => {
+    if (card?._id && !card.isContentFullyHydrated) {
+      hydrateCardContentOnDemand(card._id);
+    }
+  }, [card?._id, card?.isContentFullyHydrated, hydrateCardContentOnDemand]);
 
   const [isCodeLoaded, setIsCodeLoaded] = useState(false);
   React.useEffect(() => {
     if (slide.type === 'code') {
-      // Delay rendering the heavy SyntaxHighlighter by 250ms to allow the swiping slide transition to completely settle first
+      const delay = lowEndDeviceMode ? 500 : 250;
+      // Delay rendering the heavy SyntaxHighlighter by a dynamic buffer to allow swiping animations to fully settle first
       const timeout = setTimeout(() => {
         setIsCodeLoaded(true);
-      }, 250);
+      }, delay);
       return () => clearTimeout(timeout);
     }
-  }, [slide.type]);
+  }, [slide.type, lowEndDeviceMode]);
 
   const folderId =
     typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;
@@ -280,12 +293,16 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
             {card.image && slide.type === 'intro' && (
               <StyledImage
                 recycleKey={card._id}
-                decodeHeight={120}
-                source={{ uri: card.image }}
+                decodeHeight={lowEndDeviceMode ? 100 : 120}
+                source={{ 
+                  uri: card.image,
+                  priority: slide.slideIndex === currentIndex ? 'high' : 'normal'
+                }}
                 className="w-full h-44 rounded-2xl bg-slate-100"
                 contentFit="cover"
                 transition={200}
                 cachePolicy="disk"
+                placeholder={{ blurhash: "L6PZ|Ye.dCg2_3trxupL~q%M9Fjt" }}
               />
             )}
 
@@ -573,11 +590,17 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                 {card.image ? (
                   <StyledView className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
                     <StyledImage
-                      source={{ uri: card.image }}
+                      recycleKey={card._id}
+                      decodeHeight={lowEndDeviceMode ? 120 : 180}
+                      source={{ 
+                        uri: card.image,
+                        priority: slide.slideIndex === currentIndex ? 'high' : 'normal'
+                      }}
                       className="w-full h-48 bg-slate-50"
                       contentFit="contain"
                       transition={200}
                       cachePolicy="disk"
+                      placeholder={{ blurhash: "L6PZ|Ye.dCg2_3trxupL~q%M9Fjt" }}
                     />
                   </StyledView>
                 ) : (

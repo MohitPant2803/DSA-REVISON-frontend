@@ -92,11 +92,28 @@ export function mergeCardState(
     const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
 
     // Shift hydration to be additive-only: never downgrade timestamps or fields if cache is newer/equal
+    const cachedIsHydrated = (cached as any).isContentFullyHydrated;
+    const incomingIsHydrated = (incoming as any).isContentFullyHydrated || (incoming.explanation !== '' && incoming.explanation !== undefined);
     const useCachedBase = cachedTime >= incomingTime;
+
+    let baseFields = {};
+    if (useCachedBase) {
+      baseFields = { ...cached };
+      if (!cachedIsHydrated && incomingIsHydrated) {
+        delete (baseFields as any).explanation;
+        delete (baseFields as any).code;
+        delete (baseFields as any).examples;
+        delete (baseFields as any).slides;
+        delete (baseFields as any).imageBlobPath;
+        delete (baseFields as any).imageHash;
+        delete (baseFields as any).isContentFullyHydrated;
+      }
+    }
 
     merged = {
       ...incoming,
-      ...(useCachedBase ? cached : {}),
+      ...baseFields,
+      isContentFullyHydrated: incomingIsHydrated || cachedIsHydrated,
       // Always protect local curation flags from being corrupted by stale queries
       isFavorite: cached.isFavorite !== undefined ? cached.isFavorite : incoming.isFavorite,
       isDifficult: cached.isDifficult !== undefined ? cached.isDifficult : incoming.isDifficult,

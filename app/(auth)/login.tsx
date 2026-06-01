@@ -56,31 +56,7 @@ export default function LoginScreen() {
     return () => cancelAnimation(logoScale);
   }, []);
 
-  const handleSkipLogin = async () => {
-    try {
-      setIsAuthenticating(true);
-      hapticFeedback.selection();
 
-      const mockToken = "";
-      const mockUser = {
-        id: "guest-user",
-        name: "Guest Explorer",
-        email: "guest@dsa-reels.com",
-        avatarUrl: "https://ui-avatars.com/api/?name=Guest",
-        role: "user" as const,
-      };
-
-      // Set guest session parameters
-      await login(mockToken, mockUser);
-      
-      // Funnel Guest directly into Onboarding for the initial experience
-      router.replace('/(auth)/onboarding');
-      setIsAuthenticating(false);
-    } catch (error) {
-      console.error('Skip login error:', error);
-      setIsAuthenticating(false);
-    }
-  };
 
   const handleGoogleLogin = async () => {
     if (!isConsentChecked) {
@@ -308,18 +284,7 @@ export default function LoginScreen() {
             </View>
           )}
 
-          {/* SECONDARY CTA: Calm guest session text link */}
-          <TouchableOpacity
-            disabled={isAuthenticating}
-            onPress={handleSkipLogin}
-            activeOpacity={0.6}
-            style={styles.secondaryBtn}
-            accessibilityLabel="See how it works first button"
-            accessibilityRole="button"
-            accessibilityState={{ disabled: isAuthenticating }}
-          >
-            <Text style={styles.secondaryBtnText}>See how it works first</Text>
-          </TouchableOpacity>
+
 
           <Text style={styles.termsText}>
             ReeWise protects your data and respects your privacy.

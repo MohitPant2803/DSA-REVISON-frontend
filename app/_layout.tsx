@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { View, Text, ActivityIndicator } from "react-native";
+import { useEffect, useState, useRef } from "react";
+import { View, Text, ActivityIndicator, Animated, StyleSheet, Image, InteractionManager, AppState } from "react-native";
+import { syncManager } from "@/utils/syncManager";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -8,6 +9,7 @@ import { QueryProvider } from "@/providers/QueryProvider";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useSyncEngine } from "@/hooks/useSyncEngine";
 import { usePlaylistStateStore } from "@/store/usePlaylistStateStore";
+import { AppSkeleton } from "@/components/AppSkeleton";
 import Toast from 'react-native-toast-message';
 import '../global.css';  // ← only here
 import { ExitConfirmationModal } from "@/components/ExitConfirmationModal";
@@ -94,22 +96,77 @@ function ToastWrapper() {
   } catch (e) {
     return <Toast />;
   }
-}
-
-export default function RootLayout() {
+}export default function RootLayout() {
   const { isAuthenticated, isLoading, restoreSession, user, token, logout, isLoggingOut } = useAuthStore();
-  const { isOnboarded } = useOnboardingStore();
+  const { isOnboarded, isGeneratingSystem } = useOnboardingStore();
   const segments = useSegments();
   const router = useRouter();
 
-  // Retrieve Hydration Gate flag
+  // Retrieve Hydration Gate, Bootstrap status, and Sync indicators
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
+  const bootstrapStatus = usePlaylistStateStore((s) => s.bootstrapStatus);
+  const lastSyncedRevision = usePlaylistStateStore((s) => s.lastSyncedRevision);
+  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const syncProgressPercentage = usePlaylistStateStore((s) => s.syncProgressPercentage);
+  const syncProgressStatus = usePlaylistStateStore((s) => s.syncProgressStatus);
+  const isGuest = user?.id === 'guest-user';
+
+  // Strict store ready check: ensure local SQLite databases are fully loaded into Zustand memory partitions before allowing access
+  const isStoreReady = hasHydrated && (bootstrapStatus === 'completed' || bootstrapStatus === 'failed');
+
+  // Strict initial sync check: disabled to allow instant zero-delay boots
+  const isSyncGated = false;
 
   // 1. Trigger session restoration on mount
   useEffect(() => {
     ensureGoogleConfigured();
     restoreSession();
   }, []);
+
+  const isOnboardingHydrated = useOnboardingStore((s) => s.hasHydrated);
+
+  // 1a. Core Startup Synchronization progress gatekeeper (Trigger background silent sync on startup)
+  useEffect(() => {
+    if (isLoading || !isStoreReady || isGeneratingSystem) return;
+
+    InteractionManager.runAfterInteractions(async () => {
+      const isConnected = await isNetworkConnected();
+      const needsSync = isAuthenticated && !isGuest && token;
+
+      if (isConnected && needsSync) {
+        if (__DEV__) console.log('[Startup Sync] Triggering silent background sync after interactions...');
+        try {
+          await syncManager.sync();
+        } catch (err: any) {
+          console.log('[Startup Sync Error] Silent sync failed:', err.message);
+        }
+      }
+
+      // Task 4: Pre-warm reels feed queue silently
+      try {
+        const reelsFeedService = require('@/services/reelsFeedService');
+        reelsFeedService.getReelFeedSlice(Date.now().toString())
+          .then((slice: any) => {
+            if (slice && slice.cardsSlice) {
+              const store = usePlaylistStateStore.getState();
+              store.hydratePlaylistCards('all', slice.cardsSlice);
+              
+              // Pre-hydrate first 10 card explanation details from SQLite database
+              const prewarmCount = Math.min(slice.cardsSlice.length, 10);
+              for (let i = 0; i < prewarmCount; i++) {
+                const card = slice.cardsSlice[i];
+                if (card && card._id) {
+                  store.hydrateCardContentOnDemand(card._id).catch(() => {});
+                }
+              }
+            }
+          })
+          .catch(() => {});
+      } catch (err) {
+        if (__DEV__) console.log('[Startup Queue Pre-warm Error]', err);
+      }
+    });
+  }, [isLoading, isStoreReady, isGeneratingSystem, isAuthenticated, isGuest, token, lastSyncedRevision]);
 
   // 1b. Intercept Deep Links on startup and store in targetDeepLink if not authenticated
   const incomingUrl = Linking.useURL();
@@ -123,42 +180,72 @@ export default function RootLayout() {
     }
   }, [incomingUrl, isAuthenticated]);
 
+  // 1c. Unified App Close/Background Exit Persistence Hook
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", async (nextAppState) => {
+      if (nextAppState === "background" || nextAppState === "inactive") {
+        const userId = usePlaylistStateStore.getState().userId || "guest-user";
+        if (userId) {
+          if (__DEV__) {
+            console.log("[Root AppState] App suspending/backgrounded. Flushing all Zustand states to SQLite...");
+          }
+          const { flushAllZustandToSQLite } = require("@/utils/sqliteSyncBridge");
+          await flushAllZustandToSQLite(userId);
+        }
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   // 2. Hydration Gate & SplashScreen Timing
   useEffect(() => {
     // Hide splash only when BOTH Zustand and Auth session rehydrations are fully complete
-    if (!isLoading && hasHydrated) {
+    // And if initial sync is required, wait until it has synced!
+    if (!isLoading && isStoreReady && !isSyncGated) {
       SplashScreen.hideAsync();
     }
-  }, [isLoading, hasHydrated]);
+  }, [isLoading, isStoreReady, isSyncGated]);
 
-  const isGuest = user?.id === 'guest-user';
-
-  // 3. Navigation Guard gating with hasHydrated
+  // 3. Navigation Guard gating with isStoreReady
   useEffect(() => {
-    // Prevent any optimistic redirects until both auth and Zustand hydration finish!
-    if (isLoading || !hasHydrated) return;
+    // Prevent any optimistic redirects until auth and onboarding finishes loading
+    if (isLoading || !isOnboardingHydrated) return;
+    // Wait for store hydration only when user has access (needs data). After logout, skip this.
+    if (!isStoreReady && (isAuthenticated || isGuest)) return;
+    if (isSyncGated) return;
 
     const inAuthGroup = segments[0] === '(auth)';
     const inOnboarding = (segments as string[])[1] === 'onboarding';
     const hasAccess = !!isAuthenticated || isGuest;
 
-    if (!isOnboarded) {
+    // Only block navigation during onboarding generation — not globally
+    if (isGeneratingSystem && inOnboarding) return;
+
+    // 1. If not onboarded and not logged in, they must go to onboarding first
+    if (!isOnboarded && !hasAccess) {
       if (!inOnboarding) {
         router.replace("/(auth)/onboarding");
       }
       return;
     }
 
+    // 2. If onboarded but not logged in, they must go to login
     if (!hasAccess && !inAuthGroup) {
       router.replace("/(auth)/login");
-    } else if (hasAccess && inAuthGroup) {
-      router.replace("/(protected)/(tabs)/learn");
+    } 
+    // 3. If logged in and on an auth screen, redirect to protected tabs
+    else if (hasAccess && inAuthGroup) {
+      if (!inOnboarding) {
+        router.replace("/(protected)/(tabs)/learn");
+      }
     }
-  }, [isAuthenticated, isLoading, hasHydrated, segments, user?.id, isGuest, isOnboarded]);
+  }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, isGeneratingSystem, segments, user?.id, isGuest, isOnboarded]);
 
   // 4. Silent Background token expiration checking
   useEffect(() => {
-    if (isLoading || !hasHydrated) return;
+    if (isLoading || !isStoreReady || isSyncGated) return;
 
     const checkTokenExpiryGracefully = async () => {
       const expired = isTokenExpired(token);
@@ -185,13 +272,9 @@ export default function RootLayout() {
     if (isAuthenticated) {
       checkTokenExpiryGracefully();
     }
-  }, [isAuthenticated, isLoading, hasHydrated, token]);
+  }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, token]);
 
-  // Prevent rendering stacked routes before store hydration is solved
-  if (!hasHydrated) {
-    return null;
-  }
-
+  // Show logout overlay first — before any other gates
   if (isLoggingOut) {
     return (
       <View style={{ flex: 1, backgroundColor: '#FAF9F7', justifyContent: 'center', alignItems: 'center' }}>
@@ -206,16 +289,25 @@ export default function RootLayout() {
     );
   }
 
+  // Prevent rendering stacked routes before store hydration is solved
+  // But after logout (!isAuthenticated && !isLoading), skip the gate so nav guard can redirect to login
+  if (!isStoreReady && (isLoading || isAuthenticated)) {
+    return <AppSkeleton />;
+  }
+  // Initial sync gate overlay removed for instant, zero-delay booting
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <QueryProvider>
           <SyncEngineMount />
-          <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(protected)" options={{ animation: 'none' }} />
-          </Stack>
+          <StatusBar style="dark" />
+          <View style={{ flex: 1, position: 'relative' }}>
+            <Stack screenOptions={{ headerShown: false, animation: 'none' }}>
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(protected)" options={{ animation: 'none' }} />
+            </Stack>
+          </View>
           <ToastWrapper />
           <ExitConfirmationModal />
         </QueryProvider>

@@ -6,15 +6,14 @@
     "scheme": "dsareels",
     "orientation": "portrait",
     "icon": "./assets/icon213.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
+      "backgroundColor": "#FAF9F7"
     },
     "ios": {
       "supportsTablet": true,
-      "backgroundColor": "#0f172a"
+      "backgroundColor": "#FAF9F7"
     },
     "android": {
       "package": "com.mohit.dsareels",

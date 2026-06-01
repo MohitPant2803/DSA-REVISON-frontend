@@ -11,11 +11,13 @@ import {
   Modal,
   Pressable,
   TouchableOpacity,
+  InteractionManager,
 } from 'react-native';
 import Animated, { FadeInUp, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { interactionScheduler } from '@/utils/interactionScheduler';
 import {
   Plus,
   ListMusic,
@@ -45,6 +47,7 @@ import { SyncPauseGate } from '@/components/SyncPauseGate';
 import { usePlaylistCount } from '@/hooks/usePlaylistStoreSelectors';
 import { useBiometricReauth } from '@/hooks/useBiometricReauth';
 import { theme } from '@/theme';
+import { ReeWCharacter } from '@/components/ReeWCharacter';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -67,11 +70,11 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
     switch (playlist.id) {
       case 'easy':
         return {
-          bg: '#F2FAF5', // Light green pastel
-          border: 'rgba(16, 185, 129, 0.06)',
-          text: '#10B981', // Clean green
-          iconBg: '#E6F4EA',
-          blobColor: 'rgba(16, 185, 129, 0.05)',
+          bg: '#FFFFFF',
+          border: 'rgba(16, 185, 129, 0.15)',
+          text: '#10B981',
+          iconBg: 'rgba(16, 185, 129, 0.08)',
+          blobColor: 'rgba(16, 185, 129, 0.02)',
           displayName: 'Easy progress',
           statusText: 'Keep it going',
           statusColor: '#10B981',
@@ -79,39 +82,39 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
         };
       case 'medium':
         return {
-          bg: '#FCFAF2', // Light yellow pastel
-          border: 'rgba(245, 158, 11, 0.05)',
-          text: '#F59E0B', // Clean amber
-          iconBg: '#FEF7E0',
-          blobColor: 'rgba(245, 158, 11, 0.04)',
+          bg: '#FFFFFF',
+          border: 'rgba(245, 158, 11, 0.15)',
+          text: '#D97706',
+          iconBg: 'rgba(245, 158, 11, 0.08)',
+          blobColor: 'rgba(245, 158, 11, 0.02)',
           displayName: 'Medium practice',
           statusText: 'Good to review',
-          statusColor: '#B45309',
+          statusColor: '#D97706',
           icon: Zap,
         };
       case 'hard':
         return {
-          bg: '#FFF4F4', // Light pink pastel
-          border: 'rgba(239, 68, 68, 0.05)',
-          text: '#EF4444', // Clean red
-          iconBg: '#FCE8E6',
-          blobColor: 'rgba(239, 68, 68, 0.05)',
+          bg: '#FFFFFF',
+          border: 'rgba(239, 68, 68, 0.15)',
+          text: '#DC2626',
+          iconBg: 'rgba(239, 68, 68, 0.08)',
+          blobColor: 'rgba(239, 68, 68, 0.02)',
           displayName: 'Hard focus',
           statusText: 'Cards need attention',
-          statusColor: '#E11D48',
+          statusColor: '#DC2626',
           icon: Brain,
         };
       case 'skipped':
       default:
         return {
-          bg: '#F4F6FA', // Light blue/gray pastel
-          border: 'rgba(100, 116, 139, 0.05)',
-          text: '#64748B', // Cool slate
-          iconBg: '#E8EAED',
-          blobColor: 'rgba(100, 116, 139, 0.04)',
+          bg: '#FFFFFF',
+          border: 'rgba(59, 130, 246, 0.15)',
+          text: '#2563EB',
+          iconBg: 'rgba(59, 130, 246, 0.08)',
+          blobColor: 'rgba(59, 130, 246, 0.02)',
           displayName: 'Skipped for now',
           statusText: 'Come back later',
-          statusColor: '#64748B',
+          statusColor: '#2563EB',
           icon: SkipForward,
         };
     }
@@ -131,7 +134,7 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
           borderColor: theme.border,
           shadowColor: '#0F172A',
           shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.02,
+          shadowOpacity: 0.03,
           shadowRadius: 14,
           elevation: 2,
         }}
@@ -153,19 +156,14 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
         <View className="flex-row items-center justify-between">
           <View
             className="w-9 h-9 rounded-full items-center justify-center border"
-            style={{ backgroundColor: theme.iconBg, borderColor: 'rgba(148,163,184,0.04)' }}
+            style={{ backgroundColor: theme.iconBg, borderColor: 'rgba(15,23,42,0.04)' }}
           >
             <IconComponent color={theme.text} size={15} strokeWidth={2.0} />
           </View>
         </View>
 
-        {/* Huge dynamic number */}
-        <Text className="text-[34px] font-black tracking-tight mt-4 leading-none text-[#0B1327]">
-          {playlist.itemCount ?? 0}
-        </Text>
-
         {/* Label */}
-        <Text className="font-bold text-[13px] text-[#0B1327] mt-2 tracking-tight">
+        <Text className="font-bold text-[13px] text-[#0F172A] mt-4 tracking-tight">
           {theme.displayName}
         </Text>
 
@@ -202,10 +200,10 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
         activeOpacity={0.85}
         className="w-full flex-row items-center p-4 rounded-[22px] border bg-white justify-between"
         style={{
-          borderColor: 'rgba(148,163,184,0.08)',
+          borderColor: '#E2E8F0',
           shadowColor: '#0F172A',
           shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.025,
+          shadowOpacity: 0.02,
           shadowRadius: 14,
           elevation: 2,
         }}
@@ -214,7 +212,7 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
           {/* Soft purple rounded icon container */}
           <View 
             className="w-10 h-10 rounded-2xl items-center justify-center bg-[#F5F3FF] border"
-            style={{ borderColor: 'rgba(139, 92, 246, 0.04)' }}
+            style={{ borderColor: 'rgba(139, 92, 246, 0.05)' }}
           >
             <ListMusic color="#8B5CF6" size={16} strokeWidth={2.0} />
           </View>
@@ -222,12 +220,12 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
           {/* Title & Metadata */}
           <View className="ml-3 flex-1">
             <Text 
-              className="font-bold text-[13px] text-[#0B1327]" 
+              className="font-bold text-[13px] text-[#0F172A]" 
               numberOfLines={1}
             >
               {playlist.name}
             </Text>
-            <Text className="text-[10px] font-semibold text-[#7F8A9E] mt-0.5">
+            <Text className="text-[10px] font-semibold text-[#64748B] mt-0.5">
               {displayCount === 0 ? 'Empty' : `${displayCount} cards`}
             </Text>
           </View>
@@ -238,7 +236,7 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
           onPress={onLongPress}
           className="p-1"
         >
-          <MoreHorizontal color="#A0AEC0" size={16} />
+          <MoreHorizontal color="#64748B" size={16} />
         </TouchableOpacity>
       </TouchableOpacity>
     </View>
@@ -521,6 +519,18 @@ export default function PersonalScreen() {
   const { triggerBiometricReauth } = useBiometricReauth();
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
 
+  const [isTransitionReady, setIsTransitionReady] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      interactionScheduler.registerInteraction(); // UI priority block
+      setIsTransitionReady(true);
+      return () => {
+        // Do NOT reset to false on blur to guarantee instant next tab switch with full layout preservation!
+      };
+    }, [])
+  );
+
   // Local-First Architecture: SyncPauseGate pauses sync automatically when focused
 
   const { data: playlists = [], isLoading: playlistsLoading, isError: playlistsError, isFetched, refetch } = usePlaylists();
@@ -675,6 +685,36 @@ export default function PersonalScreen() {
     setIsSignInPromptOpen(true);
   };
 
+  if (!isTransitionReady) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
+        {/* Skeleton Header */}
+        <View className="px-6 pb-6 pt-2">
+          <View style={{ width: 140, height: 28, backgroundColor: '#E2E8F0', borderRadius: 8, marginBottom: 8 }} />
+          <View style={{ width: '80%', height: 16, backgroundColor: '#F1F5F9', borderRadius: 6 }} />
+        </View>
+
+        <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
+          {/* Smart Playlists Skeleton Grid */}
+          <View className="flex-row flex-wrap justify-between mt-4">
+            <View style={{ width: '48%', height: 110, backgroundColor: '#E2E8F0', borderRadius: 26, marginBottom: 12 }} />
+            <View style={{ width: '48%', height: 110, backgroundColor: '#E2E8F0', borderRadius: 26, marginBottom: 12 }} />
+            <View style={{ width: '48%', height: 110, backgroundColor: '#E2E8F0', borderRadius: 26, marginBottom: 12 }} />
+            <View style={{ width: '48%', height: 110, backgroundColor: '#E2E8F0', borderRadius: 26, marginBottom: 12 }} />
+          </View>
+
+          {/* Custom collections Section Title Skeleton */}
+          <View style={{ width: 180, height: 20, backgroundColor: '#E2E8F0', borderRadius: 6, marginTop: 24, marginBottom: 16 }} />
+
+          {/* Custom Collections Skeleton Grid */}
+          <View className="flex-row flex-wrap justify-between">
+            <View style={{ width: '48%', height: 110, backgroundColor: '#F1F5F9', borderRadius: 26, marginBottom: 12 }} />
+            <View style={{ width: '48%', height: 110, backgroundColor: '#F1F5F9', borderRadius: 26, marginBottom: 12 }} />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
@@ -722,19 +762,20 @@ export default function PersonalScreen() {
               <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
                 My Space
               </Text>
-              <Text className="text-[#7F8A9E] text-[13px] font-semibold mt-1.5 leading-none">
+              <Text className="text-[#475569] text-[13px] font-semibold mt-1.5 leading-none">
                 Your personal revision deck
               </Text>
             </View>
  
             {/* Streak & Floating Capsule Navigation */}
-            <View className="flex-row items-center gap-2">
+            <View className="flex-row items-center gap-3">
+              <ReeWCharacter state="streak" size={64} />
               <TouchableOpacity
                 onPress={handlePressSettings}
                 activeOpacity={0.8}
                 className="w-8 h-8 rounded-full items-center justify-center bg-white border"
                 style={{
-                  borderColor: 'rgba(148,163,184,0.08)',
+                  borderColor: '#E2E8F0',
                   shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.02,
@@ -742,7 +783,7 @@ export default function PersonalScreen() {
                   elevation: 1,
                 }}
               >
-                <Settings2 color="#7F8A9E" size={14} strokeWidth={2.0} />
+                <Settings2 color="#64748B" size={14} strokeWidth={2.0} />
               </TouchableOpacity>
             </View>
           </View>
@@ -757,7 +798,7 @@ export default function PersonalScreen() {
           <View 
             className="flex-row items-center justify-between p-6 rounded-[28px] bg-white border"
             style={{
-              borderColor: 'rgba(148,163,184,0.08)',
+              borderColor: '#E2E8F0',
               shadowColor: '#0F172A',
               shadowOffset: { width: 0, height: 8 },
               shadowOpacity: 0.03,
@@ -769,7 +810,7 @@ export default function PersonalScreen() {
             <View className="flex-1 mr-4">
               {/* Smiling emoji avatar */}
               <View 
-                className="w-10 h-10 rounded-full items-center justify-center bg-[#F3E8FF] mb-3 border border-[#E9D5FF]/30"
+                className="w-10 h-10 rounded-full items-center justify-center bg-[#F5F3FF] mb-3 border border-[#8B5CF6]/5"
               >
                 <Smile color="#8B5CF6" size={20} strokeWidth={2.0} />
               </View>
@@ -781,7 +822,7 @@ export default function PersonalScreen() {
               {/* Dynamic Analytics Stats Row (Isolated to avoid page rerenders) */}
               <AnalyticsStatsRow />
 
-              <Text className="text-[#7F8A9E] text-xs font-semibold leading-normal mt-1">
+              <Text className="text-[#475569] text-xs font-semibold leading-normal mt-1">
                 Let's keep the flow going.
               </Text>
 
@@ -805,36 +846,36 @@ export default function PersonalScreen() {
               
               {/* Stacking Book Layer 1 */}
               <View 
-                className="absolute w-14 h-9 rounded-lg bg-[#E8E3FA] border border-[#DCD3F5]"
+                className="absolute w-14 h-9 rounded-lg bg-[#E2E8F0] border border-slate-200"
                 style={{
                   transform: [{ rotate: '-8deg' }, { translateY: 6 }, { translateX: -4 }],
-                  shadowColor: '#8B5CF6',
+                  shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.08,
+                  shadowOpacity: 0.05,
                   shadowRadius: 5,
                 }}
               />
               
               {/* Stacking Book Layer 2 */}
               <View 
-                className="absolute w-14 h-9 rounded-lg bg-[#F1EEFE] border border-[#E5E0FB]"
+                className="absolute w-14 h-9 rounded-lg bg-[#CBD5E1] border border-slate-300"
                 style={{
                   transform: [{ rotate: '4deg' }, { translateY: -2 }, { translateX: 2 }],
-                  shadowColor: '#8B5CF6',
+                  shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.08,
+                  shadowOpacity: 0.05,
                   shadowRadius: 5,
                 }}
               />
               
               {/* Stacking Book Layer 3 (Top) */}
               <View 
-                className="absolute w-14 h-9 rounded-lg bg-white border border-[#F1EEFE] items-center justify-center"
+                className="absolute w-14 h-9 rounded-lg bg-[#F1F5F9] border border-slate-200 items-center justify-center"
                 style={{
                   transform: [{ rotate: '-2deg' }, { translateY: -10 }],
-                  shadowColor: '#8B5CF6',
+                  shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 6 },
-                  shadowOpacity: 0.12,
+                  shadowOpacity: 0.08,
                   shadowRadius: 8,
                   elevation: 2,
                 }}
@@ -994,10 +1035,12 @@ export default function PersonalScreen() {
       </ScrollView>
 
       {/* Settings Panel Overlay */}
-      <MySpaceSettingsOverlay
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
+      {isSettingsOpen && (
+        <MySpaceSettingsOverlay
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+        />
+      )}
 
       {/* SMALL ELEGANT ANALYTICS OVERLAY MODAL */}
       <Modal

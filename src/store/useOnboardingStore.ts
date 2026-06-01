@@ -15,6 +15,7 @@ interface OnboardingState {
   currentStep: number;
   preferences: PersonalizationPreferences;
   isGeneratingSystem: boolean;
+  hasHydrated: boolean;
   
   // Actions
   setStep: (step: number) => void;
@@ -22,6 +23,7 @@ interface OnboardingState {
   completeOnboarding: () => Promise<void>;
   setIsGeneratingSystem: (generating: boolean) => void;
   resetOnboarding: () => Promise<void>;
+  setHasHydrated: (hydrated: boolean) => void;
 }
 
 const DEFAULT_PREFERENCES: PersonalizationPreferences = {
@@ -39,6 +41,7 @@ export const useOnboardingStore = create<OnboardingState>()(
       currentStep: 0,
       preferences: DEFAULT_PREFERENCES,
       isGeneratingSystem: false,
+      hasHydrated: false,
 
       setStep: (step) => set({ currentStep: step }),
 
@@ -51,7 +54,7 @@ export const useOnboardingStore = create<OnboardingState>()(
         })),
 
       completeOnboarding: async () => {
-        set({ isOnboarded: true, currentStep: 0 });
+        set({ isOnboarded: true });
       },
 
       setIsGeneratingSystem: (generating) => set({ isGeneratingSystem: generating }),
@@ -64,6 +67,8 @@ export const useOnboardingStore = create<OnboardingState>()(
           isGeneratingSystem: false,
         });
       },
+
+      setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
     }),
     {
       name: 'dsa-onboarding-storage',
@@ -72,6 +77,12 @@ export const useOnboardingStore = create<OnboardingState>()(
         isOnboarded: state.isOnboarded,
         preferences: state.preferences,
       }),
+      merge: (persistedState: any, currentState) => {
+        return { ...currentState, ...persistedState };
+      },
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );

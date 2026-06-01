@@ -3,6 +3,7 @@ import type { IPopulatedRevisionCard } from '@/types/revision';
 import { cacheStorage } from '@/lib/cache';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { resolveCardState } from '@/utils/resolveCardState';
+import { AppState } from 'react-native';
 
 export interface ISessionQueue {
   _id: string;
@@ -29,9 +30,65 @@ export interface ISessionCardsSlice {
 // In-memory simulation of active local session queues for offline mode
 const localSessions: Record<string, ISessionQueue> = {};
 
+const pendingCacheFlushes: Record<string, ISessionQueue> = {};
+let cacheFlushTimeout: NodeJS.Timeout | null = null;
+
+export const flushSessionQueuesToCacheSync = () => {
+  if (cacheFlushTimeout) {
+    clearTimeout(cacheFlushTimeout);
+    cacheFlushTimeout = null;
+  }
+  
+  Object.keys(pendingCacheFlushes).forEach((key) => {
+    const session = pendingCacheFlushes[key];
+    delete pendingCacheFlushes[key];
+    cacheStorage.set(`session_${session._id}`, session).catch((e) => {
+      console.error('[Session Queue] Sync cache flush failed:', e);
+    });
+  });
+};
+
+const flushSessionQueuesToCache = async () => {
+  if (cacheFlushTimeout) {
+    clearTimeout(cacheFlushTimeout);
+    cacheFlushTimeout = null;
+  }
+  
+  const keys = Object.keys(pendingCacheFlushes);
+  for (const key of keys) {
+    const session = pendingCacheFlushes[key];
+    delete pendingCacheFlushes[key];
+    try {
+      await cacheStorage.set(`session_${session._id}`, session);
+    } catch (e) {
+      console.error('[Session Queue] Async cache flush failed:', e);
+    }
+  }
+};
+
+const persistSessionMemory = (session: ISessionQueue) => {
+  localSessions[session._id] = session;
+  pendingCacheFlushes[session._id] = session;
+  
+  if (cacheFlushTimeout) {
+    clearTimeout(cacheFlushTimeout);
+  }
+  
+  cacheFlushTimeout = setTimeout(() => {
+    flushSessionQueuesToCache().catch(console.error);
+  }, 3000); // 3-second debounce
+};
+
+AppState.addEventListener('change', (nextAppState) => {
+  if (nextAppState === 'inactive' || nextAppState === 'background') {
+    flushSessionQueuesToCacheSync();
+  }
+});
+
 export const invalidateSession = async (sourceId: string) => {
   const sessionId = `local-session-${sourceId}`;
   delete localSessions[sessionId];
+  delete pendingCacheFlushes[sessionId];
   await cacheStorage.remove(`session_${sessionId}`);
   console.log('[Session Queue] Invalidated session for:', sourceId);
 };
@@ -80,20 +137,21 @@ const getDeterministicQueue = (baseCardIds: string[], cardsById: Record<string, 
   ];
 };
 
-const startLocalSession = async (
+export const startLocalSession = async (
   sourceType: 'folder' | 'playlist' | 'liked' | 'watchLater',
   sourceId: string,
-  shuffle = false
+  shuffle = false,
+  startCardId?: string
 ): Promise<ISessionQueue> => {
   console.log('[Session Queue] Launching Local-First Virtual Session for:', sourceId);
   
   const sessionId = `local-session-${sourceId}`;
   
   // Try restoring a persistent session first
-  if (sourceType === 'folder') {
+  if (sourceType === 'folder' && !startCardId) {
     try {
       const cachedSession = await cacheStorage.get<ISessionQueue>(`session_${sessionId}`);
-      if (cachedSession) {
+      if (cachedSession && cachedSession.shuffle === shuffle) {
         console.log('[Session Queue] Restored persisted session for:', sourceId);
         localSessions[sessionId] = cachedSession;
         return cachedSession;
@@ -102,7 +160,7 @@ const startLocalSession = async (
   }
 
   let orderedCardIds: string[] = [];
-  const { cardsById, playlistCardOrderMap } = usePlaylistStateStore.getState();
+  const { cardsById, playlistCardOrderMap, playlistsById } = usePlaylistStateStore.getState();
 
   if (sourceType === 'playlist' || sourceType === 'liked' || sourceType === 'watchLater') {
     const playlistId = sourceType === 'liked' ? 'likes' : (sourceType === 'watchLater' ? 'watch-later' : sourceId);
@@ -137,7 +195,9 @@ const startLocalSession = async (
       }
       orderedCardIds = uniqueResolved.map((card) => card._id);
     } else {
-      orderedCardIds = (playlistCardOrderMap[playlistId] || []).filter((id) => {
+      const playlist = playlistsById[playlistId];
+      const baseIds = playlistCardOrderMap[playlistId] || playlist?.cardIds || playlist?.orderedCardIds || [];
+      orderedCardIds = baseIds.filter((id) => {
         const cleanId = id.split('-loop-')[0];
         if (!cleanId || seen.has(cleanId)) return false;
         seen.add(cleanId);
@@ -168,13 +228,24 @@ const startLocalSession = async (
     orderedCardIds = getDeterministicQueue(orderedCardIds, cardsById);
   }
 
+  let currentIndex = 0;
+  if (startCardId) {
+    const targetClean = startCardId.split('-loop-')[0];
+    for (let i = 0; i < orderedCardIds.length; i++) {
+      if (orderedCardIds[i].split('-loop-')[0] === targetClean) {
+        currentIndex = i;
+        break;
+      }
+    }
+  }
+
   const session: ISessionQueue = {
     _id: sessionId,
     userId: 'local-user',
     sourceType,
     sourceId,
     orderedCardIds,
-    currentIndex: 0,
+    currentIndex,
     shuffle,
     seenSet: [],
     cycleNumber: 1,
@@ -188,129 +259,95 @@ const startLocalSession = async (
 export const startSession = async (
   sourceType: 'folder' | 'playlist' | 'liked' | 'watchLater',
   sourceId: string,
-  shuffle = false
+  shuffle = false,
+  startCardId?: string
 ): Promise<ISessionQueue> => {
-  const hasSynced = usePlaylistStateStore.getState().hasSyncedThisSession;
-  if (hasSynced) {
-    return startLocalSession(sourceType, sourceId, shuffle);
-  }
-
-  try {
-    const response = await api.post<ISessionQueue>('/sessions/start', {
-      sourceType,
-      sourceId,
-      shuffle,
-    });
-    return response.data;
-  } catch (error) {
-    return startLocalSession(sourceType, sourceId, shuffle);
-  }
+  // Always use local session queue for ultra-fast, local-first performance (<5ms)
+  return startLocalSession(sourceType, sourceId, shuffle, startCardId);
 };
 
 export const getSessionQueue = async (sessionId: string): Promise<ISessionQueue> => {
-  if (sessionId.startsWith('local-session-')) {
-    let session = localSessions[sessionId];
-    if (!session) {
-      session = await cacheStorage.get<ISessionQueue>(`session_${sessionId}`) as ISessionQueue;
-      if (session) localSessions[sessionId] = session;
-    }
-    if (!session) throw new Error('Local session not found');
-    return session;
+  let session = localSessions[sessionId];
+  if (!session) {
+    session = await cacheStorage.get<ISessionQueue>(`session_${sessionId}`) as ISessionQueue;
+    if (session) localSessions[sessionId] = session;
   }
-  const response = await api.get<ISessionQueue>(`/sessions/${sessionId}`);
-  return response.data;
+  if (!session) {
+    console.warn('[Session Queue] Local session not found, creating fallback for:', sessionId);
+    const sourceId = sessionId.replace('local-session-', '');
+    const sourceType = sourceId.length > 20 ? 'folder' : 'playlist';
+    return startLocalSession(sourceType, sourceId, false);
+  }
+  return session;
 };
 
 export const updateSessionIndex = async (
   sessionId: string,
   currentIndex: number
 ): Promise<ISessionQueue> => {
-  if (sessionId.startsWith('local-session-')) {
-    const session = await getSessionQueue(sessionId);
-    if (session) {
-      session.currentIndex = currentIndex;
-      
-      const currentCardId = session.orderedCardIds[currentIndex];
-      if (currentCardId && !session.seenSet.includes(currentCardId)) {
-        session.seenSet.push(currentCardId);
-      }
-
-      // Check for cycle completion
-      if (session.seenSet.length >= session.orderedCardIds.length && session.orderedCardIds.length > 0) {
-        session.cycleNumber += 1;
-        session.seenSet = [];
-        const { cardsById } = usePlaylistStateStore.getState();
-        if (session.shuffle) {
-          session.orderedCardIds = getDeterministicQueue(session.orderedCardIds, cardsById);
-        }
-        session.currentIndex = 0; // Restart cycle
-      }
-
-      await persistSession(session);
+  const session = await getSessionQueue(sessionId);
+  if (session) {
+    session.currentIndex = currentIndex;
+    
+    const currentCardId = session.orderedCardIds[currentIndex];
+    if (currentCardId && !session.seenSet.includes(currentCardId)) {
+      session.seenSet.push(currentCardId);
     }
-    return session!;
+
+    // Check for cycle completion
+    if (session.seenSet.length >= session.orderedCardIds.length && session.orderedCardIds.length > 0) {
+      session.cycleNumber += 1;
+      session.seenSet = [];
+      const { cardsById } = usePlaylistStateStore.getState();
+      if (session.shuffle) {
+        session.orderedCardIds = getDeterministicQueue(session.orderedCardIds, cardsById);
+      }
+      session.currentIndex = 0; // Restart cycle
+    }
+
+    persistSessionMemory(session);
   }
-  const response = await api.put<ISessionQueue>(`/sessions/${sessionId}/index`, {
-    currentIndex,
-  });
-  return response.data;
+  return session;
 };
 
 export const toggleSessionShuffle = async (
   sessionId: string,
   shuffle: boolean
 ): Promise<ISessionQueue> => {
-  if (sessionId.startsWith('local-session-')) {
-    const session = await getSessionQueue(sessionId);
-    if (session) {
-      session.shuffle = shuffle;
-      const { cardsById } = usePlaylistStateStore.getState();
-      if (shuffle) {
-        session.orderedCardIds = getDeterministicQueue(session.orderedCardIds, cardsById);
-      }
-      await persistSession(session);
+  const session = await getSessionQueue(sessionId);
+  if (session) {
+    session.shuffle = shuffle;
+    const { cardsById } = usePlaylistStateStore.getState();
+    if (shuffle) {
+      session.orderedCardIds = getDeterministicQueue(session.orderedCardIds, cardsById);
+    } else {
+      // Revert to non-shuffled state by re-generating the original queue
+      const tempSession = await startLocalSession(session.sourceType, session.sourceId, false);
+      session.orderedCardIds = tempSession.orderedCardIds;
     }
-    return session!;
+    await persistSession(session);
   }
-  const response = await api.put<ISessionQueue>(`/sessions/${sessionId}/shuffle`, {
-    shuffle,
-  });
-  return response.data;
+  return session;
 };
 
 export const getSessionCardsSlice = async (sessionId: string): Promise<ISessionCardsSlice> => {
-  if (sessionId.startsWith('local-session-')) {
-    const session = await getSessionQueue(sessionId);
-    if (!session) {
-      throw new Error('Local session not found');
-    }
-
-    let cardsSlice: IPopulatedRevisionCard[] = [];
-    const { cardsById } = usePlaylistStateStore.getState();
-
-    if (session.sourceType === 'folder') {
-      const cached = await cacheStorage.get<any>(`cards_folder_${session.sourceId}_true`) || await cacheStorage.get<any>(`cards_folder_${session.sourceId}`);
-      if (cached && cached.results) {
-        const folderCards: IPopulatedRevisionCard[] = cached.results;
-        const folderCardsMap = new Map(folderCards.map(c => [c._id, c]));
-        cardsSlice = session.orderedCardIds.map(id => folderCardsMap.get(id) || cardsById[id]).filter(Boolean) as IPopulatedRevisionCard[];
-      } else {
-        cardsSlice = session.orderedCardIds.map(id => cardsById[id]).filter(Boolean) as IPopulatedRevisionCard[];
-      }
-    } else {
-      cardsSlice = session.orderedCardIds.map(id => cardsById[id]).filter(Boolean) as IPopulatedRevisionCard[];
-    }
-
-    return {
-      orderedCardIds: session.orderedCardIds,
-      currentIndex: session.currentIndex,
-      shuffle: session.shuffle,
-      cardsSlice,
-      sourceType: session.sourceType,
-      sourceId: session.sourceId,
-    };
+  const session = await getSessionQueue(sessionId);
+  if (!session) {
+    throw new Error('Local session not found');
   }
 
-  const response = await api.get<ISessionCardsSlice>(`/sessions/${sessionId}/slice`);
-  return response.data;
+  // Pure in-memory card array mapping using Zustand store (already fully hydrated on boot)
+  const { cardsById } = usePlaylistStateStore.getState();
+  const cardsSlice = session.orderedCardIds
+    .map(id => cardsById[id.split('-loop-')[0]])
+    .filter(Boolean) as IPopulatedRevisionCard[];
+
+  return {
+    orderedCardIds: session.orderedCardIds,
+    currentIndex: session.currentIndex,
+    shuffle: session.shuffle,
+    cardsSlice,
+    sourceType: session.sourceType,
+    sourceId: session.sourceId,
+  };
 };

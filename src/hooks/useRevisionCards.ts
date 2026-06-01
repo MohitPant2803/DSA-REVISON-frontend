@@ -65,7 +65,11 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
       }
     },
     enabled: !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60,
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 60,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: 'stale',
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -112,6 +116,11 @@ export const useGetRevisionCard = (cardId: string | undefined) => {
       }
     },
     enabled: !!cardId && !hasSyncedThisSession && !isGuest,
+    staleTime: 1000 * 60 * 60,
+    gcTime: 1000 * 60 * 60 * 24,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   return {
@@ -165,7 +174,7 @@ export const useGetCardsByFolder = (
       }
     },
     enabled: !!folderId && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 30,
+    staleTime: 1000 * 60 * 10,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);

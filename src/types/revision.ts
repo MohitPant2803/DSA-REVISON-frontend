@@ -72,6 +72,7 @@ export interface IPopulatedRevisionCard extends Omit<IRevisionCard, 'createdBy' 
   isArchived?: boolean;
   difficultyState?: 'easy' | 'medium' | 'hard' | 'skipped' | null;
   currentUserQuestionProgress?: ICurrentUserQuestionProgress | null;
+  isContentFullyHydrated?: boolean;
 }
 
 export type CreateRevisionCardDTO = {

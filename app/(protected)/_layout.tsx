@@ -1,10 +1,12 @@
 import { Stack } from 'expo-router';
+import { View } from 'react-native';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
+import { FloatingHomeButton } from '@/components/FloatingHomeButton';
 
 function StackWithBack() {
   useAppBackHandler();
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', animationTypeForReplace: 'pop' }}>
+    <Stack screenOptions={{ headerShown: false, animation: 'none', animationTypeForReplace: 'pop' }}>
       <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
       <Stack.Screen name="admin" />
       <Stack.Screen name="domains/[id]" />
@@ -21,5 +23,10 @@ function StackWithBack() {
 }
 
 export default function ProtectedLayout() {
-  return <StackWithBack />;
+  return (
+    <View style={{ flex: 1 }}>
+      <StackWithBack />
+      <FloatingHomeButton />
+    </View>
+  );
 }

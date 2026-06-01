@@ -23,7 +23,7 @@ const { width } = Dimensions.get('window');
 export default function StartupCoordinator() {
   const router = useRouter();
   const { restoreSession, isLoading: isAuthLoading, isAuthenticated, user } = useAuthStore();
-  const { isOnboarded } = useOnboardingStore();
+  const { isOnboarded, resetOnboarding } = useOnboardingStore();
   const [isPreloadComplete, setIsPreloadComplete] = useState(false);
 
   // Animation Shared Values
@@ -97,6 +97,8 @@ export default function StartupCoordinator() {
           preheatNetwork(),
           restoreSession(),
         ]);
+
+
       } catch (e) {
         console.warn('Startup pipeline warning:', e);
       } finally {
@@ -151,10 +153,10 @@ export default function StartupCoordinator() {
         startOptimisticDataPreload();
       }
 
-      if (!isOnboarded) {
-        router.replace('/(auth)/onboarding');
-      } else if (hasAccess) {
+      if (hasAccess) {
         router.replace('/(protected)/(tabs)/learn');
+      } else if (!isOnboarded) {
+        router.replace('/(auth)/onboarding');
       } else {
         router.replace('/(auth)/login');
       }
@@ -269,8 +271,7 @@ const styles = StyleSheet.create({
     width: width * 0.85,
     height: width * 0.85,
     borderRadius: (width * 0.85) / 2,
-    backgroundColor: '#8B5CF6',
-    filter: 'blur(100px)' as any, // Blur interpolation for depth
+    backgroundColor: 'transparent',
   },
   content: {
     alignItems: 'center',
@@ -286,11 +287,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 3,
   },
   textContainer: {
     alignItems: 'center',

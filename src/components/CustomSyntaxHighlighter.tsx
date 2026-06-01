@@ -153,6 +153,28 @@ export function CustomSyntaxHighlighter({
   style = defaultStyle,
   ...rest
 }: CustomSyntaxHighlighterProps) {
+  const [isReady, setIsReady] = React.useState(false);
+
+  React.useEffect(() => {
+    // Defer heavy AST parsing and recursive text element generation by 150ms
+    // to allow the React Native navigation and swipe animations to complete smoothly.
+    const timer = setTimeout(() => {
+      setIsReady(true);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!isReady) {
+    // Render a super lightweight plain-text monospace preview during swipe transitions
+    return (
+      <ScrollView horizontal={true} style={{ padding: 10 }}>
+        <Text style={{ fontFamily, fontSize, color: '#cbd5e1' }}>
+          {children}
+        </Text>
+      </ScrollView>
+    );
+  }
+
   const { transformedStyle, defaultColor } = generateNewStylesheet({
     stylesheet: style
   });

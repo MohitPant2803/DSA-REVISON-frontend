@@ -28,17 +28,11 @@ export function SpringPressable({
   });
 
   const handlePressIn = () => {
-    scale.value = withSpring(activeScale, {
-      damping: 22,
-      stiffness: 200,
-    });
+    scale.value = activeScale;
   };
 
   const handlePressOut = () => {
-    scale.value = withSpring(1, {
-      damping: 18,
-      stiffness: 180,
-    });
+    scale.value = 1;
   };
 
   return (

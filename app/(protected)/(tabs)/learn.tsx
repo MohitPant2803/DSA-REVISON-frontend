@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Dimensions,
   TouchableOpacity,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -51,11 +52,16 @@ import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable
 import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 import api from '@/services/api';
 import { useUIStore } from '@/store/useUIStore';
+import { interactionScheduler } from '@/utils/interactionScheduler';
+import { useOptimizedFlatListSettings, useStableKeyExtractor } from '@/utils/listOptimizations';
+import { transitionScheduler } from '@/utils/transitionScheduler';
+import { ReeWCharacter } from '@/components/ReeWCharacter';
 
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
   withRepeat,
   withSequence,
   withDelay,
@@ -71,7 +77,7 @@ const { width, height } = Dimensions.get('window');
 
 // Global session state to ensure cinematic animations only play the first time 
 // the user visits the Learn screen per app session.
-let globalHasPlayedLearnAnimation = false;
+let globalHasPlayedLearnAnimation = (globalThis as any).__hasPlayedLearnAnimation || false;
 let globalQuotesList: any[] = [];
 
 
@@ -148,11 +154,33 @@ const FolderCardSkeleton = () => {
 
 export default function LearnScreen() {
   useAppBackHandler();
+  
+  const [isTransitionReady, setIsTransitionReady] = useState(true);
+
   useFocusEffect(
     useCallback(() => {
+      interactionScheduler.registerInteraction(); // UI priority block
       usePlaylistStateStore.getState().setLiveSyncPaused(false);
+      
+      setIsTransitionReady(true);
+      return () => {
+        // Keep screen mounted to ensure instant back navigation switch!
+      };
     }, [])
   );
+
+  const screenOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 0 : 1);
+
+  useEffect(() => {
+    if (globalHasPlayedLearnAnimation) {
+      screenOpacity.value = withTiming(1, { duration: 600 });
+    }
+  }, []);
+
+  const screenAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: screenOpacity.value,
+  }));
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuthStore();
@@ -241,11 +269,85 @@ export default function LearnScreen() {
   const cursorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 0 : 1);
   const authorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 1 : 0);
 
+  // ReeW wobbly 3-jump entry animation values
+  const reewTranslateX = useSharedValue(globalHasPlayedLearnAnimation ? 0 : 220);
+  const reewTranslateY = useSharedValue(0);
+  const reewScaleX = useSharedValue(1);
+  const reewScaleY = useSharedValue(1);
+
+  const reewEntryStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: reewTranslateX.value },
+      { translateY: reewTranslateY.value },
+      { scaleX: reewScaleX.value },
+      { scaleY: reewScaleY.value },
+    ],
+  }));
+
   // Reveal senior author gently exactly 0.5s after animations settle
   useEffect(() => {
     if (phase === 'authorReveal' || phase === 'contentReady' || phase === 'settled') {
       setHasAppBeenAnimated(true);
       if (phase === 'settled' && !globalHasPlayedLearnAnimation) {
+        // Trigger wobbly 3-jump entry sequence for ReeW!
+        const jumpDuration = 420;
+        const landingPause = 70;
+        
+        // Jump 1: Translate from 220 to 140
+        reewTranslateX.value = withTiming(140, { duration: jumpDuration, easing: Easing.linear });
+        reewTranslateY.value = withSequence(
+          withTiming(-45, { duration: jumpDuration * 0.5, easing: Easing.out(Easing.quad) }),
+          withTiming(0, { duration: jumpDuration * 0.5, easing: Easing.in(Easing.quad) })
+        );
+        reewScaleX.value = withSequence(
+          withTiming(0.96, { duration: jumpDuration * 0.5 }),
+          withTiming(1.04, { duration: jumpDuration * 0.5 }),
+          withSpring(1, { damping: 12 })
+        );
+        reewScaleY.value = withSequence(
+          withTiming(1.04, { duration: jumpDuration * 0.5 }),
+          withTiming(0.96, { duration: jumpDuration * 0.5 }),
+          withSpring(1, { damping: 12 })
+        );
+ 
+        // Jump 2: starts after Jump 1 completes
+        setTimeout(() => {
+          reewTranslateX.value = withTiming(70, { duration: jumpDuration, easing: Easing.linear });
+          reewTranslateY.value = withSequence(
+            withTiming(-32, { duration: jumpDuration * 0.5, easing: Easing.out(Easing.quad) }),
+            withTiming(0, { duration: jumpDuration * 0.5, easing: Easing.in(Easing.quad) })
+          );
+          reewScaleX.value = withSequence(
+            withTiming(0.97, { duration: jumpDuration * 0.5 }),
+            withTiming(1.03, { duration: jumpDuration * 0.5 }),
+            withSpring(1, { damping: 12 })
+          );
+          reewScaleY.value = withSequence(
+            withTiming(1.03, { duration: jumpDuration * 0.5 }),
+            withTiming(0.97, { duration: jumpDuration * 0.5 }),
+            withSpring(1, { damping: 12 })
+          );
+        }, jumpDuration + landingPause);
+ 
+        // Jump 3: starts after Jump 2 completes
+        setTimeout(() => {
+          reewTranslateX.value = withTiming(0, { duration: jumpDuration, easing: Easing.linear });
+          reewTranslateY.value = withSequence(
+            withTiming(-20, { duration: jumpDuration * 0.5, easing: Easing.out(Easing.quad) }),
+            withTiming(0, { duration: jumpDuration * 0.5, easing: Easing.in(Easing.quad) })
+          );
+          reewScaleX.value = withSequence(
+            withTiming(0.98, { duration: jumpDuration * 0.5 }),
+            withTiming(1.02, { duration: jumpDuration * 0.5 }),
+            withSpring(1, { damping: 14, stiffness: 150 })
+          );
+          reewScaleY.value = withSequence(
+            withTiming(1.02, { duration: jumpDuration * 0.5 }),
+            withTiming(0.98, { duration: jumpDuration * 0.5 }),
+            withSpring(1, { damping: 14, stiffness: 150 })
+          );
+        }, (jumpDuration + landingPause) * 2);
+
         globalHasPlayedLearnAnimation = true;
       }
     }
@@ -302,15 +404,17 @@ export default function LearnScreen() {
       if (!isActive) return;
 
       if (index < selectedQuote.text.length) {
-        setDisplayedMessage(selectedQuote.text.substring(0, index + 1));
-        index++;
+        // Type 2 characters at a time to reduce CPU re-render storms during boot
+        const nextIdx = Math.min(selectedQuote.text.length, index + 2);
+        setDisplayedMessage(selectedQuote.text.substring(0, nextIdx));
+        index = nextIdx;
         
         // Calculate typing progress and assign to master timeline (0% to 30%)
         const currentProgress = (index / selectedQuote.text.length) * 30;
         timelineProgress.value = currentProgress;
         
-        // Pacing irregularity (timing variation) between 20ms and 50ms for natural human typing feel
-        const randomDelay = 20 + Math.random() * 30;
+        // Pacing irregularity (timing variation) for natural human typing feel
+        const randomDelay = 60 + Math.random() * 20;
         timer = setTimeout(typeNextChar, randomDelay);
       } else {
         timelineProgress.value = 30;
@@ -371,7 +475,7 @@ export default function LearnScreen() {
 
       const timer = setTimeout(() => {
         setPhase('settled');
-      }, 1400);
+      }, 2400); // 1400ms (animation ends) + 1000ms (1-second delay) to prevent startup lagging/thread contention
 
       return () => clearTimeout(timer);
     }
@@ -517,10 +621,26 @@ export default function LearnScreen() {
     return ['Dynamic Programming', 'Graphs', 'Trees'];
   }, [preferences.weakTopics]);
 
+  if (!isTransitionReady) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + 24, paddingLeft: insets.left + 24, paddingRight: insets.right + 24 }]}>
+        <View style={{ marginBottom: 36 }}>
+          <View style={{ width: 180, height: 32, backgroundColor: '#E2E8F0', borderRadius: 8, marginBottom: 12 }} />
+          <View style={{ width: '90%', height: 20, backgroundColor: '#F1F5F9', borderRadius: 6, marginBottom: 6 }} />
+          <View style={{ width: '60%', height: 20, backgroundColor: '#F1F5F9', borderRadius: 6 }} />
+        </View>
+        <FolderCardSkeleton />
+        <FolderCardSkeleton />
+        <FolderCardSkeleton />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
-      {/* Main Scrollable Content */}
-      <ScrollView
+      <Animated.View style={[{ flex: 1 }, screenAnimatedStyle]}>
+        {/* Main Scrollable Content */}
+        <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 140, paddingHorizontal: 24, paddingTop: 24 }}
@@ -535,9 +655,14 @@ export default function LearnScreen() {
       >
         {/* Top welcome line and centered quote anchor */}
         <View style={styles.headerBlock}>
-          <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
-            Welcome back, {firstName}
-          </Animated.Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
+              Welcome back, {firstName}
+            </Animated.Text>
+            <Animated.View style={reewEntryStyle}>
+              <ReeWCharacter state="zen" size={72} />
+            </Animated.View>
+          </View>
           
           {/* ONE Persistent, continuous Quote block that slides upward with 100% object permanence */}
           {selectedQuote && (
@@ -666,6 +791,7 @@ export default function LearnScreen() {
           </Animated.View>
         </Animated.View>
       )}
+      </Animated.View>
     </View>
   );
 }
@@ -673,7 +799,7 @@ export default function LearnScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F7', // Warm off-white canvas
+    backgroundColor: '#FAF9F7', // Warm soft cream canvas
   },
   headerBlock: {
     marginBottom: 36, // Increased by 30% for breathing space
@@ -698,13 +824,13 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   welcomeText: {
-    color: '#000000', // Always pure black
+    color: '#0F172A', // High-contrast title
     fontSize: 30,
     fontWeight: 'bold', // Always bold
     letterSpacing: -0.5,
   },
   greetingSub: {
-    color: '#64748B', // Soft calming slate gray throughout
+    color: '#475569', // Soft calming slate gray throughout
     fontSize: 14,
     fontWeight: '500',
     lineHeight: 22,
@@ -721,7 +847,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   sectionSubtitle: {
-    color: '#64748B',
+    color: '#475569',
     fontSize: 13,
     marginTop: -8,
     marginBottom: 20,
@@ -734,10 +860,10 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   heroPanel: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF', // Clean White Card
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.10)',
+    borderColor: '#E2E8F0', // Light Grey Border
     padding: 24,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 8 },
@@ -777,7 +903,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   metricLbl: {
-    color: '#94A3B8',
+    color: '#475569',
     fontSize: 11,
     marginTop: 2,
     fontWeight: '500',
@@ -815,7 +941,7 @@ const styles = StyleSheet.create({
   gridGlass: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.10)',
+    borderColor: '#E2E8F0',
     borderRadius: 24,
     padding: 12,
     height: '100%',
@@ -828,7 +954,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   gridLabel: {
-    color: '#64748B', // Soft contrast secondary focus text
+    color: '#475569', // Soft contrast secondary focus text
     fontSize: 11,
     fontWeight: '700',
     marginTop: 6,
@@ -850,10 +976,10 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.08)',
+    borderColor: '#E2E8F0',
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.015,
+    shadowOpacity: 0.02,
     shadowRadius: 8,
     elevation: 1,
   },
@@ -864,7 +990,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   chipText: {
-    color: '#64748B', // Muted slate gray instead of loud lavender accent
+    color: '#475569', // Muted slate gray instead of loud lavender accent
     fontSize: 12,
     fontWeight: '600',
   },
@@ -873,18 +999,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.08)',
+    borderColor: '#E2E8F0',
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: 20,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.015,
+    shadowOpacity: 0.02,
     shadowRadius: 8,
     elevation: 1,
   },
   addSheetText: {
-    color: '#64748B',
+    color: '#475569',
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 6,
@@ -896,28 +1022,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.1)',
+    borderColor: '#E2E8F0',
     padding: 24,
     marginBottom: 16,
     height: 120,
     justifyContent: 'center',
   },
   skeletonTitle: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#F1F5F9',
     height: 18,
     borderRadius: 4,
     width: '60%',
     marginBottom: 10,
   },
   skeletonSub: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#F1F5F9',
     height: 12,
     borderRadius: 3,
     width: '40%',
     marginBottom: 16,
   },
   skeletonBar: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#F1F5F9',
     height: 8,
     borderRadius: 2,
     width: '100%',

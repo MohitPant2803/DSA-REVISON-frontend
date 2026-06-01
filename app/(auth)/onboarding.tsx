@@ -21,6 +21,10 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { SpringPressable } from '@/components/SpringPressable';
 import { OnboardingLoader } from '@/components/onboarding/OnboardingLoader';
 import { hapticFeedback } from '@/utils/haptics';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import api from '@/services/api';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import Toast from 'react-native-toast-message';
 
 const { width } = Dimensions.get('window');
 
@@ -97,7 +101,7 @@ function getCardStyle(idx: number, currentStep: number, cardTranslates: any[], s
 
 export default function OnboardingCoordinator() {
   const router = useRouter();
-  const { login } = useAuthStore();
+  const { login, isAuthenticated } = useAuthStore();
   const {
     currentStep,
     setStep,
@@ -109,18 +113,20 @@ export default function OnboardingCoordinator() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeStepContent, setActiveStepContent] = useState<string>('');
 
+  // Exit transition shared values
+  const exitOpacity = useSharedValue(1);
+  const exitScale = useSharedValue(1);
+
   const card0TranslateX = useSharedValue(0);
   const card1TranslateX = useSharedValue(0);
   const card2TranslateX = useSharedValue(0);
   const card3TranslateX = useSharedValue(0);
-  const card4TranslateX = useSharedValue(0);
 
   const cardTranslates = [
     card0TranslateX,
     card1TranslateX,
     card2TranslateX,
     card3TranslateX,
-    card4TranslateX,
   ];
 
   const startX = React.useRef(0);
@@ -128,14 +134,14 @@ export default function OnboardingCoordinator() {
   const isGestureActive = React.useRef(false);
 
   const handleCardTouchStart = (e: any) => {
-    if (currentStep >= 5 || isGeneratingSystem) return;
+    if (currentStep >= 4 || isGeneratingSystem) return;
     startX.current = e.nativeEvent.pageX;
     startY.current = e.nativeEvent.pageY;
     isGestureActive.current = true;
   };
 
   const handleCardTouchMove = (e: any) => {
-    if (!isGestureActive.current || currentStep >= 5 || isGeneratingSystem) return;
+    if (!isGestureActive.current || currentStep >= 4 || isGeneratingSystem) return;
     let dx = e.nativeEvent.pageX - startX.current;
     const dy = e.nativeEvent.pageY - startY.current;
     
@@ -143,7 +149,7 @@ export default function OnboardingCoordinator() {
     if (Math.abs(dx) > 10 && Math.abs(dy) < Math.abs(dx) * 0.8) {
       // Only drag the current card for LEFT swipe (forward)
       // Right swipe (back) doesn't drag — the previous card will slide over instead
-      if (dx < 0 && currentStep < 4) {
+      if (dx < 0 && currentStep <= 3) {
         cardTranslates[currentStep].value = dx;
       }
     }
@@ -157,14 +163,18 @@ export default function OnboardingCoordinator() {
   };
 
   const handleCardTouchEnd = (e: any) => {
-    if (!isGestureActive.current || currentStep >= 5 || isGeneratingSystem) return;
+    if (!isGestureActive.current || currentStep >= 4 || isGeneratingSystem) return;
     isGestureActive.current = false;
     
     const dx = e.nativeEvent.pageX - startX.current;
     
-    // Swipe next (left swipe) — not allowed on last card
-    if (dx < -100 && currentStep < 4) {
-      runOnJS(handleNext)();
+    // Swipe next (left swipe)
+    if (dx < -100) {
+      if (currentStep < 3) {
+        runOnJS(handleNext)();
+      } else if (currentStep === 3) {
+        runOnJS(handleGoogleSignup)();
+      }
     } 
     // Swipe back (right swipe) — not allowed on first card
     else if (dx > 100 && currentStep > 0) {
@@ -177,11 +187,13 @@ export default function OnboardingCoordinator() {
   };
 
   const handleNext = () => {
-    if (currentStep < 4) {
+    if (currentStep < 3) {
       hapticFeedback.selection();
       cardTranslates[currentStep].value = withTiming(-width - 100, { duration: 300 }, () => {
         runOnJS(finalizeStepTransition)(currentStep + 1);
       });
+    } else if (currentStep === 3) {
+      handleGoogleSignup();
     }
   };
 
@@ -198,49 +210,73 @@ export default function OnboardingCoordinator() {
     }
   };
 
-  const handleSkipOrGuest = async () => {
+  const finishGuestLogin = () => {
+    // Set generating flag and step BEFORE login to block the navigation guard
+    setIsGeneratingSystem(true);
+    setStep(4);
+
+    // If already authenticated (returning user in __DEV__ mode), skip mock login
+    if (isAuthenticated) {
+      triggerSystemGeneration();
+      return;
+    }
+
+    const doLogin = async () => {
+      try {
+        const mockToken = "";
+        const mockUser = {
+          id: "guest-user",
+          name: "Guest Explorer",
+          email: "guest@dsa-reels.com",
+          avatarUrl: "https://ui-avatars.com/api/?name=Guest",
+          role: "user" as const,
+        };
+        await login(mockToken, mockUser);
+        triggerSystemGeneration();
+      } catch (e) {
+        console.error('Guest onboarding setup error:', e);
+        setIsGeneratingSystem(false);
+        setIsLoading(false);
+      }
+    };
+    doLogin();
+  };
+
+  const handleSkipOrGuest = () => {
     try {
       setIsLoading(true);
       hapticFeedback.success();
       
-      const mockToken = "";
-      const mockUser = {
-        id: "guest-user",
-        name: "Guest Explorer",
-        email: "guest@dsa-reels.com",
-        avatarUrl: "https://ui-avatars.com/api/?name=Guest",
-        role: "user" as const,
-      };
-
-      await login(mockToken, mockUser);
-      setStep(5);
-      triggerSystemGeneration();
+      // Animate current card sliding out, then transition to loader
+      cardTranslates[currentStep].value = withTiming(-width - 100, { duration: 300 }, () => {
+        runOnJS(finishGuestLogin)();
+      });
     } catch (e) {
       console.error('Guest onboarding setup error:', e);
+      cardTranslates[currentStep].value = withSpring(0, { damping: 15, stiffness: 120 });
       setIsLoading(false);
     }
   };
 
-  const handleGoogleSignup = async () => {
+  const finishGoogleLogin = () => {
+    // Set generating flag and step BEFORE login to block the navigation guard
+    setIsGeneratingSystem(true);
+    setStep(4);
+    triggerSystemGeneration();
+  };
+
+  const handleGoogleSignup = () => {
     try {
       setIsLoading(true);
       hapticFeedback.success();
       
-      const mockToken = "mock-google-jwt-token";
-      const mockUser = {
-        id: "google-oauth-user",
-        name: "Developer Apprentice",
-        email: "apprentice@dsa-reels.com",
-        avatarUrl: "https://ui-avatars.com/api/?name=Apprentice",
-        role: "user" as const,
-      };
-
-      await login(mockToken, mockUser);
-
-      setStep(5);
-      triggerSystemGeneration();
+      // Animate 4th card sliding out, then transition to loader
+      cardTranslates[3].value = withTiming(-width - 100, { duration: 300 }, () => {
+        runOnJS(finishGoogleLogin)();
+      });
     } catch (e) {
       console.error('Google auth onboarding error:', e);
+      cardTranslates[3].value = withSpring(0, { damping: 15, stiffness: 120 });
       setIsLoading(false);
     }
   };
@@ -262,10 +298,28 @@ export default function OnboardingCoordinator() {
         setActiveStepContent("Warm educational space created.");
         
         await completeOnboarding();
-        setIsGeneratingSystem(false);
-        setIsLoading(false);
         
-        router.replace('/(protected)/(tabs)/learn');
+        const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+        const hasAccess = isAuthenticated || isGuest;
+
+        // Smooth fade-out + gentle scale before navigating
+        exitOpacity.value = withTiming(0, { duration: 500 });
+        exitScale.value = withTiming(0.96, { duration: 500 });
+
+        setTimeout(() => {
+          // Navigate FIRST — then clean up state. Resetting state before navigation
+          // causes a brief re-render that flashes the old slide content.
+          if (hasAccess) {
+            (globalThis as any).__hasPlayedLearnAnimation = true;
+            router.replace('/(protected)/(tabs)/learn');
+          } else {
+            router.replace('/(auth)/login');
+          }
+
+          // Clean up after navigation is queued (component will unmount)
+          setIsGeneratingSystem(false);
+          setIsLoading(false);
+        }, 520);
       }
     }, 800);
   };
@@ -281,9 +335,6 @@ export default function OnboardingCoordinator() {
   });
   const card3Style = useAnimatedStyle(() => {
     return getCardStyle(3, currentStep, cardTranslates, width);
-  });
-  const card4Style = useAnimatedStyle(() => {
-    return getCardStyle(4, currentStep, cardTranslates, width);
   });
 
   const renderStepCard = (stepIdx: number) => {
@@ -304,9 +355,6 @@ export default function OnboardingCoordinator() {
       case 3:
         content = <SlideAskGPT />;
         break;
-      case 4:
-        content = <SlideBegin onGoogle={handleGoogleSignup} onGuest={handleSkipOrGuest} isLoading={isLoading} />;
-        break;
       default:
         return null;
     }
@@ -316,7 +364,6 @@ export default function OnboardingCoordinator() {
       card1Style,
       card2Style,
       card3Style,
-      card4Style,
     ];
 
     const isNextCard = diff === 1;
@@ -339,61 +386,67 @@ export default function OnboardingCoordinator() {
     );
   };
 
+  const exitAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: exitOpacity.value,
+    transform: [{ scale: exitScale.value }],
+  }));
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        {currentStep > 0 && currentStep < 5 && !isGeneratingSystem && (
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.6}>
-            <ChevronLeft color="#475569" size={20} strokeWidth={2.5} />
-          </TouchableOpacity>
-        )}
-        
-        {currentStep < 5 && (
-          <View style={styles.stepIndicatorContainer}>
-            {Array.from({ length: 5 }).map((_, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.stepDot,
-                  currentStep === idx && styles.stepDotActive,
-                  idx < currentStep && styles.stepDotPassed,
-                ]}
-              />
-            ))}
+    <View style={{ flex: 1, backgroundColor: '#FAF9F7' }}>
+      <Animated.View style={[{ flex: 1 }, exitAnimatedStyle]}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.header}>
+            {currentStep > 0 && currentStep < 4 && !isGeneratingSystem && (
+              <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.6}>
+                <ChevronLeft color="#475569" size={20} strokeWidth={2.5} />
+              </TouchableOpacity>
+            )}
+            
+            {currentStep < 4 && (
+              <View style={styles.stepIndicatorContainer}>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.stepDot,
+                      currentStep === idx && styles.stepDotActive,
+                      idx < currentStep && styles.stepDotPassed,
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
           </View>
-        )}
-      </View>
 
-      <View style={styles.contentPortal}>
-        {currentStep === 5 ? (
-          <Animated.View key="step5" entering={FadeIn.duration(400)} exiting={FadeOut.duration(400)} style={styles.slideCentered}>
-            <OnboardingLoader />
-          </Animated.View>
-        ) : (
-          <View style={styles.cardStackContainer}>
-            {renderStepCard(4)}
-            {renderStepCard(3)}
-            {renderStepCard(2)}
-            {renderStepCard(1)}
-            {renderStepCard(0)}
+          <View style={styles.contentPortal}>
+            {currentStep === 4 ? (
+              <Animated.View key="step4" entering={FadeIn.duration(400)} exiting={FadeOut.duration(400)} style={styles.slideCentered}>
+                <OnboardingLoader />
+              </Animated.View>
+            ) : (
+              <View style={styles.cardStackContainer}>
+                {renderStepCard(3)}
+                {renderStepCard(2)}
+                {renderStepCard(1)}
+                {renderStepCard(0)}
+              </View>
+            )}
           </View>
-        )}
-      </View>
 
-      {currentStep < 5 && (
-        <View style={styles.footer}>
-          <TouchableOpacity onPress={currentStep < 4 ? handleSkipOrGuest : undefined} style={[styles.skipBtn, currentStep === 4 && { opacity: 0 }]} activeOpacity={0.6} disabled={currentStep === 4}>
-            <Text style={styles.skipBtnText}>Skip</Text>
-          </TouchableOpacity>
+          {currentStep < 4 && (
+            <View style={styles.footer}>
+              <View />
 
-          <View style={[styles.nextBtn, currentStep === 4 && { opacity: 0 }]} pointerEvents={currentStep === 4 ? 'none' : 'auto'}>
-            <SpringPressable onPress={handleNext} style={styles.nextBtn}>
-              <ChevronRight color="#FFFFFF" size={20} strokeWidth={3} />
-            </SpringPressable>
-          </View>
-        </View>
-      )}
-    </SafeAreaView>
+              <View style={styles.nextBtn}>
+                <SpringPressable onPress={handleNext} style={styles.nextBtn}>
+                  <ChevronRight color="#FFFFFF" size={20} strokeWidth={3} />
+                </SpringPressable>
+              </View>
+            </View>
+          )}
+        </SafeAreaView>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -2100,11 +2153,6 @@ const styles = StyleSheet.create({
   },
   modeTabActive: {
     backgroundColor: '#FFFFFF',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
   },
   modeTabText: {
     color: '#64748B',
@@ -2119,11 +2167,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(226, 232, 240, 0.8)',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.03,
-    shadowRadius: 18,
-    elevation: 3,
   },
   modeReelCard: {
     width: '85%',
@@ -2185,11 +2228,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.02,
-    shadowRadius: 8,
-    elevation: 2,
     alignSelf: 'center',
   },
   mockSearchText: {
@@ -2227,11 +2265,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(139, 92, 246, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 2,
   },
   authBlock: {
     width: '100%',
@@ -2245,11 +2278,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 3,
   },
   googleBtnText: {
     color: '#FFFFFF',
@@ -2266,11 +2294,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 14,
     width: '100%',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.02,
-    shadowRadius: 8,
-    elevation: 1,
   },
   guestBtnText: {
     color: '#475569',
@@ -2303,11 +2326,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#8B5CF6',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
   },
   cardHeaderSmall: {
     flexDirection: 'row',
@@ -2324,11 +2342,6 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     borderWidth: 1,
     borderColor: 'rgba(226, 232, 240, 0.8)',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.04,
-    shadowRadius: 18,
-    elevation: 3,
     padding: 24,
     marginVertical: 12,
     marginHorizontal: 20,

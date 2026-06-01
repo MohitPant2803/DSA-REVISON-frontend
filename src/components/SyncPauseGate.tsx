@@ -13,6 +13,7 @@ export function SyncPauseGate() {
     usePlaylistStateStore.getState().setLiveSyncPaused(true);
     return () => {
       usePlaylistStateStore.getState().setLiveSyncPaused(false);
+      usePlaylistStateStore.getState().triggerSync();
     };
   }, []);
 

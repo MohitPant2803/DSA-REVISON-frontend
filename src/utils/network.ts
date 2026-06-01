@@ -14,7 +14,7 @@ export async function isNetworkConnected(): Promise<boolean> {
       const NetInfo = require('@react-native-community/netinfo').default;
       const state = await NetInfo.fetch();
       if (state && typeof state.isConnected === 'boolean') {
-        return state.isConnected;
+        return state.isConnected && state.isInternetReachable !== false;
       }
     } catch (err) {
       // Safe fallback

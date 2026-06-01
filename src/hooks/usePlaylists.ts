@@ -56,38 +56,8 @@ export function buildSystemPlaylists() {
 
   return SYSTEM_PLAYLISTS.map(p => {
     const playlistId = p.id;
+    const itemCount = Math.max(0, (state.initialSmartCounts[playlistId] || 0) + (state.smartPlaylistDeltaCounts[playlistId] || 0));
     
-    // Helper to compute live unique count from cache
-    const getLiveCount = () => {
-      const cardDifficultyMap = state.cardDifficultyMap;
-      const resolved = Object.keys(state.cardsById)
-        .map((cardId) => state.cardsById[cardId])
-        .filter(Boolean)
-        .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById))
-        .filter((resolvedCard) => resolvedCard.difficultyState === playlistId);
-
-      const seenTitles = new Set<string>();
-      const uniqueResolved = resolved.filter((card) => {
-        if (!card.title) return false;
-        const titleKey = card.title.trim().toLowerCase();
-        if (seenTitles.has(titleKey)) return false;
-        seenTitles.add(titleKey);
-        return true;
-      });
-
-      return uniqueResolved.length;
-    };
-
-    const liveCount = getLiveCount();
-    const fallbackCount = Math.max(0, (state.initialSmartCounts[playlistId] || 0) + (state.smartPlaylistDeltaCounts[playlistId] || 0));
-    
-    let itemCount = fallbackCount;
-    if (state.hydratedPlaylists[playlistId]) {
-      itemCount = liveCount;
-    } else if (liveCount > 0 && (liveCount >= fallbackCount || fallbackCount === 0)) {
-      itemCount = liveCount;
-    }
-
     return {
       ...p,
       itemCount,
@@ -113,7 +83,7 @@ export const usePlaylists = () => {
     }
 
     const localPlaylists = Object.values(playlistsById)
-      .filter((p: any) => !p.isDeleted)
+      .filter((p: any) => !p.isDeleted && p.kind !== 'system' && !p.systemKey)
       .map((p, i) => mapApiPlaylist(p, i));
     const customPlaylists = localPlaylists.filter(
       (p) => !['easy', 'medium', 'hard', 'skipped'].includes(p.id)
@@ -131,13 +101,23 @@ export const usePlaylists = () => {
         if (list) {
           hydratePlaylists(list);
         }
-        return list.map((p, i) => mapApiPlaylist(p, i));
+        
+        // Filter out system playlists from the API response so they don't leak into the custom UI
+        const filteredList = list.filter((p: any) => !p.isDeleted && p.kind !== 'system' && !p.systemKey);
+        const mappedList = filteredList.map((p, i) => mapApiPlaylist(p, i));
+        
+        const smart = buildSystemPlaylists();
+        return [...smart, ...mappedList];
       } catch (err) {
         return uiPlaylists;
       }
     },
     enabled: isAuthenticated && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60,
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 60,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: 'stale',
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -205,7 +185,7 @@ export const usePlaylistCards = (playlistId: string | null) => {
       }
     },
     enabled: !!playlistId && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 30,
+    staleTime: 1000 * 60 * 10,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -262,6 +242,7 @@ export const useDeletePlaylist = () => {
 
   return useMutation({
     mutationFn: async (playlistId: string) => {
+      const playlistName = usePlaylistStateStore.getState().playlistsById[playlistId]?.name || playlistId;
       // 1. Optimistic delete in Zustand store
       deletePlaylistInStore(playlistId);
 
@@ -271,7 +252,7 @@ export const useDeletePlaylist = () => {
         payload: { playlistId },
         timestamp: Date.now(),
       });
-      console.log(`[MUTATION] DELETE_PLAYLIST | ID: ${playlistId}`);
+      console.log(`[MUTATION] DELETE_PLAYLIST | Name: "${playlistName}" | ID: ${playlistId}`);
       return Promise.resolve();
     },
   });
@@ -283,6 +264,7 @@ export const useUpdatePlaylist = () => {
 
   return useMutation({
     mutationFn: async ({ playlistId, name }: { playlistId: string; name: string }) => {
+      const oldName = usePlaylistStateStore.getState().playlistsById[playlistId]?.name || playlistId;
       // 1. Optimistic update in Zustand store
       updatePlaylistInStore(playlistId, name);
 
@@ -292,7 +274,7 @@ export const useUpdatePlaylist = () => {
         payload: { playlistId, name },
         timestamp: Date.now(),
       });
-      console.log(`[MUTATION] UPDATE_PLAYLIST | ID: ${playlistId} | Name: ${name}`);
+      console.log(`[MUTATION] UPDATE_PLAYLIST | ID: ${playlistId} | Old Name: "${oldName}" -> New Name: "${name}"`);
       return Promise.resolve({ _id: playlistId, name } as ApiPlaylist);
     },
   });
@@ -346,6 +328,9 @@ export const useTogglePlaylistItem = () => {
     }) => {
       const nextValue = !isInPlaylist;
       
+      const playlistName = usePlaylistStateStore.getState().playlistsById[playlistId]?.name || playlistId;
+      const cardTitle = usePlaylistStateStore.getState().cardsById[revisionCardId]?.title || revisionCardId;
+
       // 1. Optimistic Toggle
       toggleCustomPlaylistItemInStore(playlistId, revisionCardId, nextValue);
 
@@ -355,7 +340,7 @@ export const useTogglePlaylistItem = () => {
         payload: { playlistId, cardId: revisionCardId, value: nextValue },
         timestamp: Date.now(),
       });
-      console.log(`[MUTATION] TOGGLE_PLAYLIST_ITEM | Playlist: ${playlistId} | Card: ${revisionCardId} | Value: ${nextValue}`);
+      console.log(`[MUTATION] TOGGLE_PLAYLIST_ITEM | Playlist: "${playlistName}" | Card: "${cardTitle}" | Value: ${nextValue}`);
       return Promise.resolve();
     },
   });
@@ -366,13 +351,14 @@ export const useReorderPlaylist = () => {
 
   return useMutation({
     mutationFn: async ({ playlistId, cardIds }: { playlistId: string; cardIds: string[] }) => {
+      const playlistName = usePlaylistStateStore.getState().playlistsById[playlistId]?.name || playlistId;
       // 1. Enqueue action for later sync
       enqueueOfflineAction({
         action: 'REORDER_PLAYLIST',
         payload: { playlistId, cardIds },
         timestamp: Date.now(),
       });
-      console.log(`[MUTATION] REORDER_PLAYLIST | ID: ${playlistId} | Cards: ${cardIds.length}`);
+      console.log(`[MUTATION] REORDER_PLAYLIST | Name: "${playlistName}" | ID: ${playlistId} | Cards: ${cardIds.length}`);
       return Promise.resolve({ _id: playlistId, cardIds } as ApiPlaylist);
     },
     onError: (_, { playlistId }) => {

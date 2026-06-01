@@ -129,6 +129,68 @@ const CreatePlaylistOverlay = ({ onClose, onPlaylistCreated }: CreatePlaylistOve
   );
 };
 
+interface PlaylistPickerCardProps {
+  playlist: any;
+  isSelected: boolean;
+  onPress: () => void;
+}
+
+const PlaylistPickerCard = React.memo(({ playlist, isSelected, onPress }: PlaylistPickerCardProps) => {
+  const displayCount = usePlaylistStateStore(
+    React.useCallback((s) => {
+      const order = s.playlistCardOrderMap[playlist.id];
+      return order === undefined ? (playlist.itemCount ?? 0) : order.length;
+    }, [playlist.id, playlist.itemCount])
+  );
+  const colors = getCustomTheme(playlist.name);
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[
+        styles.gridCard,
+        { borderColor: isSelected ? '#8B5CF6' : colors.border },
+        isSelected && { backgroundColor: 'rgba(139, 92, 246, 0.02)' }
+      ]}
+      activeOpacity={0.7}
+    >
+      {/* Beautiful Playlist Icon Square */}
+      <View 
+        style={[
+          styles.cardIconWrapper, 
+          { backgroundColor: colors.iconBg, borderColor: colors.border }
+        ]}
+      >
+        <ListMusic color={colors.text} size={13} strokeWidth={2.5} />
+      </View>
+
+      {/* Top-right Check badge */}
+      {isSelected && (
+        <View style={styles.cardCheckBadge}>
+          <Check color="#fff" size={9} strokeWidth={3.5} />
+        </View>
+      )}
+
+      <View style={{ marginTop: 8 }}>
+        <Text 
+          numberOfLines={1} 
+          style={styles.playlistName}
+        >
+          {playlist.name}
+        </Text>
+        <Text 
+          style={[
+            styles.playlistCount,
+            { color: isSelected ? '#8B5CF6' : '#94A3B8' }
+          ]}
+        >
+          {displayCount} {displayCount === 1 ? 'card' : 'cards'}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
 export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps) => {
   const { user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
@@ -136,7 +198,6 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
 
   const { data: playlists = [] } = usePlaylists();
   const togglePlaylistItem = useTogglePlaylistItem();
-  const playlistCardOrderMap = usePlaylistStateStore((s) => s.playlistCardOrderMap);
 
   // Local state for checking memberships and quick inputs
   const [tempMembership, setTempMembership] = useState<Record<string, boolean>>({});
@@ -289,12 +350,11 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
                   ) : (
                     customPlaylists.map((playlist) => {
                       const isSelected = !!tempMembership[playlist.id];
-                      const colors = getCustomTheme(playlist.name);
-                      const liveOrder = playlistCardOrderMap[playlist.id];
-                      const displayCount = liveOrder !== undefined ? liveOrder.length : (playlist.itemCount ?? 0);
                       return (
-                        <TouchableOpacity
+                        <PlaylistPickerCard
                           key={playlist.id}
+                          playlist={playlist}
+                          isSelected={isSelected}
                           onPress={() => {
                             lightHaptic();
                             setTempMembership(prev => ({
@@ -302,47 +362,7 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
                               [playlist.id]: !isSelected
                             }));
                           }}
-                          style={[
-                            styles.gridCard,
-                            { borderColor: isSelected ? '#8B5CF6' : colors.border },
-                            isSelected && { backgroundColor: 'rgba(139, 92, 246, 0.02)' }
-                          ]}
-                          activeOpacity={0.7}
-                        >
-                          {/* Beautiful Playlist Icon Square */}
-                          <View 
-                            style={[
-                              styles.cardIconWrapper, 
-                              { backgroundColor: colors.iconBg, borderColor: colors.border }
-                            ]}
-                          >
-                            <ListMusic color={colors.text} size={13} strokeWidth={2.5} />
-                          </View>
-
-                          {/* Top-right Check badge */}
-                          {isSelected && (
-                            <View style={styles.cardCheckBadge}>
-                              <Check color="#fff" size={9} strokeWidth={3.5} />
-                            </View>
-                          )}
-
-                          <View style={{ marginTop: 8 }}>
-                            <Text 
-                              numberOfLines={1} 
-                              style={styles.playlistName}
-                            >
-                              {playlist.name}
-                            </Text>
-                            <Text 
-                              style={[
-                                styles.playlistCount,
-                                { color: isSelected ? '#8B5CF6' : '#94A3B8' }
-                              ]}
-                            >
-                              {displayCount} {displayCount === 1 ? 'card' : 'cards'}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
+                        />
                       );
                     })
                   )}

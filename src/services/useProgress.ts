@@ -26,12 +26,15 @@ export const useUpdateCardProgress = () => {
 
   return useMutation({
     mutationFn: ({ cardId, action, value }: { cardId: string; action: progressService.ProgressAction; value: boolean }) => {
-      usePlaylistStateStore.getState().enqueueOfflineAction({
-        action: 'TOGGLE_FAVORITE',
-        payload: { cardId, value },
-        timestamp: Date.now()
-      });
-      usePlaylistStateStore.getState().toggleFavoriteInStore(cardId, value);
+      if (action === 'difficult') {
+        const cardObj = usePlaylistStateStore.getState().cardsById[cardId] || {};
+        usePlaylistStateStore.getState().transferCard(cardId, cardObj, value ? 'hard' : null);
+        usePlaylistStateStore.getState().enqueueOfflineAction({
+          action: 'CLASSIFY_CARD',
+          payload: { cardId, state: value ? 'hard' : null },
+          timestamp: Date.now()
+        });
+      }
       return Promise.resolve({ message: 'offline', offline: true });
     },
 

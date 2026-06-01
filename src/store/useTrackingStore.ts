@@ -2,15 +2,12 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type PlaybackMode = 'sequential' | 'shuffle' | 'difficult' | 'favorites' | 'watchLater';
+export type PlaybackMode = 'sequential' | 'shuffle' | 'difficult';
 
 interface TrackingState {
   // Playback configuration
   currentMode: PlaybackMode;
   infiniteLoop: boolean;
-  
-  // Watch later local storage (offline-first watch later feature)
-  watchLaterCardIds: string[];
   
   // Real-time Session Tracking
   sessionStartTime: number | null;
@@ -30,9 +27,23 @@ interface TrackingState {
   // Actions
   setMode: (mode: PlaybackMode) => void;
   setInfiniteLoop: (enabled: boolean) => void;
-  toggleWatchLater: (cardId: string) => void;
-  setWatchLater: (cardIds: string[]) => void;
   
+  // Reels Session Tracking
+  reelsSessionId: string | null;
+  reelsSessionCards: string[];
+  reelsActiveIndex: number;
+  reelsSourceType: 'folder' | 'playlist' | 'liked' | 'watchLater' | null;
+  reelsSourceId: string | null;
+
+  setReelsSession: (session: {
+    sessionId: string | null;
+    sessionCards: string[];
+    activeIndex: number;
+    sourceType: 'folder' | 'playlist' | 'liked' | 'watchLater' | null;
+    sourceId: string | null;
+  }) => void;
+  setReelsActiveIndex: (index: number) => void;
+
   startSession: () => void;
   updateSessionTime: () => void;
   markCardCompleted: (cardId: string) => void;
@@ -52,8 +63,6 @@ export const useTrackingStore = create<TrackingState>()(
       currentMode: 'sequential',
       infiniteLoop: true,
       
-      watchLaterCardIds: [],
-      
       sessionStartTime: null,
       sessionTotalTime: 0,
       completedCardsCount: 0,
@@ -65,20 +74,25 @@ export const useTrackingStore = create<TrackingState>()(
       totalScrolls: 0,
       unsyncedSwipes: 0,
       unsyncedScrolls: 0,
+
+      reelsSessionId: null,
+      reelsSessionCards: [],
+      reelsActiveIndex: 0,
+      reelsSourceType: null,
+      reelsSourceId: null,
       
       setMode: (mode) => set({ currentMode: mode }),
       
       setInfiniteLoop: (enabled) => set({ infiniteLoop: enabled }),
-      
-      toggleWatchLater: (cardId) => set((state) => {
-        const exists = state.watchLaterCardIds.includes(cardId);
-        const updated = exists
-          ? state.watchLaterCardIds.filter((id) => id !== cardId)
-          : [...state.watchLaterCardIds, cardId];
-        return { watchLaterCardIds: updated };
+
+      setReelsSession: (session) => set({
+        reelsSessionId: session.sessionId,
+        reelsSessionCards: session.sessionCards,
+        reelsActiveIndex: session.activeIndex,
+        reelsSourceType: session.sourceType,
+        reelsSourceId: session.sourceId,
       }),
-      
-      setWatchLater: (cardIds) => set({ watchLaterCardIds: cardIds }),
+      setReelsActiveIndex: (index) => set({ reelsActiveIndex: index }),
       
       startSession: () => set({
         sessionStartTime: Date.now(),
@@ -142,16 +156,19 @@ export const useTrackingStore = create<TrackingState>()(
         const nextSwipes = state.totalSwipes + 1;
         const nextUnsynced = state.unsyncedSwipes + 1;
         
-        // Save to SQLite instantly in background
-        const authStore = require('./useAuthStore').useAuthStore;
-        const userId = authStore.getState().user?.id || 'guest-user';
-        const { saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
-        saveUserMetricsToSQLite(userId, {
-          totalSwipes: nextSwipes,
-          totalScrolls: state.totalScrolls,
-          unsyncedSwipes: nextUnsynced,
-          unsyncedScrolls: state.unsyncedScrolls,
-        });
+        // Persist to SQLite every 5 swipes — survives force kill
+        if (nextSwipes % 5 === 0) {
+          try {
+            const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+            const userId = usePlaylistStateStore.getState().userId;
+            if (userId) {
+              const { saveAnalyticsToSQLite } = require('../utils/sqliteSyncBridge');
+              saveAnalyticsToSQLite(userId, nextSwipes, state.totalScrolls).catch(() => {});
+            }
+          } catch (e) {
+            console.warn('[useTrackingStore] Failed to write analytics to SQLite:', e);
+          }
+        }
 
         return {
           totalSwipes: nextSwipes,
@@ -162,17 +179,20 @@ export const useTrackingStore = create<TrackingState>()(
       incrementScroll: () => set((state) => {
         const nextScrolls = state.totalScrolls + 1;
         const nextUnsynced = state.unsyncedScrolls + 1;
-        
-        // Save to SQLite instantly in background
-        const authStore = require('./useAuthStore').useAuthStore;
-        const userId = authStore.getState().user?.id || 'guest-user';
-        const { saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
-        saveUserMetricsToSQLite(userId, {
-          totalSwipes: state.totalSwipes,
-          totalScrolls: nextScrolls,
-          unsyncedSwipes: state.unsyncedSwipes,
-          unsyncedScrolls: nextUnsynced,
-        });
+
+        // Persist to SQLite every 5 scrolls — survives force kill
+        if (nextScrolls % 5 === 0) {
+          try {
+            const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+            const userId = usePlaylistStateStore.getState().userId;
+            if (userId) {
+              const { saveAnalyticsToSQLite } = require('../utils/sqliteSyncBridge');
+              saveAnalyticsToSQLite(userId, state.totalSwipes, nextScrolls).catch(() => {});
+            }
+          } catch (e) {
+            console.warn('[useTrackingStore] Failed to write analytics to SQLite:', e);
+          }
+        }
 
         return {
           totalScrolls: nextScrolls,
@@ -180,18 +200,7 @@ export const useTrackingStore = create<TrackingState>()(
         };
       }),
       
-      clearUnsyncedAnalytics: () => set((state) => {
-        // Save to SQLite instantly in background
-        const authStore = require('./useAuthStore').useAuthStore;
-        const userId = authStore.getState().user?.id || 'guest-user';
-        const { saveUserMetricsToSQLite } = require('@/utils/sqliteSyncBridge');
-        saveUserMetricsToSQLite(userId, {
-          totalSwipes: state.totalSwipes,
-          totalScrolls: state.totalScrolls,
-          unsyncedSwipes: 0,
-          unsyncedScrolls: 0,
-        });
-
+      clearUnsyncedAnalytics: () => set(() => {
         return {
           unsyncedSwipes: 0,
           unsyncedScrolls: 0,
@@ -211,8 +220,12 @@ export const useTrackingStore = create<TrackingState>()(
       partialize: (state) => ({
         currentMode: state.currentMode,
         infiniteLoop: state.infiniteLoop,
-        watchLaterCardIds: state.watchLaterCardIds,
         loopsCompleted: state.loopsCompleted,
+        reelsSessionId: state.reelsSessionId,
+        reelsSessionCards: state.reelsSessionCards,
+        reelsActiveIndex: state.reelsActiveIndex,
+        reelsSourceType: state.reelsSourceType,
+        reelsSourceId: state.reelsSourceId,
       }),
     }
   )

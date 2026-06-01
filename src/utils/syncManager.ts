@@ -1,5 +1,6 @@
 import { usePlaylistStateStore, OfflineAction, DifficultyState } from '../store/usePlaylistStateStore';
 import { useAuthStore, getOrCreateInstallationUUID } from '../store/useAuthStore';
+import { useTrackingStore } from '../store/useTrackingStore';
 import { getDatabase, sqliteLock, hydrationLock, isSQLiteAvailable } from './sqliteDatabase';
 import {
   saveCardsToSQLite,
@@ -16,12 +17,17 @@ import {
   canonicalSerialize,
   signMutationPayload,
   saveDeletedEntityToSQLite,
-  isEntityDeletedInSQLite
+  getDeletedEntityIdsFromSQLite,
+  saveSeniorQuotesToSQLite,
+  saveAnalyticsToSQLite,
+  saveOfflineQueueToSQLite
 } from './sqliteSyncBridge';
 import api from '../services/api';
 import { syncTelemetry } from './syncTelemetry';
 import { isNetworkConnected } from './network';
 import { Platform } from 'react-native';
+import { sqliteWriteManager } from './sqliteWriteManager';
+import { syncPerformanceTracker } from './syncPerformanceTracker';
 
 export type SyncState = 'idle' | 'hydrating' | 'replaying' | 'reconciling' | 'paused' | 'recovering';
 
@@ -42,6 +48,7 @@ export const EVENT_REGISTRY: Record<string, {
   'UPDATE_FOLDER': { priority: 'normal', mergeStrategy: 'patch' },
   'TOGGLE_PLAYLIST_ITEM': { priority: 'critical', mergeStrategy: 'patch' },
   'REORDER_PLAYLIST': { priority: 'normal', mergeStrategy: 'patch' },
+  'UPDATE_REEL_PREFERENCES': { priority: 'normal', mergeStrategy: 'LWW' },
 };
 
 /**
@@ -69,7 +76,8 @@ class SyncManager {
   private logicalClock = 0;
 
   constructor() {
-    this.startHeartbeat();
+    // heartbeats disabled to enforce strict startup-only MongoDB sync
+    // this.startHeartbeat();
   }
 
   public getSyncState(): SyncState {
@@ -176,6 +184,7 @@ class SyncManager {
     const folderDeletes = new Set<string>();
     const playlistCreates = new Map<string, OfflineAction>();
     const playlistDeletes = new Set<string>();
+    let activeReelPreferences: OfflineAction | null = null;
 
     for (const action of queue) {
       const act = action.action;
@@ -209,6 +218,8 @@ class SyncManager {
         } else {
           playlistDeletes.add(pId);
         }
+      } else if (act === 'UPDATE_REEL_PREFERENCES') {
+        activeReelPreferences = action;
       } else {
         output.push(action);
       }
@@ -248,6 +259,10 @@ class SyncManager {
         if (playlistDeletes.has(payload.playlistId)) {
           finalQueue.push(action);
           playlistDeletes.delete(payload.playlistId);
+        }
+      } else if (act === 'UPDATE_REEL_PREFERENCES') {
+        if (activeReelPreferences === action) {
+          finalQueue.push(action);
         }
       } else if (act !== 'CREATE_FOLDER' && act !== 'CREATE_PLAYLIST') {
         if (output.includes(action)) {
@@ -302,16 +317,25 @@ class SyncManager {
     const activeUserId = auth.user?.id;
     if (!activeUserId || auth.user?.id === 'guest-user' || this.syncInProgress) return;
 
-    if (!this.acquireSyncLease(activeUserId)) return;
+    // Interaction Priority Gate: Defer sync if user is actively interacting to prevent gesture frame lag
+    const { interactionScheduler } = require('./interactionScheduler');
+    if (interactionScheduler.isInteracting()) {
+      if (__DEV__) {
+        console.log('[Sync Manager] Deferring sync loop due to active user interaction.');
+      }
+      interactionScheduler.runWhenIdle(() => this.sync(force));
+      return;
+    }
 
-    this.syncInProgress = true;
-    this.setSyncState('replaying');
+    if (!this.acquireSyncLease(activeUserId)) return;
 
     const startTime = performance.now();
     const store = usePlaylistStateStore.getState();
     const capturedGenId = auth.sessionGenerationId;
+    let phaseId = '';
 
     try {
+      phaseId = syncPerformanceTracker.startPhase('Delta Sync');
       const isConnected = await isNetworkConnected();
       if (!isConnected || !this.lastHeartbeatSuccess) {
         console.log('[Sync Manager] Device offline or heartbeat failed. Skipping remote sync.');
@@ -319,13 +343,8 @@ class SyncManager {
         return;
       }
 
-      // Check battery level boundary before processing low priority tasks (Loophole 61)
+      // Check battery level boundary (Optional check bypassed to prevent native thread-blocking on emulators)
       let isLowBattery = false;
-      try {
-        const Battery = require('expo-battery');
-        const powerState = await Battery.getPowerStateAsync();
-        isLowBattery = powerState.batteryLevel !== -1 && powerState.batteryLevel < SYNC_POLICY.minBatteryLevelDefer;
-      } catch {}
 
       this.abortController = new AbortController();
       const signal = this.abortController.signal;
@@ -335,11 +354,11 @@ class SyncManager {
       if (pendingQueue.length > 0) {
         console.log(`[SYNC REPLAY] Syncing offline action queue | Total: ${pendingQueue.length} operations.`);
         // Loop Detection: Quarantine infinitely failing mutations into DLQ
-        const loopingActions = pendingQueue.filter(a => (a.retryCount ?? 0) > 5);
+        const loopingActions = pendingQueue.filter((a: OfflineAction) => (a.retryCount ?? 0) > 5);
         if (loopingActions.length > 0) {
-           const failedIds = loopingActions.map(a => a.id);
+           const failedIds = loopingActions.map((a: OfflineAction) => a.id);
            store.isolatePoisonActions(failedIds);
-           pendingQueue = pendingQueue.filter(a => (a.retryCount ?? 0) <= 5);
+           pendingQueue = pendingQueue.filter((a: OfflineAction) => (a.retryCount ?? 0) <= 5);
         }
 
         // Run event-driven prioritizations & compaction
@@ -388,7 +407,7 @@ class SyncManager {
               
               // Durably remove replayed logs and update cursors from SQLite inside a single atomic transaction (Loophole 51)
               const lastAppliedId = processedIds[processedIds.length - 1];
-              acknowledgeMutationsTransaction(processedIds, activeUserId, lastAppliedId);
+              await acknowledgeMutationsTransaction(processedIds, activeUserId, lastAppliedId);
             }
 
             // Loophole 92: Quarantine poisoned events to DLQ
@@ -407,6 +426,10 @@ class SyncManager {
       }
 
       this.setSyncState('reconciling');
+
+      let acceptedFolders: any[] = [];
+      let acceptedPlaylists: any[] = [];
+      let finalAcceptedCards: any[] = [];
 
       // 2. Fetch authoritative cloud sync increments (Deltas)
       const sinceRevision = store.lastSyncedRevision || 0;
@@ -428,13 +451,18 @@ class SyncManager {
         } = payload.delta || {};
         console.log(`[SYNC RECONCILE] Reconciliation starting. Re-synced: ${folders.length} folders, ${playlists.length} playlists, ${cards.length} cards, ${progress.length} progress.`);
 
+        // Pre-fetch deleted entity sets asynchronously to avoid synchronous promise checking bugs
+        const deletedCardIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'card');
+        const deletedFolderIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'folder');
+        const deletedPlaylistIds = await getDeletedEntityIdsFromSQLite(activeUserId, 'playlist');
+
         const mergedCards = { ...store.cardsById };
         const mergedFolders = { ...store.foldersById };
         const mergedPlaylists = { ...store.playlistsById };
         const mergedOrderMap = { ...store.playlistCardOrderMap };
 
         const activeQueue = store.offlineActionQueue;
-        const isDirty = (id: string) => activeQueue.some((a) => 
+        const isDirty = (id: string) => activeQueue.some((a: OfflineAction) => 
           a.payload?.playlistId === id || 
           a.payload?.folderId === id || 
           a.payload?.cardId === id ||
@@ -443,10 +471,10 @@ class SyncManager {
 
         // Process remote tombstones only when explicitly enabled on the user's MongoDB profile.
         if (allowRemoteDestructiveSync && deletedEntities && deletedEntities.length > 0) {
-          deletedEntities.forEach((del: any) => {
-            if (!del || !del.entityId) return;
-            if (isDirty(del.entityId)) return; // Protect optimistic recreates/actions
-            saveDeletedEntityToSQLite(
+          for (const del of deletedEntities) {
+            if (!del || !del.entityId) continue;
+            if (isDirty(del.entityId)) continue; // Protect optimistic recreates/actions
+            await saveDeletedEntityToSQLite(
               del.entityId,
               del.entityType,
               activeUserId,
@@ -458,52 +486,86 @@ class SyncManager {
             
             if (del.entityType === 'playlist') {
               const localPlaylist = store.playlistsById[del.entityId];
-              if (localPlaylist && new Date((localPlaylist as any).updatedAt || 0).getTime() > tombstoneTime) return; // Reject stale tombstone
-              deletePlaylistFromSQLite(del.entityId, activeUserId);
+              if (localPlaylist && new Date((localPlaylist as any).updatedAt || 0).getTime() > tombstoneTime) continue; // Reject stale tombstone
+              await deletePlaylistFromSQLite(del.entityId, activeUserId);
               delete mergedPlaylists[del.entityId];
             } else if (del.entityType === 'folder') {
               const localFolder = store.foldersById[del.entityId];
-              if (localFolder && new Date(localFolder.updatedAt || 0).getTime() > tombstoneTime) return; // Reject stale tombstone
-              deleteFolderFromSQLite(del.entityId, activeUserId);
+              if (localFolder && new Date(localFolder.updatedAt || 0).getTime() > tombstoneTime) continue; // Reject stale tombstone
+              await deleteFolderFromSQLite(del.entityId, activeUserId);
               delete mergedFolders[del.entityId];
             } else if (del.entityType === 'card') {
               const cleanId = del.entityId.split('-loop-')[0];
-              deleteCardFromSQLite(cleanId, activeUserId);
+              await deleteCardFromSQLite(cleanId, activeUserId);
               delete mergedCards[cleanId];
               Object.keys(mergedOrderMap).forEach((playlistId) => {
                 mergedOrderMap[playlistId] = (mergedOrderMap[playlistId] || [])
                   .filter((id: string) => id.split('-loop-')[0] !== cleanId);
               });
             }
-          });
+          }
         }
 
         // Apply Last-Write-Wins (LWW) conflict merging (Loophole 3, 4, 15)
+        // Apply Last-Write-Wins (LWW) conflict merging (Loophole 3, 4, 15)
+        acceptedFolders = [];
         if (folders.length > 0) {
-          const acceptedFolders: any[] = [];
           folders.forEach((f: any) => {
             if (!f || !f._id) return;
-            if (isEntityDeletedInSQLite(activeUserId, 'folder', f._id)) return;
+            if (deletedFolderIds.has(f._id)) return;
             // Prevent stale server sweep from overwriting local optimistic creations/updates
             if (isDirty(f._id) || store.foldersById[f._id]?.dirty) return;
+
+            // Reconcile and replace temporary folder with real server folder:
+            const localTempDuplicate = Object.values(store.foldersById).find(
+              (localF: any) => localF.title === f.title && String(localF._id).startsWith('temp-') && !localF.isDeleted
+            ) as any;
+            
+            if (localTempDuplicate) {
+              delete mergedFolders[localTempDuplicate._id];
+              const { getDatabase } = require('./sqliteDatabase');
+              const db = getDatabase();
+              db.runAsync('DELETE FROM folders WHERE id = ?;', [localTempDuplicate._id]).catch(() => {});
+            }
+
             mergedFolders[f._id] = f;
             acceptedFolders.push(f);
           });
-          saveFoldersToSQLite(acceptedFolders, activeUserId);
         }
 
+        acceptedPlaylists = [];
         if (playlists.length > 0) {
-          const acceptedPlaylists: any[] = [];
           playlists.forEach((p: any) => {
             if (!p || !p._id) return;
-            if (isEntityDeletedInSQLite(activeUserId, 'playlist', p._id)) return;
+            if (deletedPlaylistIds.has(p._id)) return;
 
-            // Mongo is an update channel, not the local authority. If a same-name local playlist
-            // exists, keep local and let the pending local queue settle upstream.
-            const localDuplicate = Object.values(store.playlistsById).find(
-              (localP: any) => localP.name === p.name && localP._id !== p._id && !localP.isDeleted
+            // Reconcile temporary playlist with server real playlist:
+            const localTempDuplicate = Object.values(store.playlistsById).find(
+              (localP: any) => localP.name === p.name && String(localP._id).startsWith('temp-') && !localP.isDeleted
             ) as any;
-            if (localDuplicate) return;
+            
+            if (localTempDuplicate) {
+              delete mergedPlaylists[localTempDuplicate._id];
+              delete mergedOrderMap[localTempDuplicate._id];
+              
+              const localOrder = store.playlistCardOrderMap[localTempDuplicate._id] || [];
+              const cardIds = p.cardIds || p.orderedCardIds || localOrder || [];
+              const finalCardIds = cardIds.map((id: string) => id.split('-loop-')[0]).filter(Boolean);
+              
+              p.cardIds = finalCardIds;
+              p.orderedCardIds = finalCardIds;
+              
+              const { getDatabase } = require('./sqliteDatabase');
+              const db = getDatabase();
+              db.runAsync('DELETE FROM playlists WHERE id = ?;', [localTempDuplicate._id]).catch(() => {});
+            } else {
+              // Mongo is an update channel, not the local authority. If a same-name local playlist
+              // exists, keep local and let the pending local queue settle upstream.
+              const localDuplicate = Object.values(store.playlistsById).find(
+                (localP: any) => localP.name === p.name && localP._id !== p._id && !localP.isDeleted
+              ) as any;
+              if (localDuplicate) return;
+            }
 
             // Prevent stale server sweep from overwriting local optimistic creations/updates or destroying freshly toggled items
             if (isDirty(p._id) || store.playlistsById[p._id]?.dirty) return;
@@ -512,20 +574,20 @@ class SyncManager {
             mergedOrderMap[p._id] = cardIds.map((id: string) => id.split('-loop-')[0]).filter(Boolean);
             acceptedPlaylists.push(p);
           });
-          savePlaylistsToSQLite(acceptedPlaylists, activeUserId);
         }
 
+        const acceptedCards: any[] = [];
+        const acceptedCardsMap = new Map<string, any>();
+
         if (cards.length > 0) {
-          const acceptedCards: any[] = [];
           cards.forEach((c: any) => {
             if (!c || !c._id) return;
             const cleanId = c._id.split('-loop-')[0];
-            if (isEntityDeletedInSQLite(activeUserId, 'card', cleanId)) return;
+            if (deletedCardIds.has(cleanId)) return;
             if (isDirty(cleanId) || store.cardsById[cleanId]?.dirty) return;
             mergedCards[cleanId] = { ...mergedCards[cleanId], ...c };
-            acceptedCards.push(c);
+            acceptedCardsMap.set(cleanId, mergedCards[cleanId]);
           });
-          saveCardsToSQLite(acceptedCards, activeUserId);
         }
 
         // Commutative statistical progress merges
@@ -546,11 +608,47 @@ class SyncManager {
               } as any;
               mergedCards[cardId].difficultyState = p.difficultyState;
               mergedCards[cardId].isFavorite = p.favorite;
+              
+              acceptedCardsMap.set(cardId, mergedCards[cardId]);
             }
           });
-          const progressCardIds = progress.map((p: any) => p.revisionCardId.toString());
-          const progressCardsToSave = progressCardIds.map((id: string) => mergedCards[id]).filter(Boolean);
-          saveCardsToSQLite(progressCardsToSave, activeUserId);
+        }
+
+        finalAcceptedCards = Array.from(acceptedCardsMap.values());
+
+        // Use serialized write manager instead of concurrent Promise.all() to prevent WAL contention
+        if (acceptedFolders.length > 0) {
+          await sqliteWriteManager.enqueue({
+            id: `sync-folders-${Date.now()}`,
+            type: 'folders',
+            userId: activeUserId,
+            data: acceptedFolders,
+            timestamp: Date.now(),
+            priority: 'normal',
+          });
+        }
+
+        if (acceptedPlaylists.length > 0) {
+          await sqliteWriteManager.enqueue({
+            id: `sync-playlists-${Date.now()}`,
+            type: 'playlists',
+            userId: activeUserId,
+            data: acceptedPlaylists,
+            timestamp: Date.now(),
+            priority: 'normal',
+          });
+        }
+
+        if (finalAcceptedCards.length > 0) {
+          await sqliteWriteManager.enqueue({
+            id: `sync-cards-${Date.now()}`,
+            type: 'cards',
+            userId: activeUserId,
+            data: finalAcceptedCards,
+            timestamp: Date.now(),
+            priority: 'normal',
+            dedupeKey: `sync-cards-${activeUserId}`, // Coalesce rapid delta syncs
+          });
         }
 
         // Reconcile cardDifficultyMap from server questionProgress classifications
@@ -578,27 +676,83 @@ class SyncManager {
           if (__DEV__) console.log(`[SYNC RECONCILE] Merged ${questionProgress.length} classification entries into cardDifficultyMap.`);
         }
 
-        // Commit fully reconciled states back to Zustand in a single react ticket!
-        usePlaylistStateStore.setState({
-          cardsById: mergedCards,
-          foldersById: mergedFolders,
-          playlistsById: mergedPlaylists,
-          playlistCardOrderMap: mergedOrderMap,
-          cardDifficultyMap: mergedDifficultyMap,
-          lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
-          lastSyncedAt: payload.timestamp || new Date().toISOString(),
-          lastSuccessfulSyncAt: Date.now(),
-          syncFailureCount: 0,
-        });
+        // Merge and save senior quotes delta
+        const seniorQuotes = payload.delta?.seniorQuotes || [];
+        let mergedSeniorQuotes = [...store.seniorQuotes];
+        if (seniorQuotes.length > 0) {
+          await sqliteWriteManager.enqueue({
+            id: `sync-quotes-${Date.now()}`,
+            type: 'quotes',
+            userId: activeUserId,
+            data: seniorQuotes,
+            timestamp: Date.now(),
+            priority: 'normal',
+          });
+          
+          seniorQuotes.forEach((q: any) => {
+            const index = mergedSeniorQuotes.findIndex((existing: any) => existing._id === q._id);
+            if (index !== -1) {
+              mergedSeniorQuotes[index] = { ...mergedSeniorQuotes[index], ...q };
+            } else {
+              mergedSeniorQuotes.push(q);
+            }
+          });
+        }
 
-        // Persist local sync cursor coordinates (Loophole 52)
-        const db = getDatabase();
-        db.runSync(
-          `INSERT INTO sync_cursors (userId, lastPulledRevision, updatedAt) VALUES (?, ?, ?)
-           ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`,
-          [activeUserId, payload.toRevision || payload.currentRevision || 0, Date.now()]
-        );
+        // Commit fully reconciled states back to Zustand in a single react tick!
+        const commitReconciledState = () => {
+          usePlaylistStateStore.setState({
+            cardsById: mergedCards,
+            foldersById: mergedFolders,
+            playlistsById: mergedPlaylists,
+            playlistCardOrderMap: mergedOrderMap,
+            cardDifficultyMap: mergedDifficultyMap,
+            seniorQuotes: mergedSeniorQuotes,
+            lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
+            lastSyncedAt: payload.timestamp || new Date().toISOString(),
+            lastSuccessfulSyncAt: Date.now(),
+            syncFailureCount: 0,
+          });
+        };
+
+        if (interactionScheduler.isInteracting()) {
+          if (__DEV__) {
+            console.log('[Sync Manager] UI is active. Deferring reconciled Zustand state commit until idle.');
+          }
+          interactionScheduler.runWhenIdle(commitReconciledState);
+        } else {
+          commitReconciledState();
+        }
+
+        // Persist local sync cursor coordinates (Loophole 52) inside the serialized write manager
+        await sqliteWriteManager.enqueue({
+          id: `sync-cursor-${Date.now()}`,
+          type: 'custom',
+          userId: activeUserId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(
+                `INSERT INTO sync_cursors (userId, lastPulledRevision, updatedAt) VALUES (?, ?, ?)
+                 ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`,
+                [activeUserId, payload.toRevision || payload.currentRevision || 0, Date.now()]
+              );
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal',
+        });
       }
+
+      if (phaseId) {
+        syncPerformanceTracker.endPhase(phaseId, 'completed', {
+          cards: finalAcceptedCards.length,
+          folders: acceptedFolders.length,
+          playlists: acceptedPlaylists.length,
+        });
+      }
+
+      // Record snapshotted write metrics
+      syncPerformanceTracker.recordWriteMetrics(sqliteWriteManager.getMetrics());
 
       const duration = performance.now() - startTime;
       syncTelemetry.logSyncSuccess(duration, pendingQueue.length, {
@@ -606,6 +760,9 @@ class SyncManager {
       });
 
     } catch (err: any) {
+      if (phaseId) {
+        syncPerformanceTracker.endPhase(phaseId, 'failed', {}, err?.message);
+      }
       console.error('[Sync Manager Error] Sync execution failed:', err.message);
       syncTelemetry.logSyncFailure(err, store.syncFailureCount + 1);
       store.incrementSyncFailure();
@@ -618,3 +775,35 @@ class SyncManager {
 }
 
 export const syncManager = new SyncManager();
+
+/**
+ * Fast synchronous-like force flush to SQLite on app close/kill.
+ */
+export async function forceFlushOnClose(): Promise<void> {
+  try {
+    const state = usePlaylistStateStore.getState();
+    const userId = state.userId;
+    if (!userId) return;
+
+    // 1. Flush swipe and scroll counts to SQLite immediately
+    const trackingState = useTrackingStore.getState();
+    await saveAnalyticsToSQLite(
+      userId,
+      trackingState.totalSwipes || 0,
+      trackingState.totalScrolls || 0
+    );
+
+    // 2. Flush pending offline queue actions to SQLite
+    const pendingActions = state.offlineActionQueue || [];
+    if (pendingActions.length > 0) {
+      await saveOfflineQueueToSQLite(pendingActions, userId);
+    }
+
+    // 3. Attempt network sync with fire and forget — don't await
+    syncManager.sync(true).catch(() => {});
+
+  } catch (err) {
+    console.error('[Force Flush] Failed:', err);
+  }
+}
+

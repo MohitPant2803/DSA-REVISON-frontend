@@ -8,58 +8,117 @@ import Animated, {
   withRepeat,
   withSequence,
   withDelay,
-  FadeIn,
-  FadeOut,
 } from 'react-native-reanimated';
 import { springPresets, easings } from '@/theme/motion';
-import { GlassPanel } from '../motion/GlassPanel';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { hapticFeedback } from '@/utils/haptics';
 import { Sparkles, Folder, CheckCircle } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
+const TOPICS = [
+  { label: 'SDE', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.08)', border: 'rgba(139, 92, 246, 0.25)' },
+  { label: 'Data', color: '#6366F1', bg: 'rgba(99, 102, 241, 0.08)', border: 'rgba(99, 102, 241, 0.25)' },
+  { label: 'Quant', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.08)', border: 'rgba(59, 130, 246, 0.25)' },
+  { label: 'Product', color: '#EC4899', bg: 'rgba(236, 72, 153, 0.08)', border: 'rgba(236, 72, 153, 0.25)' },
+  { label: 'Case Studies', color: '#EA580C', bg: 'rgba(234, 88, 12, 0.08)', border: 'rgba(234, 88, 12, 0.25)' },
+  { label: 'Guesstimates', color: '#10B981', bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.25)' },
+  { label: 'System Design', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.08)', border: 'rgba(139, 92, 246, 0.25)' },
+  { label: 'DBMS', color: '#6366F1', bg: 'rgba(99, 102, 241, 0.08)', border: 'rgba(99, 102, 241, 0.25)' },
+  { label: 'CN', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.08)', border: 'rgba(59, 130, 246, 0.25)' }
+];
+
+interface FloatingTopicProps {
+  label: string;
+  color: string;
+  bg: string;
+  borderColor: string;
+  index: number;
+  total: number;
+}
+
+function FloatingTopic({ label, color, bg, borderColor, index, total }: FloatingTopicProps) {
+  const angle = (index * 2 * Math.PI) / total;
+  const radius = 96; // Orbit distance from center
+  const posX = Math.cos(angle) * radius;
+  const posY = Math.sin(angle) * radius;
+
+  // Shared values for calm floating animation
+  const tx = useSharedValue(posX);
+  const ty = useSharedValue(posY);
+  const scale = useSharedValue(0);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    // 1. Smooth, staggered fade-in based on index
+    const staggerDelay = index * 180;
+    scale.value = withDelay(staggerDelay, withSpring(1.0, { damping: 15, stiffness: 50 }));
+    opacity.value = withDelay(staggerDelay, withTiming(0.95, { duration: 600 }));
+
+    // 2. Continuous Calming float drift animation (sine-wave emulation using reanimated sequencing)
+    const driftDuration = 2800 + (index * 220);
+    const driftAmp = 6;
+
+    tx.value = withRepeat(
+      withSequence(
+        withTiming(posX + Math.cos(angle) * driftAmp, { duration: driftDuration, easing: easings.cubicBezier }),
+        withTiming(posX - Math.cos(angle) * driftAmp, { duration: driftDuration, easing: easings.cubicBezier })
+      ),
+      -1,
+      true
+    );
+
+    ty.value = withRepeat(
+      withSequence(
+        withTiming(posY + Math.sin(angle) * driftAmp, { duration: driftDuration + 300, easing: easings.cubicBezier }),
+        withTiming(posY - Math.sin(angle) * driftAmp, { duration: driftDuration + 300, easing: easings.cubicBezier })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateX: tx.value },
+        { translateY: ty.value },
+        { scale: scale.value },
+      ],
+      opacity: opacity.value,
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.floatingTag, { backgroundColor: bg, borderColor: borderColor }, animatedStyle]}>
+      <Text style={[styles.floatingTagText, { color: color }]}>{label}</Text>
+    </Animated.View>
+  );
+}
+
 export function OnboardingLoader() {
   const { preferences } = useOnboardingStore();
   const [progress, setProgress] = useState(0);
   const [logMessage, setLogMessage] = useState('Booting revision compilers...');
-  
-  // Visual tracking of card-fly states
-  const [flyingCardIndex, setFlyingCardIndex] = useState(-1);
 
   // Reanimated Shared Values
   const haloRotation = useSharedValue(0);
   const haloScale = useSharedValue(0.85);
 
-  // Micro cards fly translation values
-  const card1X = useSharedValue(0);
-  const card1Y = useSharedValue(0);
-  const card1Scale = useSharedValue(1);
-  const card1Opacity = useSharedValue(0);
-
-  const card2X = useSharedValue(0);
-  const card2Y = useSharedValue(0);
-  const card2Scale = useSharedValue(1);
-  const card2Opacity = useSharedValue(0);
-
   const folder1Scale = useSharedValue(1);
   const folder2Scale = useSharedValue(1);
-
-  // Get their selected weak topics (fallback to generic if empty)
-  const weak1 = preferences.weakTopics[0] || 'Dynamic Programming';
-  const weak2 = preferences.weakTopics[1] || 'Graphs & Traversals';
 
   useEffect(() => {
     // 1. Continuous slow rotation of compiling halo
     haloRotation.value = withRepeat(
-      withTiming(360, { duration: 3000, easing: easings.cubicBezier }),
+      withTiming(360, { duration: 4000, easing: easings.cubicBezier }),
       -1,
       false
     );
     haloScale.value = withRepeat(
       withSequence(
-        withTiming(1.05, { duration: 1500 }),
-        withTiming(0.85, { duration: 1500 })
+        withTiming(1.05, { duration: 2000 }),
+        withTiming(0.85, { duration: 2000 })
       ),
       -1,
       true
@@ -69,68 +128,46 @@ export function OnboardingLoader() {
     const runPersonalizedCompilation = async () => {
       // Stage 1: Load preferences (0ms - 800ms)
       setTimeout(() => {
-        setProgress(20);
-        setLogMessage(`Configuring ${preferences.skillLevel || 'intermediate'} recall track...`);
+        setProgress(15);
+        setLogMessage('Synchronizing customized learning path...');
         hapticFeedback.impactLight();
-      }, 700);
+      }, 600);
 
-      // Stage 2: Seeding Topic 1 and flying card 1 (800ms - 2000ms)
+      // Stage 2: SDE, System Design, DBMS, CN
       setTimeout(() => {
-        setProgress(45);
-        setLogMessage(`Structuring priority folder: ${weak1}...`);
+        setProgress(40);
+        setLogMessage('Mapping SDE Core: System Design, DBMS & Networks...');
         hapticFeedback.impactLight();
         
-        // Fly Card 1 out to Folder 1 (Left folder)
-        card1Opacity.value = withTiming(1.0, { duration: 100 });
-        card1X.value = withSpring(-80, springPresets.bouncy);
-        card1Y.value = withSpring(80, springPresets.bouncy);
-        card1Scale.value = withSpring(0.4, springPresets.bouncy);
+        folder1Scale.value = withSequence(
+          withSpring(1.2, springPresets.stiff),
+          withSpring(1.0, springPresets.bouncy)
+        );
+      }, 1500);
 
-        setTimeout(() => {
-          // Folder 1 absorption impact haptic
-          folder1Scale.value = withSequence(
-            withSpring(1.2, springPresets.stiff),
-            withSpring(1.0, springPresets.bouncy)
-          );
-          hapticFeedback.success();
-          card1Opacity.value = withTiming(0, { duration: 150 });
-        }, 600);
-      }, 1600);
-
-      // Stage 3: Seeding Topic 2 and flying card 2 (2000ms - 3200ms)
+      // Stage 3: Data & Quant
       setTimeout(() => {
-        setProgress(70);
-        setLogMessage(`Structuring priority folder: ${weak2}...`);
+        setProgress(65);
+        setLogMessage('Calibrating Data & Quant mathematical models...');
         hapticFeedback.impactLight();
+      }, 2500);
 
-        // Fly Card 2 out to Folder 2 (Right folder)
-        card2Opacity.value = withTiming(1.0, { duration: 100 });
-        card2X.value = withSpring(80, springPresets.bouncy);
-        card2Y.value = withSpring(80, springPresets.bouncy);
-        card2Scale.value = withSpring(0.4, springPresets.bouncy);
-
-        setTimeout(() => {
-          // Folder 2 absorption impact
-          folder2Scale.value = withSequence(
-            withSpring(1.2, springPresets.stiff),
-            withSpring(1.0, springPresets.bouncy)
-          );
-          hapticFeedback.success();
-          card2Opacity.value = withTiming(0, { duration: 150 });
-        }, 600);
-      }, 2800);
-
-      // Stage 4: Calibration (3200ms - 4200ms)
+      // Stage 4: Product, Case Studies, Guesstimates
       setTimeout(() => {
-        setProgress(90);
-        setLogMessage('Calibrating active verbal GPT comparison feedback...');
-        hapticFeedback.impactMedium();
-      }, 3800);
+        setProgress(85);
+        setLogMessage('Synthesizing Product, Case Studies & Guesstimates...');
+        hapticFeedback.impactLight();
+        
+        folder2Scale.value = withSequence(
+          withSpring(1.2, springPresets.stiff),
+          withSpring(1.0, springPresets.bouncy)
+        );
+      }, 3500);
 
-      // Stage 5: Done (4200ms)
+      // Stage 5: Done (4500ms)
       setTimeout(() => {
         setProgress(100);
-        setLogMessage('Revision system generated.');
+        setLogMessage('Revision ecosystem fully compiled.');
         hapticFeedback.success();
       }, 4500);
     };
@@ -143,24 +180,6 @@ export function OnboardingLoader() {
     transform: [
       { rotate: `${haloRotation.value}deg` },
       { scale: haloScale.value },
-    ],
-  }));
-
-  const card1AnimatedStyle = useAnimatedStyle(() => ({
-    opacity: card1Opacity.value,
-    transform: [
-      { translateX: card1X.value },
-      { translateY: card1Y.value },
-      { scale: card1Scale.value },
-    ],
-  }));
-
-  const card2AnimatedStyle = useAnimatedStyle(() => ({
-    opacity: card2Opacity.value,
-    transform: [
-      { translateX: card2X.value },
-      { translateY: card2Y.value },
-      { scale: card2Scale.value },
     ],
   }));
 
@@ -181,36 +200,20 @@ export function OnboardingLoader() {
           <Sparkles color="#8B5CF6" size={28} strokeWidth={1.5} />
         </View>
 
-        {/* Floating cards being sorted */}
-        <Animated.View style={[styles.microCard, styles.cardRed, card1AnimatedStyle]}>
-          <Text style={styles.microText}>DP</Text>
-        </Animated.View>
-
-        <Animated.View style={[styles.microCard, styles.cardGreen, card2AnimatedStyle]}>
-          <Text style={styles.microText}>Graph</Text>
-        </Animated.View>
+        {/* Constellation of Calm Orbiting Topic Tags */}
+        {TOPICS.map((topic, idx) => (
+          <FloatingTopic
+            key={topic.label}
+            label={topic.label}
+            color={topic.color}
+            bg={topic.bg}
+            borderColor={topic.border}
+            index={idx}
+            total={TOPICS.length}
+          />
+        ))}
       </View>
 
-      {/* Playlist Folders visual compiling */}
-      <View style={styles.foldersRow}>
-        <Animated.View style={[styles.folderPlate, folder1AnimatedStyle]}>
-          <View style={styles.folderCard}>
-            <Folder color="#8B5CF6" size={16} strokeWidth={2.5} />
-            <Text style={styles.folderName} numberOfLines={1}>
-              {weak1}
-            </Text>
-          </View>
-        </Animated.View>
-
-        <Animated.View style={[styles.folderPlate, folder2AnimatedStyle]}>
-          <View style={styles.folderCard}>
-            <Folder color="#6366F1" size={16} strokeWidth={2.5} />
-            <Text style={styles.folderName} numberOfLines={1}>
-              {weak2}
-            </Text>
-          </View>
-        </Animated.View>
-      </View>
 
       {/* Dynamic Logger & Progress Bar */}
       <View style={styles.loggerBlock}>
@@ -241,22 +244,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   compilerPortal: {
-    width: 140,
-    height: 140,
+    width: 250,
+    height: 250,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    marginBottom: 32,
+    marginBottom: 44,
   },
   haloRing: {
     position: 'absolute',
-    width: 130,
-    height: 130,
-    borderRadius: 65,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
     borderWidth: 2,
     borderColor: '#8B5CF6',
     borderStyle: 'dashed',
-    opacity: 0.25,
+    opacity: 0.15,
   },
   coreBranding: {
     width: 68,
@@ -267,34 +270,22 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(226, 232, 240, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.03,
-    shadowRadius: 16,
-    elevation: 2,
+    zIndex: 10,
   },
-  microCard: {
+  floatingTag: {
     position: 'absolute',
-    width: 54,
-    height: 40,
-    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    zIndex: 2,
+    zIndex: 5,
   },
-  cardRed: {
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-  },
-  cardGreen: {
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-    borderColor: 'rgba(99, 102, 241, 0.3)',
-  },
-  microText: {
-    color: '#0F172A',
-    fontSize: 10,
-    fontWeight: 'bold',
+  floatingTagText: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   foldersRow: {
     flexDirection: 'row',
@@ -325,8 +316,7 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 12,
     fontWeight: 'bold',
-    marginLeft: 8,
-    flex: 1,
+    marginLeft: 0,
   },
   loggerBlock: {
     width: width - 64,

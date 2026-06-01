@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 export interface UserLearningPreferences {
   explanationFlowOrder: string[];
@@ -10,6 +11,7 @@ export interface UserLearningPreferences {
   hideCertainBlockTypes: string[];
   theme?: 'light' | 'dark';
   gptPromptMode?: 'explanation' | 'quiz';
+  lowEndDeviceMode: boolean;
 }
 
 interface PreferencesState {
@@ -31,6 +33,7 @@ export const useUserPreferencesStore = create<PreferencesState>()(
         hideCertainBlockTypes: [],
         theme: 'light',
         gptPromptMode: 'explanation',
+        lowEndDeviceMode: Platform.OS === 'android' && (Platform.Version as number) < 31,
       },
       updatePreference: (key, value) =>
         set((state) => ({
