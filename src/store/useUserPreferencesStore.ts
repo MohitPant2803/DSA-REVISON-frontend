@@ -9,7 +9,7 @@ export interface UserLearningPreferences {
   revisionMode: boolean;
   showHintsEarly: boolean;
   hideCertainBlockTypes: string[];
-  theme?: 'light' | 'dark';
+  theme?: 'default' | 'zen' | 'rain' | 'matcha' | 'sunset' | 'midnight';
   gptPromptMode?: 'explanation' | 'quiz';
   lowEndDeviceMode: boolean;
 }
@@ -20,6 +20,7 @@ interface PreferencesState {
     key: K,
     value: UserLearningPreferences[K]
   ) => void;
+  resetToDefault: () => void;
 }
 
 export const useUserPreferencesStore = create<PreferencesState>()(
@@ -31,7 +32,7 @@ export const useUserPreferencesStore = create<PreferencesState>()(
         revisionMode: true,
         showHintsEarly: false,
         hideCertainBlockTypes: [],
-        theme: 'light',
+        theme: 'zen',
         gptPromptMode: 'explanation',
         lowEndDeviceMode: Platform.OS === 'android' && (Platform.Version as number) < 31,
       },
@@ -42,10 +43,31 @@ export const useUserPreferencesStore = create<PreferencesState>()(
             [key]: value,
           },
         })),
+      resetToDefault: () =>
+        set({
+          preferences: {
+            explanationFlowOrder: ['intro', 'code', 'dryrun', 'summary'],
+            compactMode: false,
+            revisionMode: true,
+            showHintsEarly: false,
+            hideCertainBlockTypes: [],
+            theme: 'zen',
+            gptPromptMode: 'explanation',
+            lowEndDeviceMode: Platform.OS === 'android' && (Platform.Version as number) < 31,
+          },
+        }),
     }),
     {
       name: 'user-learning-preferences',
       storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => {
+        const { useAuthStore } = require('./useAuthStore');
+        const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+        if (isGuest) {
+          return {};
+        }
+        return state;
+      }
     }
   )
 );

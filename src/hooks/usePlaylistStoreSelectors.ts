@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import { resolveCardState } from '@/utils/resolveCardState';
+import { getAllDescendantFolderIds } from '@/utils/folderHelpers';
 
 /**
  * Returns ONLY the specific card's interactive difficulty state from the store.
@@ -115,10 +116,6 @@ export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
           // Resolve custom playlist card order strictly in stored order
           const order = state.playlistCardOrderMap[playlistId] || [];
 
-          if (cached && cached.revisionCounter === state.currentRevisionCounter && cached.orderRef === order) {
-            return cached.cards;
-          }
-
           const resolved = order
             .map((id) => state.cardsById[id])
             .filter((card: any) => card && !card.isDeleted)
@@ -135,10 +132,6 @@ export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
 
           return resolved;
         } else {
-          if (cached && cached.revisionCounter === state.currentRevisionCounter) {
-            return cached.cards;
-          }
-
           // Smart playlist: derives items on the fly
           const resolved = Object.keys(state.cardsById)
             .map((cardId) => state.cardsById[cardId])
@@ -228,14 +221,18 @@ const rawFolderCardsCache = new Map<string, {
 const folderCountsCache = new Map<string, {
   counts: { easy: number; medium: number; hard: number; skipped: number; unattempted: number };
   storeRef: any;
-  diffRef: any;
+  foldersRef: any;
+  rawCards: IPopulatedRevisionCard[];
+  diffMapSnapshot: Record<string, string | null>;
   currentRevisionCounter: number;
 }>();
 
 const folderCardsCache = new Map<string, {
   cards: IPopulatedRevisionCard[];
   storeRef: any;
-  diffRef: any;
+  foldersRef: any;
+  rawCards: IPopulatedRevisionCard[];
+  diffMapSnapshot: Record<string, string | null>;
   currentRevisionCounter: number;
 }>();
 
@@ -250,13 +247,17 @@ export function useFolderCards(folderId: string): IPopulatedRevisionCard[] {
       useCallback((state) => {
         const cached = rawFolderCardsCache.get(folderId);
         if (cached && 
-            cached.storeRef === state.cardsById && 
-            cached.currentRevisionCounter === state.currentRevisionCounter) {
+            cached.storeRef === state.cardsById) {
           return cached.cards;
         }
 
+        const descendantIds = getAllDescendantFolderIds(folderId, state.foldersById);
         const resolved = (Object.values(state.cardsById) as IPopulatedRevisionCard[])
-          .filter((c: any) => c && (c.folderId === folderId || c.rootFolderId === folderId) && !c.isDeleted)
+          .filter((c: any) => {
+            if (!c || c.isDeleted) return false;
+            const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
+            return descendantIds.has(fid) || (c.rootFolderId && descendantIds.has(c.rootFolderId));
+          })
           .sort((a, b) => (a.order || 0) - (b.order || 0));
 
         if (rawFolderCardsCache.size >= 30) {
@@ -293,23 +294,49 @@ export function useFolderDifficultyCounts(folderId: string): {
     useShallow(
       useCallback((state) => {
         const cached = folderCountsCache.get(folderId);
-        if (cached && 
-            cached.storeRef === state.cardsById && 
-            cached.diffRef === state.cardDifficultyMap && 
-            cached.currentRevisionCounter === state.currentRevisionCounter) {
-          return cached.counts;
-        }
-
-        const folderCards = (Object.values(state.cardsById) as IPopulatedRevisionCard[])
-          .filter((c: any) => c && (c.folderId === folderId || c.rootFolderId === folderId) && !c.isDeleted);
-
-        let easy = 0, medium = 0, hard = 0, skipped = 0, unattempted = 0;
         const cardDifficultyMap = state.cardDifficultyMap;
 
-        folderCards.forEach((c) => {
+        if (cached && 
+            cached.storeRef === state.cardsById && 
+            cached.foldersRef === state.foldersById) {
+          // Check if any card difficulty state in this folder has actually changed in cardDifficultyMap
+          let difficultyChanged = false;
+          for (const card of cached.rawCards) {
+            const cleanId = card._id;
+            const oldDiff = cached.diffMapSnapshot[cleanId];
+            const newDiff = cardDifficultyMap[cleanId]?.difficulty ?? null;
+            if (oldDiff !== newDiff) {
+              difficultyChanged = true;
+              break;
+            }
+          }
+          if (!difficultyChanged) {
+            return cached.counts;
+          }
+        }
+
+        // Cache miss or card structure changed: resolve set of cards
+        let rawCards: IPopulatedRevisionCard[];
+        if (cached && cached.storeRef === state.cardsById && cached.foldersRef === state.foldersById) {
+          rawCards = cached.rawCards;
+        } else {
+          const descendantIds = getAllDescendantFolderIds(folderId, state.foldersById);
+          rawCards = (Object.values(state.cardsById) as IPopulatedRevisionCard[])
+            .filter((c: any) => {
+              if (!c || c.isDeleted) return false;
+              const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
+              return descendantIds.has(fid) || (c.rootFolderId && descendantIds.has(c.rootFolderId));
+            });
+        }
+
+        let easy = 0, medium = 0, hard = 0, skipped = 0, unattempted = 0;
+        const diffMapSnapshot: Record<string, string | null> = {};
+
+        rawCards.forEach((c) => {
           const cleanId = c._id.split('-loop-')[0];
           const local = cardDifficultyMap[cleanId];
-          const difficulty = local ? local.difficulty : state.cardsById[cleanId]?.difficultyState;
+          const difficulty = local ? local.difficulty : state.cardsById[cleanId]?.difficultyState ?? null;
+          diffMapSnapshot[c._id] = difficulty;
           
           if (difficulty === 'easy') easy++;
           else if (difficulty === 'medium') medium++;
@@ -330,9 +357,11 @@ export function useFolderDifficultyCounts(folderId: string): {
         folderCountsCache.set(folderId, {
           counts,
           storeRef: state.cardsById,
-          diffRef: cardDifficultyMap,
+          foldersRef: state.foldersById,
+          rawCards,
+          diffMapSnapshot,
           currentRevisionCounter: state.currentRevisionCounter,
-        });
+        } as any);
 
         return counts;
       }, [folderId])
@@ -354,17 +383,45 @@ export function useResolvedFolderCards(folderId: string): IPopulatedRevisionCard
 
         if (cachedEntry && 
             cachedEntry.storeRef === state.cardsById && 
-            cachedEntry.diffRef === cardDifficultyMap && 
-            cachedEntry.currentRevisionCounter === state.currentRevisionCounter) {
-          return cachedEntry.cards;
+            cachedEntry.foldersRef === state.foldersById) {
+          // Check if any card difficulty state has actually changed in cardDifficultyMap
+          let difficultyChanged = false;
+          for (const card of cachedEntry.rawCards) {
+            const cleanId = card._id;
+            const oldDiff = cachedEntry.diffMapSnapshot[cleanId];
+            const newDiff = cardDifficultyMap[cleanId]?.difficulty ?? null;
+            if (oldDiff !== newDiff) {
+              difficultyChanged = true;
+              break;
+            }
+          }
+          if (!difficultyChanged) {
+            return cachedEntry.cards;
+          }
         }
 
-        const rawCards = (Object.values(state.cardsById) as IPopulatedRevisionCard[])
-          .filter((c: any) => c && (c.folderId === folderId || c.rootFolderId === folderId) && !c.isDeleted)
-          .sort((a, b) => (a.order || 0) - (b.order || 0));
+        // Cache miss or card structure changed: resolve set of cards
+        let rawCards: IPopulatedRevisionCard[];
+        if (cachedEntry && cachedEntry.storeRef === state.cardsById && cachedEntry.foldersRef === state.foldersById) {
+          rawCards = cachedEntry.rawCards;
+        } else {
+          const descendantIds = getAllDescendantFolderIds(folderId, state.foldersById);
+          rawCards = (Object.values(state.cardsById) as IPopulatedRevisionCard[])
+            .filter((c: any) => {
+              if (!c || c.isDeleted) return false;
+              const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
+              return descendantIds.has(fid) || (c.rootFolderId && descendantIds.has(c.rootFolderId));
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+        }
 
         const resolved = rawCards.map((c) => resolveCardState(c, cardDifficultyMap, state.cardsById));
-        
+        const diffMapSnapshot: Record<string, string | null> = {};
+        rawCards.forEach((c) => {
+          const cleanId = c._id.split('-loop-')[0];
+          diffMapSnapshot[c._id] = cardDifficultyMap[cleanId]?.difficulty ?? state.cardsById[cleanId]?.difficultyState ?? null;
+        });
+
         if (folderCardsCache.size >= 30) {
           const firstKey = folderCardsCache.keys().next().value;
           if (firstKey !== undefined) {
@@ -375,12 +432,15 @@ export function useResolvedFolderCards(folderId: string): IPopulatedRevisionCard
         folderCardsCache.set(folderId, {
           cards: resolved,
           storeRef: state.cardsById,
-          diffRef: cardDifficultyMap,
+          foldersRef: state.foldersById,
+          rawCards,
+          diffMapSnapshot,
           currentRevisionCounter: state.currentRevisionCounter,
-        });
+        } as any);
 
         return resolved;
       }, [folderId])
     )
   );
 }
+

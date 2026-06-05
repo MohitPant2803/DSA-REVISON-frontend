@@ -6,10 +6,9 @@ import { FloatingHomeButton } from '@/components/FloatingHomeButton';
 function StackWithBack() {
   useAppBackHandler();
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'none', animationTypeForReplace: 'pop' }}>
-      <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
+    <Stack screenOptions={{ headerShown: false, animation: 'fade', animationTypeForReplace: 'pop' }}>
+      <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
       <Stack.Screen name="admin" />
-      <Stack.Screen name="domains/[id]" />
       <Stack.Screen name="playlist/[playlistId]" />
       <Stack.Screen name="folder/[folderId]" />
       <Stack.Screen name="reels-player" options={{ gestureEnabled: false }} />

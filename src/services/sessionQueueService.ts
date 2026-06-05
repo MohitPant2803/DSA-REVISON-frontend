@@ -4,6 +4,7 @@ import { cacheStorage } from '@/lib/cache';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { resolveCardState } from '@/utils/resolveCardState';
 import { AppState } from 'react-native';
+import { getAllDescendantFolderIds } from '@/utils/folderHelpers';
 
 export interface ISessionQueue {
   _id: string;
@@ -213,11 +214,13 @@ export const startLocalSession = async (
     } catch (e) {}
 
     if (orderedCardIds.length === 0) {
+      const { foldersById } = usePlaylistStateStore.getState();
+      const descendantIds = getAllDescendantFolderIds(sourceId, foldersById);
       orderedCardIds = Object.values(cardsById)
         .filter((c) => {
           if (!c) return false;
           const fid = typeof c.folderId === 'object' && c.folderId !== null ? (c.folderId as any)._id : c.folderId;
-          return fid === sourceId || c.rootFolderId === sourceId || c.subfolderIds?.includes(sourceId);
+          return descendantIds.has(fid) || (c.rootFolderId && descendantIds.has(c.rootFolderId));
         })
         .sort((a, b) => (a.order || 0) - (b.order || 0))
         .map((c) => c._id);

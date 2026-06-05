@@ -440,22 +440,6 @@ export async function setupDatabaseTables(): Promise<void> {
         // Self-healing migrations for sync_transactions
         try { await db.execAsync('ALTER TABLE sync_transactions ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
 
-        // I: Delta Stream Checkpoints Table
-        await db.execAsync(`
-          CREATE TABLE IF NOT EXISTS delta_stream_checkpoints (
-            transactionId TEXT PRIMARY KEY NOT NULL,
-            userId TEXT NOT NULL DEFAULT '',
-            bucket TEXT NOT NULL,
-            revision INTEGER NOT NULL,
-            pageNumber INTEGER NOT NULL,
-            cursor TEXT,
-            updatedAt INTEGER NOT NULL
-          );
-        `);
-
-        // Self-healing migrations for delta_stream_checkpoints
-        try { await db.execAsync('ALTER TABLE delta_stream_checkpoints ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
-
         // J: Translations Ledger
         await db.execAsync(`
           CREATE TABLE IF NOT EXISTS id_translations (
@@ -477,29 +461,6 @@ export async function setupDatabaseTables(): Promise<void> {
             lastPulledRevision INTEGER DEFAULT 0,
             lastAppliedMutationId TEXT,
             lastServerCheckpoint TEXT,
-            updatedAt INTEGER NOT NULL
-          );
-        `);
-
-        // L: Replay Traces Table
-        await db.execAsync(`
-          CREATE TABLE IF NOT EXISTS replay_traces (
-            id TEXT PRIMARY KEY NOT NULL,
-            userId TEXT NOT NULL,
-            installationUUID TEXT NOT NULL,
-            mutationId TEXT NOT NULL,
-            sequenceChain INTEGER NOT NULL,
-            timestamp INTEGER NOT NULL,
-            reconciliationOutcome TEXT
-          );
-        `);
-
-        // M: Queue Snapshots Table
-        await db.execAsync(`
-          CREATE TABLE IF NOT EXISTS queue_snapshots (
-            userId TEXT PRIMARY KEY NOT NULL,
-            snapshotPayload TEXT NOT NULL,
-            checkpointSequence INTEGER NOT NULL,
             updatedAt INTEGER NOT NULL
           );
         `);
@@ -559,6 +520,27 @@ export async function setupDatabaseTables(): Promise<void> {
             branch TEXT,
             yearOfGraduation INTEGER,
             updatedAt TEXT NOT NULL
+          );
+        `);
+
+        // P3: Notification Settings Table
+        await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS notification_settings (
+            userId TEXT PRIMARY KEY NOT NULL,
+            enabled INTEGER CHECK(enabled IN (0, 1)) NOT NULL DEFAULT 0,
+            hour INTEGER NOT NULL DEFAULT 19,
+            minute INTEGER NOT NULL DEFAULT 0,
+            frequency TEXT NOT NULL DEFAULT 'daily',
+            customDays TEXT NOT NULL DEFAULT '[]',
+            updatedAt TEXT NOT NULL
+          );
+        `);
+
+        // P4: App Config Table
+        await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
           );
         `);
 

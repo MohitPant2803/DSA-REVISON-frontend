@@ -117,7 +117,7 @@ export const usePlaylists = () => {
     gcTime: 1000 * 60 * 60,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: 'stale',
+    refetchOnReconnect: true,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -189,7 +189,7 @@ export const usePlaylistCards = (playlistId: string | null) => {
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated;
+  const hasLocal = isSmart || isGuest ? hasHydrated : isHydrated;
 
   return {
     data: hasLocal ? storeCards : queryResult.data || [],

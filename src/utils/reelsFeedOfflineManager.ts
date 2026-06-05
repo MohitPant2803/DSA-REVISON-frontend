@@ -1,4 +1,14 @@
-import { getDatabase, isSQLiteAvailable } from './sqliteDatabase';
+import { getDatabase as getDatabaseRaw, isSQLiteAvailable } from './sqliteDatabase';
+import { whenDatabaseReady } from './appBootstrapGate';
+
+/**
+ * Gated database accessor to prevent querying before DDL schema is complete.
+ */
+async function getDatabase(): Promise<ReturnType<typeof getDatabaseRaw>> {
+  await whenDatabaseReady();
+  return getDatabaseRaw();
+}
+
 import { usePlaylistStateStore } from '../store/usePlaylistStateStore';
 import { sqliteWriteManager } from './sqliteWriteManager';
 import type { IPopulatedRevisionCard } from '../types/revision';
@@ -68,6 +78,16 @@ export function invalidateSliceCache() {
 
 let saveSessionTimeout: NodeJS.Timeout | null = null;
 let lastRegenTimestamp = 0;
+let replenishmentAttemptsCount = 0;
+let lastReplenishmentTime = 0;
+
+export function isValidCardForQueue(card: any): boolean {
+  if (!card) return false;
+  if (card.isDeleted) return false;
+  if (!card._id || !card.folderId) return false;
+  if (!card.title && !card.topic) return false;
+  return true;
+}
 
 export function flushSessionIndexToSQLiteSync(userId: string) {
   if (!sessionMemoryShadow || sessionMemoryShadow.userId !== userId) return;
@@ -77,7 +97,6 @@ export function flushSessionIndexToSQLiteSync(userId: string) {
   }
   
   if (!isSQLiteAvailable()) return;
-  const db = getDatabase();
   
   const { currentIndex, deepestIndexReached, updatedAt } = sessionMemoryShadow;
   
@@ -85,10 +104,21 @@ export function flushSessionIndexToSQLiteSync(userId: string) {
     console.log(`[SQLite Save] Entity: reel_sessions | Action: flushSessionIndexToSQLiteSync | Index: ${currentIndex}`);
   }
 
-  db.runAsync(
-    'UPDATE reel_sessions SET currentIndex = ?, deepestIndexReached = ?, updatedAt = ? WHERE userId = ?;',
-    [currentIndex, deepestIndexReached, updatedAt, userId]
-  ).catch(err => {
+  sqliteWriteManager.enqueue({
+    id: `flush-session-sync-${Date.now()}`,
+    type: 'custom',
+    userId,
+    data: {
+      executor: async (db: any) => {
+        await db.runAsync(
+          'UPDATE reel_sessions SET currentIndex = ?, deepestIndexReached = ?, updatedAt = ? WHERE userId = ?;',
+          [currentIndex, deepestIndexReached, updatedAt, userId]
+        );
+      }
+    },
+    timestamp: Date.now(),
+    priority: 'normal'
+  }).catch(err => {
     console.error('[Offline Feed Manager] Failed to flush session index to SQLite Sync:', err.message);
   });
 
@@ -104,22 +134,69 @@ export async function flushSessionIndexToSQLite(userId: string): Promise<void> {
   }
   
   if (!isSQLiteAvailable()) return;
-  const db = getDatabase();
   
   try {
     const { currentIndex, deepestIndexReached, updatedAt } = sessionMemoryShadow;
     if (__DEV__) {
       console.log(`[SQLite Save] Entity: reel_sessions | Action: flushSessionIndexToSQLite | Index: ${currentIndex}`);
     }
-    await db.runAsync(
-      'UPDATE reel_sessions SET currentIndex = ?, deepestIndexReached = ?, updatedAt = ? WHERE userId = ?;',
-      [currentIndex, deepestIndexReached, updatedAt, userId]
-    );
+    await sqliteWriteManager.enqueue({
+      id: `flush-session-async-${Date.now()}`,
+      type: 'custom',
+      userId,
+      data: {
+        executor: async (db: any) => {
+          await db.runAsync(
+            'UPDATE reel_sessions SET currentIndex = ?, deepestIndexReached = ?, updatedAt = ? WHERE userId = ?;',
+            [currentIndex, deepestIndexReached, updatedAt, userId]
+          );
+        }
+      },
+      timestamp: Date.now(),
+      priority: 'normal'
+    });
 
     // Flush seen cards in batch inside transaction
     await flushSessionSeenCardsToSQLite(userId);
   } catch (err: any) {
     console.error('[Offline Feed Manager] Failed to flush session index to SQLite:', err.message);
+  }
+}
+
+export async function flushSessionIndexAndQueueToSQLite(userId: string): Promise<void> {
+  if (!sessionMemoryShadow || sessionMemoryShadow.userId !== userId) return;
+  if (saveSessionTimeout) {
+    clearTimeout(saveSessionTimeout);
+    saveSessionTimeout = null;
+  }
+  
+  if (!isSQLiteAvailable()) return;
+  
+  try {
+    const { currentIndex, deepestIndexReached, queue, updatedAt } = sessionMemoryShadow;
+    const queueStr = JSON.stringify(queue);
+    if (__DEV__) {
+      console.log(`[SQLite Save] Entity: reel_sessions | Action: flushSessionIndexAndQueueToSQLite | Index: ${currentIndex} | Queue Size: ${queue.length}`);
+    }
+    await sqliteWriteManager.enqueue({
+      id: `flush-session-queue-async-${Date.now()}`,
+      type: 'custom',
+      userId,
+      data: {
+        executor: async (db: any) => {
+          await db.runAsync(
+            'UPDATE reel_sessions SET currentIndex = ?, deepestIndexReached = ?, queue = ?, updatedAt = ? WHERE userId = ?;',
+            [currentIndex, deepestIndexReached, queueStr, updatedAt, userId]
+          );
+        }
+      },
+      timestamp: Date.now(),
+      priority: 'normal'
+    });
+
+    await flushSessionSeenCardsToSQLite(userId);
+  } catch (err: any) {
+    console.error('[Offline Feed Manager] Failed to flush session index and queue to SQLite:', err.message);
   }
 }
 
@@ -151,8 +228,8 @@ function getDescendantFolderIdsInMemory(parentIds: string[]): string[] {
   const foldersById = usePlaylistStateStore.getState().foldersById;
   const allFolders = Object.values(foldersById);
 
-  const folderIdsToQuery = [...parentIds];
-  let currentParentIds = [...parentIds];
+  const folderIdsToQuery = parentIds.filter(id => foldersById[id] && !(foldersById[id] as any).isDeleted);
+  let currentParentIds = [...folderIdsToQuery];
 
   while (currentParentIds.length > 0) {
     const nextParentIds: string[] = [];
@@ -225,8 +302,13 @@ export async function computeLocalContentHash(
  * Get or Create user folder preferences asynchronously from SQLite.
  */
 export async function getLocalUserPreferences(userId: string): Promise<{ selectedRootFolderIds: string[] }> {
+  if (userId === 'guest-user') {
+    const selectedRootFolderIds = usePlaylistStateStore.getState().selectedRootFolderIds;
+    return { selectedRootFolderIds };
+  }
+
   if (!isSQLiteAvailable()) return { selectedRootFolderIds: [] };
-  const db = getDatabase();
+  const db = await getDatabase();
 
   try {
     const row = await db.getFirstAsync<{ selectedRootFolderIds: string }>(
@@ -245,7 +327,16 @@ export async function getLocalUserPreferences(userId: string): Promise<{ selecte
     const rootFolders = await db.getAllAsync<{ id: string }>(
       'SELECT id FROM folders WHERE parentFolderId IS NULL AND isDeleted = 0;'
     );
-    const folderIds = rootFolders.map(f => f.id);
+    let folderIds = rootFolders.map(f => f.id);
+
+    if (folderIds.length === 0) {
+      // Fallback to Zustand state root folders if SQLite returns empty
+      const foldersById = usePlaylistStateStore.getState().foldersById;
+      const rootFoldersFromStore = Object.values(foldersById || {}).filter(
+        (f: any) => f && !f.isDeleted && (!f.parentFolderId || f.parentFolderId === null)
+      );
+      folderIds = rootFoldersFromStore.map((f: any) => f.id || f._id).filter(Boolean);
+    }
 
     return { selectedRootFolderIds: folderIds };
   } catch (err: any) {
@@ -281,15 +372,77 @@ export async function generateReelsQueueLocally(
   }
 
   return profiler.profileAsync('Generate Reels Queue Locally (Async)', async () => {
-    // Retrieve user root folder preferences
+    // Retrieve user root folder preferences and filter out deleted folders
     const prefs = await getLocalUserPreferences(userId);
-    const selectedFolders = prefs.selectedRootFolderIds;
+    const foldersById = usePlaylistStateStore.getState().foldersById;
+    const selectedFolders = prefs.selectedRootFolderIds.filter(id => {
+      const folder = foldersById[id] as any;
+      return folder && !folder.isDeleted;
+    });
 
-    if (__DEV__) {
-      console.log(`[Reels Queue Regen] Executing Memory-First | Reason: ${triggerReason} | Folders: [${selectedFolders.join(',')}]`);
+    let finalSelectedFolders = [...selectedFolders];
+    if (finalSelectedFolders.length === 0) {
+      // 1. Get all root folders from Zustand memory state
+      const allFolders = Object.values(foldersById || {});
+      const cardsById = usePlaylistStateStore.getState().cardsById;
+      const allCards = Object.values(cardsById || {});
+      
+      // We want to find which folders actually contain cards
+      const folderIdsWithCards = new Set(
+        allCards.filter((c: any) => c && !c.isDeleted && c.folderId).map((c: any) => c.folderId)
+      );
+      
+      // Let's filter folders that are root folders (parentFolderId is null/empty) and non-deleted
+      const rootFolders = allFolders.filter(
+        (f: any) => f && !f.isDeleted && (!f.parentFolderId || f.parentFolderId === null)
+      );
+      
+      // Get IDs of root folders containing cards
+      let fallbackIds = rootFolders
+        .map((f: any) => f.id || f._id)
+        .filter(id => id && folderIdsWithCards.has(id));
+        
+      if (fallbackIds.length === 0) {
+        // Fallback to any root folders regardless of direct cards (since child folders might have cards)
+        fallbackIds = rootFolders.map((f: any) => f.id || f._id).filter(Boolean);
+      }
+      
+      if (fallbackIds.length === 0) {
+        // Fallback to any non-deleted folders in the store
+        fallbackIds = allFolders.filter((f: any) => f && !f.isDeleted).map((f: any) => f.id || f._id).filter(Boolean);
+      }
+      
+      finalSelectedFolders = fallbackIds;
+      
+      if (__DEV__) {
+        console.log(`[Reels Queue Regen] Folder fallback triggered. Selected folders: [${finalSelectedFolders.join(',')}]`);
+      }
     }
 
-    if (selectedFolders.length === 0) {
+    // verification diagnostics logs
+    const allFoldersList = Object.values(foldersById || {});
+    const totalFolders = allFoldersList.length;
+    const nonDeletedFolders = allFoldersList.filter((f: any) => f && !f.isDeleted).length;
+    const selectedRootFolders = finalSelectedFolders.length;
+    
+    const descendantsSet = new Set<string>();
+    finalSelectedFolders.forEach(rootId => {
+      getDescendantFolderIdsInMemory([rootId]).forEach(dId => descendantsSet.add(dId));
+    });
+    const cardsAvailableAfterFolderFiltering = Object.values(usePlaylistStateStore.getState().cardsById || {}).filter(
+      (c: any) => c && !c.isDeleted && descendantsSet.has(c.folderId)
+    ).length;
+    
+    console.log('[Reels Study Source Verification]', {
+      userId,
+      totalFolders,
+      nonDeletedFolders,
+      selectedRootFolders,
+      cardsAvailableAfterFolderFiltering,
+      isGuest: userId === 'guest-user',
+    });
+
+    if (finalSelectedFolders.length === 0) {
       console.warn('[Offline Feed Manager] No root folders selected in study preferences');
       return null;
     }
@@ -305,7 +458,7 @@ export async function generateReelsQueueLocally(
       queueVersion = sessionMemoryShadow.queueVersion;
     } else if (isSQLiteAvailable()) {
       try {
-        const db = getDatabase();
+        const db = await getDatabase();
         const existing = await db.getFirstAsync<any>(
           'SELECT currentIndex, deepestIndexReached, queueVersion FROM reel_sessions WHERE userId = ? LIMIT 1;',
           [userId]
@@ -319,7 +472,7 @@ export async function generateReelsQueueLocally(
     }
 
     // 2. Compute content hash and count eligible cards in-memory
-    const { hash, cardCount } = await computeLocalContentHash(selectedFolders, userId);
+    const { hash, cardCount } = await computeLocalContentHash(finalSelectedFolders, userId);
     if (cardCount === 0) {
       console.warn('[Offline Feed Manager] Selected root folders contain no cards');
       return null;
@@ -333,23 +486,22 @@ export async function generateReelsQueueLocally(
     const samplingCap = Math.min(MAX_QUEUE_SIZE, cardCount);
 
     // 3. Group descendant folder cards by their root ancestor folder using in-memory state
-    const { usePlaylistStateStore } = require('../store/usePlaylistStateStore');
     const storeState = usePlaylistStateStore.getState();
     const cardsById = storeState.cardsById;
 
     const folderCardGroups: Record<string, string[]> = {};
-    selectedFolders.forEach(id => {
+    finalSelectedFolders.forEach(id => {
       folderCardGroups[id] = [];
     });
 
     const allCards = Object.values(cardsById);
 
-    selectedFolders.forEach(rootId => {
+    finalSelectedFolders.forEach(rootId => {
       const descendants = getDescendantFolderIdsInMemory([rootId]);
       if (descendants.length > 0) {
         const folderSet = new Set(descendants);
         folderCardGroups[rootId] = allCards
-          .filter((c: any) => c && folderSet.has(c.folderId) && !c.isDeleted)
+          .filter((c: any) => isValidCardForQueue(c) && folderSet.has(c.folderId))
           .map((c: any) => c._id);
       }
     });
@@ -367,7 +519,7 @@ export async function generateReelsQueueLocally(
     const cardsToReset: string[] = [];
     let unseenEligibleCardCount = 0;
 
-    for (const rootId of selectedFolders) {
+    for (const rootId of finalSelectedFolders) {
       const groupCards = folderCardGroups[rootId] || [];
       if (groupCards.length === 0) continue;
 
@@ -393,8 +545,8 @@ export async function generateReelsQueueLocally(
     }
 
     // Emergency fallback if all cards viewed
-    if (unseenEligibleCardCount === 0 && selectedFolders.length > 0) {
-      for (const rootId of selectedFolders) {
+    if (unseenEligibleCardCount === 0 && finalSelectedFolders.length > 0) {
+      for (const rootId of finalSelectedFolders) {
         const groupCards = folderCardGroups[rootId] || [];
         if (groupCards.length === 0) continue;
         const shuffledGroup = seededShuffle(groupCards, prng);
@@ -405,12 +557,22 @@ export async function generateReelsQueueLocally(
 
     // Reset exhausted folders progress locally asynchronously in background
     if (cardsToReset.length > 0 && isSQLiteAvailable()) {
-      const db = getDatabase();
       const placeholders = cardsToReset.map(() => '?').join(',');
-      db.runAsync(
-        `UPDATE card_progress SET completed = 0, difficultyState = NULL, seenInReels = 0 WHERE userId = ? AND cardId IN (${placeholders})`,
-        [userId, ...cardsToReset]
-      ).catch(err => console.error('[SQLite Reset Progress Async Error]', err.message));
+      sqliteWriteManager.enqueue({
+        id: `reset-progress-${Date.now()}`,
+        type: 'custom',
+        userId,
+        data: {
+          executor: async (db: any) => {
+            await db.runAsync(
+              `UPDATE card_progress SET completed = 0, difficultyState = NULL, seenInReels = 0 WHERE userId = ? AND cardId IN (${placeholders})`,
+              [userId, ...cardsToReset]
+            );
+          }
+        },
+        timestamp: Date.now(),
+        priority: 'normal'
+      }).catch(err => console.error('[SQLite Reset Progress Async Error]', err.message));
     }
 
     // Re-adjust proportional size allocations based on exact unseen count
@@ -468,12 +630,12 @@ export async function generateReelsQueueLocally(
     }
 
     const queueStr = JSON.stringify(finalQueueIds);
-    const selectedFoldersStr = JSON.stringify(selectedFolders);
+    const selectedFoldersStr = JSON.stringify(finalSelectedFolders);
     const updatedAt = new Date().toISOString();
 
     const sessionResult = {
       userId,
-      selectedRootFolderIds: selectedFolders,
+      selectedRootFolderIds: finalSelectedFolders,
       currentIndex,
       deepestIndexReached,
       queue: finalQueueIds,
@@ -489,32 +651,42 @@ export async function generateReelsQueueLocally(
 
     // Persist session to SQLite asynchronously in the background so it doesn't block the UI threads
     if (isSQLiteAvailable()) {
-      const db = getDatabase();
-      db.runAsync(
-        `INSERT INTO reel_sessions (
-          userId, selectedRootFolderIds, currentIndex, deepestIndexReached, queue, contentHash, eligibleCardCount, queueVersion, updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(userId) DO UPDATE SET
-          selectedRootFolderIds=excluded.selectedRootFolderIds,
-          currentIndex=excluded.currentIndex,
-          deepestIndexReached=excluded.deepestIndexReached,
-          queue=excluded.queue,
-          contentHash=excluded.contentHash,
-          eligibleCardCount=excluded.eligibleCardCount,
-          queueVersion=excluded.queueVersion + 1,
-          updatedAt=excluded.updatedAt;`,
-        [
-          userId,
-          selectedFoldersStr,
-          currentIndex,
-          deepestIndexReached,
-          queueStr,
-          hash,
-          cardCount,
-          queueVersion,
-          updatedAt
-        ]
-      ).catch(err => console.error('[SQLite Session Save Async Error]', err.message));
+      sqliteWriteManager.enqueue({
+        id: `save-session-${Date.now()}`,
+        type: 'custom',
+        userId,
+        data: {
+          executor: async (db: any) => {
+            await db.runAsync(
+              `INSERT INTO reel_sessions (
+                userId, selectedRootFolderIds, currentIndex, deepestIndexReached, queue, contentHash, eligibleCardCount, queueVersion, updatedAt
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(userId) DO UPDATE SET
+                selectedRootFolderIds=excluded.selectedRootFolderIds,
+                currentIndex=excluded.currentIndex,
+                deepestIndexReached=excluded.deepestIndexReached,
+                queue=excluded.queue,
+                contentHash=excluded.contentHash,
+                eligibleCardCount=excluded.eligibleCardCount,
+                queueVersion=excluded.queueVersion + 1,
+                updatedAt=excluded.updatedAt;`,
+              [
+                userId,
+                selectedFoldersStr,
+                currentIndex,
+                deepestIndexReached,
+                queueStr,
+                hash,
+                cardCount,
+                queueVersion,
+                updatedAt
+              ]
+            );
+          }
+        },
+        timestamp: Date.now(),
+        priority: 'normal'
+      }).catch(err => console.error('[SQLite Save Session Async Error]', err.message));
     }
 
     return sessionResult;
@@ -528,7 +700,7 @@ let lastProcessedFeedSessionId: string | null = null;
  */
 export async function getReelFeedSliceLocally(userId: string, feedSessionId?: string): Promise<any> {
   if (!isSQLiteAvailable()) return null;
-  const db = getDatabase();
+  const db = await getDatabase();
 
   return profiler.profileAsync('Get Reel Feed Slice Locally (Async)', async () => {
     const isNewSession = feedSessionId && feedSessionId !== lastProcessedFeedSessionId;
@@ -537,24 +709,31 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
     }
 
     // 1. Resolve active session from memory shadow first
-    let session = sessionMemoryShadow;
-    if (!session || session.userId !== userId) {
-      const dbRow = await db.getFirstAsync<any>(
-        'SELECT * FROM reel_sessions WHERE userId = ? LIMIT 1;',
-        [userId]
-      );
-      if (dbRow) {
-        session = {
-          userId: dbRow.userId,
-          currentIndex: dbRow.currentIndex,
-          deepestIndexReached: dbRow.deepestIndexReached,
-          queue: typeof dbRow.queue === 'string' ? JSON.parse(dbRow.queue) : dbRow.queue,
-          contentHash: dbRow.contentHash,
-          eligibleCardCount: dbRow.eligibleCardCount,
-          queueVersion: dbRow.queueVersion || 1,
-          updatedAt: dbRow.updatedAt
-        };
-        sessionMemoryShadow = session;
+    let session: any = sessionMemoryShadow;
+    if (userId === 'guest-user') {
+      if (!session || session.userId !== userId) {
+        const generated = await generateReelsQueueLocally(userId, 'session_start');
+        session = sessionMemoryShadow || generated;
+      }
+    } else {
+      if (!session || session.userId !== userId) {
+        const dbRow = await db.getFirstAsync<any>(
+          'SELECT * FROM reel_sessions WHERE userId = ? LIMIT 1;',
+          [userId]
+        );
+        if (dbRow) {
+          session = {
+            userId: dbRow.userId,
+            currentIndex: dbRow.currentIndex,
+            deepestIndexReached: dbRow.deepestIndexReached,
+            queue: typeof dbRow.queue === 'string' ? JSON.parse(dbRow.queue) : dbRow.queue,
+            contentHash: dbRow.contentHash,
+            eligibleCardCount: dbRow.eligibleCardCount,
+            queueVersion: dbRow.queueVersion || 1,
+            updatedAt: dbRow.updatedAt
+          };
+          sessionMemoryShadow = session;
+        }
       }
     }
 
@@ -562,13 +741,13 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
       const generated = await generateReelsQueueLocally(userId, 'session_start');
       session = sessionMemoryShadow || {
         userId,
-        currentIndex: generated.currentIndex,
-        deepestIndexReached: generated.deepestIndexReached,
-        queue: generated.queue,
-        contentHash: generated.contentHash,
-        eligibleCardCount: generated.eligibleCardCount,
-        queueVersion: generated.queueVersion,
-        updatedAt: generated.updatedAt
+        currentIndex: generated?.currentIndex || 0,
+        deepestIndexReached: generated?.deepestIndexReached || 0,
+        queue: generated?.queue || [],
+        contentHash: generated?.contentHash || '',
+        eligibleCardCount: generated?.eligibleCardCount || 0,
+        queueVersion: generated?.queueVersion || 1,
+        updatedAt: generated?.updatedAt || new Date().toISOString()
       };
       sessionMemoryShadow = session;
     } else {
@@ -579,16 +758,134 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
 
         if (session.contentHash !== hash) {
           console.log('[Offline Feed Manager] New session & hash mismatch. Regenerating queue...');
-          await generateReelsQueueLocally(userId, 'session_start');
-          session = sessionMemoryShadow || session;
+          const generated = await generateReelsQueueLocally(userId, 'session_start');
+          session = sessionMemoryShadow || generated || session;
         }
       }
     }
 
-    const queue = session.queue;
-    const queueLength = queue.length;
+    const store = usePlaylistStateStore.getState();
+    const cardsById = store.cardsById;
+    const foldersById = store.foldersById;
+
+    const queue = session.queue || [];
+    
+    // Step 3 — BULK CLEAN INVALID QUEUE: Remove ALL invalid/deleted cards from queue immediately
+    const initialQueueLength = queue.length;
+    const cleanQueue = queue.filter((id: any) => {
+      const cleanId = id.split('-loop-')[0];
+      const card = cardsById[cleanId] as any;
+      return card && !card.isDeleted;
+    });
+
+    const uniqueIds = new Set(cleanQueue);
+    const duplicateCount = cleanQueue.length - uniqueIds.size;
+
+    if (cleanQueue.length !== initialQueueLength) {
+      console.warn(`[Offline Slice Manager] Queue contained invalid/deleted cards. Bulk cleaned ${initialQueueLength - cleanQueue.length} cards. Unique: ${uniqueIds.size}, Duplicates: ${duplicateCount}`);
+      session.queue = cleanQueue;
+      if (session.currentIndex >= cleanQueue.length) {
+        session.currentIndex = 0;
+        session.deepestIndexReached = 0;
+      }
+      session.updatedAt = new Date().toISOString();
+      flushSessionIndexAndQueueToSQLite(userId).catch(console.error);
+    }
+
+    const queueLength = cleanQueue.length;
     if (queueLength === 0) {
-      throw new Error('Your study queue is empty');
+      console.warn('[Offline Slice Manager] Queue became empty after cleaning. Rebuilding feed from source-of-truth...');
+      invalidateSliceCache();
+      sessionMemoryShadow = null;
+      
+      const generated = await generateReelsQueueLocally(userId, 'scroll_refill');
+      if (!generated || generated.queue.length === 0) {
+        console.warn('[Offline Slice Manager] Study queue is empty after rebuilding.');
+        return {
+          queueLength: 0,
+          orderedCardIds: [],
+          startIdx: 0,
+          currentIndex: 0,
+          deepestIndexReached: 0,
+          queueVersion: 1,
+          contentHash: '',
+          cardsSlice: [],
+        };
+      }
+      
+      generated.currentIndex = 0;
+      generated.deepestIndexReached = 0;
+      sessionMemoryShadow = generated;
+      
+      if (isSQLiteAvailable()) {
+        sqliteWriteManager.enqueue({
+          id: `reset-session-empty-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(
+                'UPDATE reel_sessions SET currentIndex = 0, deepestIndexReached = 0, queue = ?, updatedAt = ? WHERE userId = ?;',
+                [JSON.stringify(generated.queue), new Date().toISOString(), userId]
+              );
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(console.error);
+      }
+      
+      const startIdx = 0;
+      const endIdx = Math.min(generated.queue.length - 1, NEXT_WINDOW_SIZE);
+      const sliceIds = generated.queue.slice(startIdx, endIdx + 1);
+      const orderedSlice = sliceIds.map((id: any) => {
+        const cleanId = id.split('-loop-')[0];
+        const card = cardsById[cleanId] as any;
+        if (!card || card.isDeleted) return null;
+        
+        const folderIdStr = typeof card.folderId === 'object' ? card.folderId?._id : card.folderId;
+        const folderRef = (foldersById as any)[folderIdStr] || { _id: folderIdStr, title: 'Folder' };
+        
+        return {
+          _id: card._id,
+          title: card.title,
+          topic: card.topic,
+          tags: card.tags || [],
+          difficulty: card.difficulty,
+          folderId: {
+            _id: folderRef._id,
+            title: folderRef.title,
+            icon: folderRef.icon || 'folder',
+            color: folderRef.color || '#7c3aed',
+          },
+          createdBy: { id: typeof card.createdBy === 'object' ? (card.createdBy as any)?.id || '' : card.createdBy, name: 'Author' },
+          visibility: card.visibility || 'public',
+          order: card.order || 0,
+          explanation: card.explanation || '',
+          code: card.code || '',
+          imageBlobPath: card.imageBlobPath,
+          imageHash: card.imageHash,
+          examples: card.examples || [],
+          slides: card.slides,
+          isFavorite: !!card.isFavorite,
+          difficultyState: card.difficultyState || null,
+          currentUserQuestionProgress: card.currentUserQuestionProgress || null,
+          createdAt: card.updatedAt,
+          updatedAt: card.updatedAt,
+          isContentFullyHydrated: !!card.isContentFullyHydrated,
+        } as any;
+      }).filter(Boolean) as IPopulatedRevisionCard[];
+      
+      return {
+        queueLength: generated.queue.length,
+        orderedCardIds: generated.queue,
+        startIdx: 0,
+        currentIndex: 0,
+        deepestIndexReached: 0,
+        queueVersion: generated.queueVersion,
+        contentHash: generated.contentHash,
+        cardsSlice: orderedSlice,
+      };
     }
 
     let currentIdx = session.currentIndex || 0;
@@ -617,11 +914,6 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
       return cachedSliceResult;
     }
 
-    const { usePlaylistStateStore } = require('../store/usePlaylistStateStore');
-    const store = usePlaylistStateStore.getState();
-    const cardsById = store.cardsById;
-    const foldersById = store.foldersById;
-
     let sliceIds: string[] = [];
     let orderedSlice: IPopulatedRevisionCard[] = [];
     let refillRetries = 0;
@@ -630,22 +922,18 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
       const startIdx = Math.max(0, currentIdx - PREVIOUS_WINDOW_SIZE);
       const endIdx = Math.min(queueLength - 1, currentIdx + NEXT_WINDOW_SIZE);
 
-      sliceIds = queue.slice(startIdx, endIdx + 1);
+      sliceIds = cleanQueue.slice(startIdx, endIdx + 1);
 
       if (sliceIds.length === 0) break;
 
       orderedSlice = sliceIds.map(id => {
         const cleanId = id.split('-loop-')[0];
-        const card = cardsById[cleanId];
+        const card = cardsById[cleanId] as any;
         if (!card || card.isDeleted) return null;
 
-        // Safety-net: only trigger on-demand hydration for cards not yet hydrated at boot
-        // After bulk boot hydration, this should almost never fire
-        if (!card.isContentFullyHydrated) {
-          store.hydrateCardContentOnDemand(id).catch(() => {});
-        }
 
-        const folderRef = foldersById[card.folderId] || { _id: card.folderId, title: 'Folder' };
+        const folderIdStr = typeof card.folderId === 'object' ? card.folderId?._id : card.folderId;
+        const folderRef = (foldersById as any)[folderIdStr] || { _id: folderIdStr, title: 'Folder' };
 
         return {
           _id: card._id,
@@ -678,8 +966,8 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
       }).filter(Boolean) as IPopulatedRevisionCard[];
 
       // Verify active card exists
-      const activeCardId = queue[currentIdx];
-      const activeCard = cardsById[activeCardId];
+      const activeCardId = cleanQueue[currentIdx];
+      const activeCard = cardsById[activeCardId] as any;
       const isActiveCardDeleted = !activeCard || activeCard.isDeleted;
 
       if (isActiveCardDeleted) {
@@ -705,10 +993,161 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
     }
 
     if (refillRetries >= 3) {
-      console.warn('[Offline Slice Manager] Running emergency hard queue replenishment...');
-      sessionMemoryShadow = null;
+      const now = Date.now();
+      if (now - lastReplenishmentTime < 5000) {
+        replenishmentAttemptsCount++;
+      } else {
+        replenishmentAttemptsCount = 1;
+      }
+      lastReplenishmentTime = now;
+
+      if (replenishmentAttemptsCount > 3) {
+        console.error('[Offline Slice Manager] QUEUE RECOVERY LOOP DETECTED. Triggering hard reset...');
+        sessionMemoryShadow = null;
+        invalidateSliceCache();
+        replenishmentAttemptsCount = 0;
+        
+        if (isSQLiteAvailable()) {
+          sqliteWriteManager.enqueue({
+            id: `hard-reset-session-${Date.now()}`,
+            type: 'custom',
+            userId,
+            data: {
+              executor: async (db: any) => {
+                await db.runAsync('DELETE FROM reel_sessions WHERE userId = ?;', [userId]);
+              }
+            },
+            timestamp: Date.now(),
+            priority: 'critical'
+          }).catch(console.error);
+        }
+        
+        const generated = await generateReelsQueueLocally(userId, 'session_start');
+        if (generated && generated.queue.length > 0) {
+          const sliceIds = generated.queue.slice(0, NEXT_WINDOW_SIZE + 1);
+          const orderedSlice = sliceIds.map((id: any) => {
+            const cleanId = id.split('-loop-')[0];
+            const card = cardsById[cleanId] as any;
+            if (!card || card.isDeleted) return null;
+            const folderIdStr = typeof card.folderId === 'object' ? card.folderId?._id : card.folderId;
+            const folderRef = (foldersById as any)[folderIdStr] || { _id: folderIdStr, title: 'Folder' };
+            return {
+              _id: card._id,
+              title: card.title,
+              topic: card.topic,
+              tags: card.tags || [],
+              difficulty: card.difficulty,
+              folderId: {
+                _id: folderRef._id,
+                title: folderRef.title,
+                icon: folderRef.icon || 'folder',
+                color: folderRef.color || '#7c3aed',
+              },
+              createdBy: { id: typeof card.createdBy === 'object' ? (card.createdBy as any)?.id || '' : card.createdBy, name: 'Author' },
+              visibility: card.visibility || 'public',
+              order: card.order || 0,
+              explanation: card.explanation || '',
+              code: card.code || '',
+              imageBlobPath: card.imageBlobPath,
+              imageHash: card.imageHash,
+              examples: card.examples || [],
+              slides: card.slides,
+              isFavorite: !!card.isFavorite,
+              difficultyState: card.difficultyState || null,
+              currentUserQuestionProgress: card.currentUserQuestionProgress || null,
+              createdAt: card.updatedAt,
+              updatedAt: card.updatedAt,
+              isContentFullyHydrated: !!card.isContentFullyHydrated,
+            } as any;
+          }).filter(Boolean) as IPopulatedRevisionCard[];
+
+          return {
+            queueLength: generated.queue.length,
+            orderedCardIds: generated.queue,
+            startIdx: 0,
+            currentIndex: 0,
+            deepestIndexReached: 0,
+            queueVersion: generated.queueVersion,
+            contentHash: generated.contentHash,
+            cardsSlice: orderedSlice,
+          };
+        } else {
+          return {
+            queueLength: 0,
+            orderedCardIds: [],
+            startIdx: 0,
+            currentIndex: 0,
+            deepestIndexReached: 0,
+            queueVersion: 1,
+            contentHash: '',
+            cardsSlice: [],
+          };
+        }
+      }
+
+      console.warn(`[Offline Slice Manager] Running emergency hard queue replenishment (Attempt ${replenishmentAttemptsCount})...`);
       invalidateSliceCache();
-      return getReelFeedSliceLocally(userId);
+      const generated = await generateReelsQueueLocally(userId, 'scroll_refill');
+      if (generated && generated.queue.length > 0) {
+        const sliceIds = generated.queue.slice(0, NEXT_WINDOW_SIZE + 1);
+        const orderedSlice = sliceIds.map((id: any) => {
+          const cleanId = id.split('-loop-')[0];
+          const card = cardsById[cleanId] as any;
+          if (!card || card.isDeleted) return null;
+          const folderIdStr = typeof card.folderId === 'object' ? card.folderId?._id : card.folderId;
+          const folderRef = (foldersById as any)[folderIdStr] || { _id: folderIdStr, title: 'Folder' };
+          return {
+            _id: card._id,
+            title: card.title,
+            topic: card.topic,
+            tags: card.tags || [],
+            difficulty: card.difficulty,
+            folderId: {
+              _id: folderRef._id,
+              title: folderRef.title,
+              icon: folderRef.icon || 'folder',
+              color: folderRef.color || '#7c3aed',
+            },
+            createdBy: { id: typeof card.createdBy === 'object' ? (card.createdBy as any)?.id || '' : card.createdBy, name: 'Author' },
+            visibility: card.visibility || 'public',
+            order: card.order || 0,
+            explanation: card.explanation || '',
+            code: card.code || '',
+            imageBlobPath: card.imageBlobPath,
+            imageHash: card.imageHash,
+            examples: card.examples || [],
+            slides: card.slides,
+            isFavorite: !!card.isFavorite,
+            difficultyState: card.difficultyState || null,
+            currentUserQuestionProgress: card.currentUserQuestionProgress || null,
+            createdAt: card.updatedAt,
+            updatedAt: card.updatedAt,
+            isContentFullyHydrated: !!card.isContentFullyHydrated,
+          } as any;
+        }).filter(Boolean) as IPopulatedRevisionCard[];
+
+        return {
+          queueLength: generated.queue.length,
+          orderedCardIds: generated.queue,
+          startIdx: 0,
+          currentIndex: 0,
+          deepestIndexReached: 0,
+          queueVersion: generated.queueVersion,
+          contentHash: generated.contentHash,
+          cardsSlice: orderedSlice,
+        };
+      } else {
+        return {
+          queueLength: 0,
+          orderedCardIds: [],
+          startIdx: 0,
+          currentIndex: 0,
+          deepestIndexReached: 0,
+          queueVersion: 1,
+          contentHash: '',
+          cardsSlice: [],
+        };
+      }
     }
 
     const result = {
@@ -737,7 +1176,7 @@ export async function updateReelIndexLocally(userId: string, currentIndex: numbe
   let session = sessionMemoryShadow;
   if (!session || session.userId !== userId) {
     if (!isSQLiteAvailable()) return;
-    const db = getDatabase();
+    const db = await getDatabase();
     try {
       const dbRow = await db.getFirstAsync<any>(
         'SELECT * FROM reel_sessions WHERE userId = ? LIMIT 1;',
@@ -800,50 +1239,64 @@ export async function markReelAsSeenLocally(userId: string, cardId: string): Pro
 /**
  * Flush all seen cards collected in sessionSeenMemoryShadow in batch to SQLite.
  */
-export async function flushSessionSeenCardsToSQLite(userId: string): Promise<void> {
+export async function flushSessionSeenCardsToSQLite(userId: string, dbOverride?: any): Promise<void> {
   if (sessionSeenMemoryShadow.size === 0) return;
   if (!isSQLiteAvailable()) return;
 
   const seenIds = Array.from(sessionSeenMemoryShadow);
   sessionSeenMemoryShadow.clear(); // Clear memory shadow immediately to avoid double-processing
 
-  try {
+  const runUpdates = async (db: any) => {
     const now = new Date().toISOString();
-    await sqliteWriteManager.enqueue({
-      id: `flush-seen-${Date.now()}`,
-      type: 'custom',
-      userId,
-      data: {
-        executor: async (db: any) => {
-          for (const cleanId of seenIds) {
-            const row = await db.getFirstAsync(
-              'SELECT cardId FROM card_progress WHERE userId = ? AND cardId = ? LIMIT 1;',
-              [userId, cleanId]
-            );
+    for (const cleanId of seenIds) {
+      const row = await db.getFirstAsync(
+        'SELECT cardId FROM card_progress WHERE userId = ? AND cardId = ? LIMIT 1;',
+        [userId, cleanId]
+      );
 
-            if (row) {
-              await db.runAsync(
-                'UPDATE card_progress SET seenInReels = 1, updatedAt = ? WHERE userId = ? AND cardId = ?;',
-                [now, userId, cleanId]
-              );
-            } else {
-              await db.runAsync(
-                `INSERT INTO card_progress (
-                  cardId, userId, completed, revisionCount, favorite, difficultyState, seenInReels, revision, updatedAt
-                ) VALUES (?, ?, 0, 0, 0, NULL, 1, 0, ?);`,
-                [cleanId, userId, now]
-              );
-            }
-          }
-        }
-      },
-      timestamp: Date.now(),
-      priority: 'normal',
-    });
+      if (row) {
+        await db.runAsync(
+          'UPDATE card_progress SET seenInReels = 1, updatedAt = ? WHERE userId = ? AND cardId = ?;',
+          [now, userId, cleanId]
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO card_progress (
+            cardId, userId, completed, revisionCount, favorite, difficultyState, seenInReels, revision, updatedAt
+          ) VALUES (?, ?, 0, 0, 0, NULL, 1, 0, ?);`,
+          [cleanId, userId, now]
+        );
+      }
+    }
+  };
+
+  try {
+    if (dbOverride) {
+      await runUpdates(dbOverride);
+    } else {
+      await sqliteWriteManager.enqueue({
+        id: `flush-seen-${Date.now()}`,
+        type: 'custom',
+        userId,
+        data: {
+          executor: runUpdates
+        },
+        timestamp: Date.now(),
+        priority: 'normal',
+      });
+    }
     if (__DEV__) {
-      console.log(`[SQLite Save] Bulk flushed ${seenIds.length} seen card states inside transaction.`);
+      console.log(`[SQLite Save] Bulk flushed ${seenIds.length} seen card states.`);
     }
   } catch (err: any) {
     console.error('[Offline Feed Manager] Failed to flush seen cards in batch:', err.message);
   }
 }
+
+/**
+ * Get the current replenishment attempts count (for diagnostics).
+ */
+export function getReplenishmentAttemptsCount(): number {
+  return replenishmentAttemptsCount;
+}
+

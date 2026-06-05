@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, ActivityIndicator, TouchableOpacity, Platform, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
+  SharedValue,
   useSharedValue,
   useAnimatedStyle,
   withSpring,
@@ -15,7 +16,7 @@ import Animated, {
   cancelAnimation,
   runOnJS,
 } from 'react-native-reanimated';
-import { ChevronLeft, ChevronRight, Sparkles, Bookmark, Flame, Zap, Skull, Folder, RefreshCw, Brain, Terminal, MessageSquare, ArrowUpRight, GraduationCap, Moon, Coffee, Heart, GripVertical, ArrowRight, ArrowUp, Plus } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Sparkles, Bookmark, Flame, Zap, Skull, Folder, RefreshCw, Brain, Terminal, MessageSquare, ArrowUpRight, GraduationCap, Moon, Coffee, Heart, GripVertical, ArrowRight, ArrowUp, Plus, ArrowDown, ArrowLeft, Bell } from 'lucide-react-native';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { SpringPressable } from '@/components/SpringPressable';
@@ -25,6 +26,7 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import Toast from 'react-native-toast-message';
+import Svg, { Path, Circle, Rect, Defs, LinearGradient, Stop, G } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
 
@@ -99,9 +101,169 @@ function getCardStyle(idx: number, currentStep: number, cardTranslates: any[], s
   }
 }
 
+interface OnboardingDynamicBackgroundProps {
+  zenOpacity: any;
+  matchaOpacity: any;
+  sunsetOpacity: any;
+  midnightOpacity: any;
+}
+
+function OnboardingDynamicBackground({
+  zenOpacity,
+  matchaOpacity,
+  sunsetOpacity,
+  midnightOpacity,
+}: OnboardingDynamicBackgroundProps) {
+  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+  const animatedZen = useAnimatedStyle(() => ({ opacity: zenOpacity.value }));
+  const animatedMatcha = useAnimatedStyle(() => ({ opacity: matchaOpacity.value }));
+  const animatedSunset = useAnimatedStyle(() => ({ opacity: sunsetOpacity.value }));
+  const animatedMidnight = useAnimatedStyle(() => ({ opacity: midnightOpacity.value }));
+
+  return (
+    <View style={StyleSheet.absoluteFillObject}>
+      {/* 1. ZEN LAYER */}
+      <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FAF6F0' }, animatedZen]}>
+        <Svg style={StyleSheet.absoluteFillObject} width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="zenSunGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#E9967A" stopOpacity="0.22" />
+              <Stop offset="100%" stopColor="#FFFDF9" stopOpacity="0.0" />
+            </LinearGradient>
+          </Defs>
+          
+          <G opacity="0.32">
+            <Circle cx="20" cy={screenHeight - 20} r="60" stroke="#8C6A5C" strokeWidth="1" fill="none" strokeDasharray="3, 4" />
+            <Circle cx="20" cy={screenHeight - 20} r="100" stroke="#8C6A5C" strokeWidth="1" fill="none" />
+            <Circle cx="20" cy={screenHeight - 20} r="140" stroke="#8C6A5C" strokeWidth="1" fill="none" strokeDasharray="4, 5" />
+            <Circle cx="20" cy={screenHeight - 20} r="180" stroke="#8C6A5C" strokeWidth="1.5" fill="none" />
+            <Circle cx="20" cy={screenHeight - 20} r="230" stroke="#8C6A5C" strokeWidth="1" fill="none" strokeDasharray="3, 3" />
+          </G>
+
+          <G transform={`translate(15, ${screenHeight - 65})`} opacity="0.25">
+            <Path d="M 0 35 Q 20 5 45 35 Z" fill="#8C6A5C" />
+            <Path d="M 28 20 Q 42 0 58 20 Z" fill="#8C6A5C" opacity="0.8" />
+            <Path d="M 12 12 Q 22 2 34 12 Z" fill="#8C6A5C" opacity="0.6" />
+          </G>
+
+          <Circle cx={screenWidth * 0.5} cy="100" r="70" fill="url(#zenSunGlow)" />
+
+          <G opacity="0.26" transform={`translate(${screenWidth - 100}, 20)`}>
+            <Path d="M80,0 Q75,100 70,220" stroke="#8C6A5C" strokeWidth="2.5" fill="none" />
+            <Path d="M80,0 L70,220" stroke="#FFFDF9" strokeWidth="0.8" fill="none" />
+            <Path d="M92,-10 Q88,80 82,180" stroke="#8C6A5C" strokeWidth="1.8" fill="none" />
+            <Circle cx="77.5" cy="50" r="2" fill="#8C6A5C" />
+            <Circle cx="75" cy="110" r="2.2" fill="#8C6A5C" />
+            <Circle cx="72.5" cy="170" r="2" fill="#8C6A5C" />
+            <Path d="M77,50 Q40,30 20,40 Q45,55 77,50" fill="#8C6A5C" />
+            <Path d="M77,50 Q50,70 30,95 Q55,80 77,50" fill="#8C6A5C" />
+            <Path d="M75,110 Q35,105 10,125 Q35,135 75,110" fill="#8C6A5C" />
+            <Path d="M75,110 Q45,130 25,165 Q50,145 75,110" fill="#8C6A5C" />
+            <Path d="M72.5,170 Q40,180 18,210 Q42,200 72.5,170" fill="#8C6A5C" />
+            <Path d="M85,30 Q110,15 125,5 Q115,25 85,30" fill="#8C6A5C" />
+            <Path d="M83,90 Q115,85 130,80 Q115,100 83,90" fill="#8C6A5C" />
+          </G>
+        </Svg>
+      </Animated.View>
+
+      {/* 2. MATCHA LAYER */}
+      <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#F1F5E9' }, animatedMatcha]}>
+        <Svg style={StyleSheet.absoluteFillObject} width="100%" height="100%">
+          <G opacity="0.18" transform={`translate(${screenWidth - 120}, -20)`}>
+            <Path d="M0,80 C60,40 100,40 140,80 C100,120 60,120 0,80" fill="#4A704C" />
+            <Path d="M0,80 C60,40 120,60 140,80" stroke="#F1F5E9" strokeWidth="1" fill="none" />
+            <Path d="M20,130 C70,100 110,110 130,140 C90,170 50,160 20,130" fill="#4A704C" transform="rotate(-15, 20, 130)" />
+            <Path d="M30,50 C80,20 110,40 130,70 C90,90 60,80 30,50" fill="#4A704C" transform="rotate(30, 30, 50)" />
+          </G>
+          <G opacity="0.12" transform={`translate(${screenWidth - 130}, ${screenHeight - 165})`}>
+            <Path d="M 10,70 Q 10,115 55,115 Q 100,115 100,70 L 90,70 Q 90,103 55,103 Q 20,103 20,70 Z" fill="#4A704C" />
+            <Rect x="43" y="115" width="24" height="4" rx="2" fill="#4A704C" />
+            <Path d="M-22,64 L50,86 L48,91 L-24,69 Z" fill="#4A704C" transform="rotate(-15, 14, 75)" />
+          </G>
+          <G opacity="0.13" transform="translate(-10, 480)">
+            <Path d="M0,40 C40,20 80,30 100,60 C70,80 30,70 0,40" fill="#4A704C" transform="rotate(25, 0, 40)" />
+          </G>
+        </Svg>
+      </Animated.View>
+
+      {/* 3. SUNSET LAYER */}
+      <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FFF3EE' }, animatedSunset]}>
+        <Svg style={StyleSheet.absoluteFillObject} width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="sunsetGradientOnboarding" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#FFE4D6" stopOpacity="0.8" />
+              <Stop offset="45%" stopColor="#FFD3C4" />
+              <Stop offset="100%" stopColor="#FFF3EE" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#sunsetGradientOnboarding)" />
+          <Circle cx={screenWidth * 0.3} cy="180" r="42" fill="#E05A47" opacity="0.14" />
+          <Circle cx={screenWidth * 0.3} cy="180" r="30" fill="#E05A47" opacity="0.16" />
+          <G opacity="0.18">
+            <Path d={`M 0,${screenHeight - 110} Q ${screenWidth * 0.3},${screenHeight - 160} ${screenWidth * 0.65},${screenHeight - 110} T ${screenWidth},${screenHeight - 90} L ${screenWidth},${screenHeight} L 0,${screenHeight} Z`} fill="#D9534F" />
+            <Path d={`M 0,${screenHeight - 70} Q ${screenWidth * 0.5},${screenHeight - 110} ${screenWidth},${screenHeight - 65} L ${screenWidth},${screenHeight} L 0,${screenHeight} Z`} fill="#4A2A20" opacity="0.25" />
+          </G>
+          <G opacity="0.24" transform={`translate(${screenWidth - 90}, 20)`}>
+            <Path d="M90,-10 C60,40 30,70 -10,90" stroke="#7D574E" strokeWidth="1.5" fill="none" />
+            <Path d="M40,50 L42,38 L30,45 L32,32 L20,30 L32,24 L28,12 L38,20 L48,15 L44,28 L54,34 L44,38 Z" fill="#E05A47" transform="rotate(-15, 40, 50)" />
+            <Path d="M40,50 L52,58 M40,50 L42,38 M40,50 L30,45 M40,50 L32,32 M40,50 L20,30" stroke="#7D574E" strokeWidth="0.6" />
+            <Path d="M72,22 L73,12 L63,18 L64,7 L54,6 L64,1 L60,-9 L69,-3 L77,-7 L74,4 L82,9 L74,12 Z" fill="#E05A47" transform="scale(0.85) translate(30, 20)" />
+          </G>
+        </Svg>
+      </Animated.View>
+
+      {/* 4. MIDNIGHT LAYER */}
+      <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#030509' }, animatedMidnight]}>
+        <Svg style={StyleSheet.absoluteFillObject} width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="midnightGradientOnboarding" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#030509" />
+              <Stop offset="65%" stopColor="#050810" />
+              <Stop offset="100%" stopColor="#090E1A" />
+            </LinearGradient>
+            <LinearGradient id="lampConeOnboarding" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#FCD34D" stopOpacity="0.14" />
+              <Stop offset="100%" stopColor="#FCD34D" stopOpacity="0.0" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#midnightGradientOnboarding)" />
+          <G opacity="0.95">
+            <Circle cx="30" cy="80" r="1.2" fill="#FFFFFF" />
+            <Circle cx="80" cy="140" r="1.8" fill="#FFFFFF" opacity="0.8" />
+            <Circle cx="130" cy="60" r="1" fill="#FFFFFF" />
+            <Circle cx={screenWidth * 0.45} cy="100" r="1.5" fill="#FFFFFF" opacity="0.85" />
+            <Circle cx={screenWidth * 0.72} cy="180" r="1.2" fill="#FFFFFF" />
+            <Circle cx={screenWidth - 140} cy="120" r="2" fill="#FFFFFF" opacity="0.95" />
+            <Circle cx="50" cy="280" r="1.5" fill="#FFFFFF" opacity="0.75" />
+            <Circle cx={screenWidth - 50} cy="290" r="1.2" fill="#FFFFFF" />
+            <Circle cx="120" cy="400" r="1.8" fill="#FFFFFF" opacity="0.8" />
+            <Circle cx="190" cy="200" r="1.2" fill="#FFFFFF" opacity="0.7" />
+            <Circle cx="260" cy="90" r="1.5" fill="#FFFFFF" opacity="0.8" />
+            <Circle cx="310" cy="220" r="1" fill="#FFFFFF" opacity="0.65" />
+            <Path d="M150,70 Q150,78 158,78 Q150,78 150,86 Q150,78 142,78 Q150,78 150,70" fill="#FFFFFF" />
+            <Path d="M70,220 Q70,226 76,226 Q70,226 70,232 Q70,226 64,226 Q70,226 70,220" fill="#FFFFFF" opacity="0.9" />
+            <Path d="M280,140 Q280,147 287,147 Q280,147 280,154 Q280,147 273,147 Q280,147 280,140" fill="#FFFFFF" opacity="0.95" />
+          </G>
+          <G transform={`translate(${screenWidth * 0.6 - 20}, 60)`}>
+            <Circle cx="20" cy="20" r="32" fill="#FFF" opacity="0.02" />
+            <Circle cx="20" cy="20" r="22" fill="#FFF" opacity="0.04" />
+            <Path d="M 12 4 A 18 18 0 1 0 36 28 A 15 15 0 1 1 12 4 Z" fill="#FFF" opacity="0.8" />
+            <Path d="M 12 4 A 18 18 0 1 0 36 28 A 15 15 0 1 1 12 4 Z" stroke="#818CF8" strokeWidth="0.9" fill="none" opacity="0.5" />
+          </G>
+          <G transform={`translate(${screenWidth - 110}, ${screenHeight - 190})`}>
+            <Path d="M 60,30 C 50,20 20,40 10,70" stroke="#818CF8" strokeWidth="1.5" fill="none" opacity="0.25" />
+            <Path d="M 50,45 L -280,180 L 10,180 Z" fill="url(#lampConeOnboarding)" />
+          </G>
+        </Svg>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function OnboardingCoordinator() {
   const router = useRouter();
-  const { login, isAuthenticated } = useAuthStore();
+  const { login, isAuthenticated, user } = useAuthStore();
   const {
     currentStep,
     setStep,
@@ -114,19 +276,62 @@ export default function OnboardingCoordinator() {
   const [activeStepContent, setActiveStepContent] = useState<string>('');
 
   // Exit transition shared values
-  const exitOpacity = useSharedValue(1);
+  const exitOpacity = useSharedValue(0);
   const exitScale = useSharedValue(1);
+
+  // Dynamic Background Shared Values (transitions Zen -> Matcha -> Sunset -> Midnight -> Zen ...)
+  const zenOpacity = useSharedValue(1);
+  const matchaOpacity = useSharedValue(0);
+  const sunsetOpacity = useSharedValue(0);
+  const midnightOpacity = useSharedValue(0);
+
+  const backgroundIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    exitOpacity.value = withTiming(1, { duration: 800 });
+
+    const opacities = [zenOpacity, matchaOpacity, sunsetOpacity, midnightOpacity];
+    let currentIdx = 0;
+    backgroundIntervalRef.current = setInterval(() => {
+      const prevIdx = currentIdx;
+      currentIdx = (currentIdx + 1) % 4;
+      
+      opacities[prevIdx].value = withTiming(0, { duration: 5000 });
+      opacities[currentIdx].value = withTiming(1, { duration: 5000 });
+    }, 8000);
+
+    return () => {
+      if (backgroundIntervalRef.current) {
+        clearInterval(backgroundIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const transitionToZenSlowly = () => {
+    if (backgroundIntervalRef.current) {
+      clearInterval(backgroundIntervalRef.current);
+      backgroundIntervalRef.current = null;
+    }
+    zenOpacity.value = withTiming(1, { duration: 2000 });
+    matchaOpacity.value = withTiming(0, { duration: 2000 });
+    sunsetOpacity.value = withTiming(0, { duration: 2000 });
+    midnightOpacity.value = withTiming(0, { duration: 2000 });
+  };
 
   const card0TranslateX = useSharedValue(0);
   const card1TranslateX = useSharedValue(0);
   const card2TranslateX = useSharedValue(0);
   const card3TranslateX = useSharedValue(0);
+  const card4TranslateX = useSharedValue(0);
+  const card5TranslateX = useSharedValue(0);
 
   const cardTranslates = [
     card0TranslateX,
     card1TranslateX,
     card2TranslateX,
     card3TranslateX,
+    card4TranslateX,
+    card5TranslateX,
   ];
 
   const startX = React.useRef(0);
@@ -134,22 +339,21 @@ export default function OnboardingCoordinator() {
   const isGestureActive = React.useRef(false);
 
   const handleCardTouchStart = (e: any) => {
-    if (currentStep >= 4 || isGeneratingSystem) return;
+    if (currentStep >= 6 || isGeneratingSystem) return;
     startX.current = e.nativeEvent.pageX;
     startY.current = e.nativeEvent.pageY;
     isGestureActive.current = true;
   };
 
   const handleCardTouchMove = (e: any) => {
-    if (!isGestureActive.current || currentStep >= 4 || isGeneratingSystem) return;
+    if (!isGestureActive.current || currentStep >= 6 || isGeneratingSystem) return;
     let dx = e.nativeEvent.pageX - startX.current;
     const dy = e.nativeEvent.pageY - startY.current;
     
     // Only track if horizontal movement is dominant
     if (Math.abs(dx) > 10 && Math.abs(dy) < Math.abs(dx) * 0.8) {
       // Only drag the current card for LEFT swipe (forward)
-      // Right swipe (back) doesn't drag — the previous card will slide over instead
-      if (dx < 0 && currentStep <= 3) {
+      if (dx < 0 && currentStep <= 5) {
         cardTranslates[currentStep].value = dx;
       }
     }
@@ -163,20 +367,20 @@ export default function OnboardingCoordinator() {
   };
 
   const handleCardTouchEnd = (e: any) => {
-    if (!isGestureActive.current || currentStep >= 4 || isGeneratingSystem) return;
+    if (!isGestureActive.current || currentStep >= 6 || isGeneratingSystem) return;
     isGestureActive.current = false;
     
     const dx = e.nativeEvent.pageX - startX.current;
     
     // Swipe next (left swipe)
     if (dx < -100) {
-      if (currentStep < 3) {
+      if (currentStep < 5) {
         runOnJS(handleNext)();
-      } else if (currentStep === 3) {
-        runOnJS(handleGoogleSignup)();
+      } else if (currentStep === 5) {
+        runOnJS(handleSkipOrGuest)();
       }
     } 
-    // Swipe back (right swipe) — not allowed on first card
+    // Swipe back (right swipe) - not allowed on first card
     else if (dx > 100 && currentStep > 0) {
       runOnJS(handleBack)();
     } 
@@ -187,13 +391,13 @@ export default function OnboardingCoordinator() {
   };
 
   const handleNext = () => {
-    if (currentStep < 3) {
+    if (currentStep < 5) {
       hapticFeedback.selection();
       cardTranslates[currentStep].value = withTiming(-width - 100, { duration: 300 }, () => {
         runOnJS(finalizeStepTransition)(currentStep + 1);
       });
-    } else if (currentStep === 3) {
-      handleGoogleSignup();
+    } else if (currentStep === 5) {
+      handleSkipOrGuest();
     }
   };
 
@@ -210,14 +414,37 @@ export default function OnboardingCoordinator() {
     }
   };
 
-  const finishGuestLogin = () => {
-    // Set generating flag and step BEFORE login to block the navigation guard
+  const navigateToAppDirectly = async () => {
     setIsGeneratingSystem(true);
-    setStep(4);
+    await completeOnboarding();
+    
+    const hasAccess = isAuthenticated || user?.id === 'guest-user';
+
+    // Smooth fade-out + gentle scale before navigating
+    exitOpacity.value = withTiming(0, { duration: 300 });
+    exitScale.value = withTiming(0.98, { duration: 300 });
+
+    setTimeout(() => {
+      // Navigate FIRST — then clean up state
+      if (hasAccess) {
+        (globalThis as any).__hasPlayedLearnAnimation = true;
+        router.replace('/(protected)/(tabs)/learn');
+      } else {
+        router.replace('/(auth)/login');
+      }
+
+      // Clean up after navigation is queued
+      setIsGeneratingSystem(false);
+      setIsLoading(false);
+    }, 320);
+  };
+
+  const finishGuestLogin = () => {
+    setIsGeneratingSystem(true);
 
     // If already authenticated (returning user in __DEV__ mode), skip mock login
     if (isAuthenticated) {
-      triggerSystemGeneration();
+      navigateToAppDirectly();
       return;
     }
 
@@ -232,7 +459,7 @@ export default function OnboardingCoordinator() {
           role: "user" as const,
         };
         await login(mockToken, mockUser);
-        triggerSystemGeneration();
+        navigateToAppDirectly();
       } catch (e) {
         console.error('Guest onboarding setup error:', e);
         setIsGeneratingSystem(false);
@@ -247,9 +474,12 @@ export default function OnboardingCoordinator() {
       setIsLoading(true);
       hapticFeedback.success();
       
-      // Animate current card sliding out, then transition to loader
+      // Slowly transition the background to Zen theme
+      transitionToZenSlowly();
+      
+      // Animate current card sliding out, then navigate directly
       cardTranslates[currentStep].value = withTiming(-width - 100, { duration: 300 }, () => {
-        runOnJS(finishGuestLogin)();
+        runOnJS(navigateToAppDirectly)();
       });
     } catch (e) {
       console.error('Guest onboarding setup error:', e);
@@ -259,10 +489,7 @@ export default function OnboardingCoordinator() {
   };
 
   const finishGoogleLogin = () => {
-    // Set generating flag and step BEFORE login to block the navigation guard
-    setIsGeneratingSystem(true);
-    setStep(4);
-    triggerSystemGeneration();
+    navigateToAppDirectly();
   };
 
   const handleGoogleSignup = () => {
@@ -270,72 +497,26 @@ export default function OnboardingCoordinator() {
       setIsLoading(true);
       hapticFeedback.success();
       
-      // Animate 4th card sliding out, then transition to loader
-      cardTranslates[3].value = withTiming(-width - 100, { duration: 300 }, () => {
+      // Slowly transition the background to Zen theme
+      transitionToZenSlowly();
+      
+      // Animate 6th card sliding out, then login & navigate directly
+      cardTranslates[5].value = withTiming(-width - 100, { duration: 300 }, () => {
         runOnJS(finishGoogleLogin)();
       });
     } catch (e) {
       console.error('Google auth onboarding error:', e);
-      cardTranslates[3].value = withSpring(0, { damping: 15, stiffness: 120 });
+      cardTranslates[5].value = withSpring(0, { damping: 15, stiffness: 120 });
       setIsLoading(false);
     }
   };
 
-  const triggerSystemGeneration = () => {
-    setIsGeneratingSystem(true);
-    let progress = 0;
-    
-    const interval = setInterval(async () => {
-      progress += 25;
-      if (progress === 25) {
-        setActiveStepContent("Creating personalized revision loops...");
-      } else if (progress === 50) {
-        setActiveStepContent("Compiling Blind 75 active recall cards...");
-      } else if (progress === 75) {
-        setActiveStepContent("Calibrating spaced repetition tracker...");
-      } else if (progress >= 100) {
-        clearInterval(interval);
-        setActiveStepContent("Warm educational space created.");
-        
-        await completeOnboarding();
-        
-        const isGuest = useAuthStore.getState().user?.id === 'guest-user';
-        const hasAccess = isAuthenticated || isGuest;
-
-        // Smooth fade-out + gentle scale before navigating
-        exitOpacity.value = withTiming(0, { duration: 500 });
-        exitScale.value = withTiming(0.96, { duration: 500 });
-
-        setTimeout(() => {
-          // Navigate FIRST — then clean up state. Resetting state before navigation
-          // causes a brief re-render that flashes the old slide content.
-          if (hasAccess) {
-            (globalThis as any).__hasPlayedLearnAnimation = true;
-            router.replace('/(protected)/(tabs)/learn');
-          } else {
-            router.replace('/(auth)/login');
-          }
-
-          // Clean up after navigation is queued (component will unmount)
-          setIsGeneratingSystem(false);
-          setIsLoading(false);
-        }, 520);
-      }
-    }, 800);
-  };
-
-  const card0Style = useAnimatedStyle(() => {
-    return getCardStyle(0, currentStep, cardTranslates, width);
-  });
-  const card1Style = useAnimatedStyle(() => {
-    return getCardStyle(1, currentStep, cardTranslates, width);
-  });
-  const card2Style = useAnimatedStyle(() => {
-    return getCardStyle(2, currentStep, cardTranslates, width);
-  });
-  const card3Style = useAnimatedStyle(() => {
-    return getCardStyle(3, currentStep, cardTranslates, width);
-  });
+  const card0Style = useAnimatedStyle(() => getCardStyle(0, currentStep, cardTranslates, width));
+  const card1Style = useAnimatedStyle(() => getCardStyle(1, currentStep, cardTranslates, width));
+  const card2Style = useAnimatedStyle(() => getCardStyle(2, currentStep, cardTranslates, width));
+  const card3Style = useAnimatedStyle(() => getCardStyle(3, currentStep, cardTranslates, width));
+  const card4Style = useAnimatedStyle(() => getCardStyle(4, currentStep, cardTranslates, width));
+  const card5Style = useAnimatedStyle(() => getCardStyle(5, currentStep, cardTranslates, width));
 
   const renderStepCard = (stepIdx: number) => {
     const diff = stepIdx - currentStep;
@@ -355,6 +536,12 @@ export default function OnboardingCoordinator() {
       case 3:
         content = <SlideAskGPT />;
         break;
+      case 4:
+        content = <SlideScheduleRevision />;
+        break;
+      case 5:
+        content = <SlideThemeAccents />;
+        break;
       default:
         return null;
     }
@@ -364,6 +551,8 @@ export default function OnboardingCoordinator() {
       card1Style,
       card2Style,
       card3Style,
+      card4Style,
+      card5Style,
     ];
 
     const isNextCard = diff === 1;
@@ -392,26 +581,32 @@ export default function OnboardingCoordinator() {
   }));
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#FAF9F7' }}>
+    <View style={{ flex: 1, backgroundColor: '#FAF6F0' }}>
       <Animated.View style={[{ flex: 1 }, exitAnimatedStyle]}>
-        <SafeAreaView style={styles.container}>
+        <OnboardingDynamicBackground
+          zenOpacity={zenOpacity}
+          matchaOpacity={matchaOpacity}
+          sunsetOpacity={sunsetOpacity}
+          midnightOpacity={midnightOpacity}
+        />
+        <SafeAreaView style={[styles.container, { backgroundColor: 'transparent' }]}>
           <View style={styles.header}>
-            {currentStep > 0 && currentStep < 4 && !isGeneratingSystem && (
+            {currentStep > 0 && currentStep < 6 && !isGeneratingSystem && (
               <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.6}>
                 <ChevronLeft color="#475569" size={20} strokeWidth={2.5} />
               </TouchableOpacity>
             )}
             
-            {currentStep < 4 && (
+            {currentStep < 6 && !isGeneratingSystem && (
               <View style={styles.stepIndicatorContainer}>
-                {Array.from({ length: 4 }).map((_, idx) => (
+                {Array.from({ length: 6 }).map((_, idx) => (
                   <View
-                    key={idx}
-                    style={[
-                      styles.stepDot,
-                      currentStep === idx && styles.stepDotActive,
-                      idx < currentStep && styles.stepDotPassed,
-                    ]}
+                     key={idx}
+                     style={[
+                       styles.stepDot,
+                       currentStep === idx && styles.stepDotActive,
+                       idx < currentStep && styles.stepDotPassed,
+                     ]}
                   />
                 ))}
               </View>
@@ -419,21 +614,17 @@ export default function OnboardingCoordinator() {
           </View>
 
           <View style={styles.contentPortal}>
-            {currentStep === 4 ? (
-              <Animated.View key="step4" entering={FadeIn.duration(400)} exiting={FadeOut.duration(400)} style={styles.slideCentered}>
-                <OnboardingLoader />
-              </Animated.View>
-            ) : (
-              <View style={styles.cardStackContainer}>
-                {renderStepCard(3)}
-                {renderStepCard(2)}
-                {renderStepCard(1)}
-                {renderStepCard(0)}
-              </View>
-            )}
+            <View style={styles.cardStackContainer}>
+              {renderStepCard(5)}
+              {renderStepCard(4)}
+              {renderStepCard(3)}
+              {renderStepCard(2)}
+              {renderStepCard(1)}
+              {renderStepCard(0)}
+            </View>
           </View>
 
-          {currentStep < 4 && (
+          {currentStep < 6 && !isGeneratingSystem && (
             <View style={styles.footer}>
               <View />
 
@@ -948,7 +1139,6 @@ function SlideWelcome() {
 // SCREEN 2: PLAYLIST REORDERING (drag to reorder animation)
 // -------------------------------------------------------------
 function SlidePlaylistReorder() {
-  // Shared values for Page 2
   const floatAnim = useSharedValue(0);
   const particle1X = useSharedValue(0);
   const particle1Y = useSharedValue(0);
@@ -960,25 +1150,22 @@ function SlidePlaylistReorder() {
   const hashtagOpacity = useSharedValue(1);
   const hashtagScale = useSharedValue(1);
 
-  // Notebook line drawing styles
   const line1Width = useSharedValue(0);
   const line2Width = useSharedValue(0);
   const line3Width = useSharedValue(0);
 
-  // Drag Reorder Simulation shared values
-  const item1Y = useSharedValue(0); // Card 1 (Graphs)
-  const item2Y = useSharedValue(0); // Card 2 (Heaps)
+  const item1Y = useSharedValue(0);
+  const item2Y = useSharedValue(0);
   const item2Scale = useSharedValue(1);
   const item2Elevation = useSharedValue(2);
   const item2ShadowOpacity = useSharedValue(0.02);
 
-  const item3Y = useSharedValue(0); // Card 3 (DP)
+  const item3Y = useSharedValue(0);
   const item3Scale = useSharedValue(1);
   const item3Elevation = useSharedValue(2);
   const item3ShadowOpacity = useSharedValue(0.02);
 
   useEffect(() => {
-    // A. Connect Background animations
     floatAnim.value = withRepeat(
       withSequence(
         withTiming(-6, { duration: 3000 }),
@@ -1004,15 +1191,11 @@ function SlidePlaylistReorder() {
     particle3X.value = withRepeat(withSequence(withTiming(12, { duration: 4500 }), withTiming(-12, { duration: 4500 })), -1, true);
     particle3Y.value = withRepeat(withSequence(withTiming(-10, { duration: 3800 }), withTiming(10, { duration: 3800 })), -1, true);
 
-
-
     line1Width.value = withDelay(400, withTiming(1, { duration: 1100 }));
     line2Width.value = withDelay(650, withTiming(1, { duration: 1100 }));
     line3Width.value = withDelay(900, withTiming(1, { duration: 1100 }));
 
-    // B. Continuous premium Card Shuffle loop (Chained 3-stage drag-swap-snap-pause-reset cycle)
     const loopReorder = () => {
-      // 1. T: 0ms: Initial Reset of all cards
       item1Y.value = withTiming(0, { duration: 350 });
       item2Y.value = withTiming(0, { duration: 350 });
       item3Y.value = withTiming(0, { duration: 350 });
@@ -1025,102 +1208,35 @@ function SlidePlaylistReorder() {
       item3Elevation.value = withTiming(2, { duration: 250 });
       item3ShadowOpacity.value = withTiming(0.02, { duration: 250 });
 
-      // --- ROUND 1: Lift & Swap Card 2 (Heaps) into Slot 1 (swapping with Card 1 Graphs) ---
-      // T: 800ms: Lift Card 2
-      item2Scale.value = withDelay(
-        800,
-        withSpring(1.04, { damping: 10, stiffness: 180 })
-      );
-      item2Elevation.value = withDelay(
-        800,
-        withTiming(8, { duration: 200 })
-      );
-      item2ShadowOpacity.value = withDelay(
-        800,
-        withTiming(0.18, { duration: 200 })
-      );
+      item2Scale.value = withDelay(800, withSpring(1.04, { damping: 10, stiffness: 180 }));
+      item2Elevation.value = withDelay(800, withTiming(8, { duration: 200 }));
+      item2ShadowOpacity.value = withDelay(800, withTiming(0.18, { duration: 200 }));
 
-      // T: 1400ms: Card 2 slides up to Slot 1 (-92px), Card 1 slides down to Slot 2 (92px)
-      item2Y.value = withDelay(
-        1400,
-        withSpring(-92, { damping: 14, stiffness: 100 }, () => {
-          runOnJS(hapticFeedback.selection)();
-        })
-      );
-      item1Y.value = withDelay(
-        1400,
-        withSpring(92, { damping: 14, stiffness: 100 })
-      );
+      item2Y.value = withDelay(1400, withSpring(-92, { damping: 14, stiffness: 100 }, () => {
+        runOnJS(hapticFeedback.selection)();
+      }));
+      item1Y.value = withDelay(1400, withSpring(92, { damping: 14, stiffness: 100 }));
 
-      // T: 2100ms: Card 2 snaps & drops into Slot 1
-      item2Scale.value = withDelay(
-        2100,
-        withSpring(1.0, { damping: 11, stiffness: 140 })
-      );
-      item2Elevation.value = withDelay(
-        2100,
-        withTiming(2, { duration: 200 })
-      );
-      item2ShadowOpacity.value = withDelay(
-        2100,
-        withTiming(0.02, { duration: 200 })
-      );
+      item2Scale.value = withDelay(2100, withSpring(1.0, { damping: 11, stiffness: 140 }));
+      item2Elevation.value = withDelay(2100, withTiming(2, { duration: 200 }));
+      item2ShadowOpacity.value = withDelay(2100, withTiming(0.02, { duration: 200 }));
 
-      // --- ROUND 2: Lift & Swap Card 3 (DP) into Slot 2 (swapping with Card 1 Graphs) ---
-      // T: 3200ms: Lift Card 3
-      item3Scale.value = withDelay(
-        3200,
-        withSpring(1.04, { damping: 10, stiffness: 180 })
-      );
-      item3Elevation.value = withDelay(
-        3200,
-        withTiming(8, { duration: 200 })
-      );
-      item3ShadowOpacity.value = withDelay(
-        3200,
-        withTiming(0.18, { duration: 200 })
-      );
+      item3Scale.value = withDelay(3200, withSpring(1.04, { damping: 10, stiffness: 180 }));
+      item3Elevation.value = withDelay(3200, withTiming(8, { duration: 200 }));
+      item3ShadowOpacity.value = withDelay(3200, withTiming(0.18, { duration: 200 }));
 
-      // T: 3800ms: Card 3 slides up to Slot 2 (-92px), Card 1 slides down to Slot 3 (184px)
-      item3Y.value = withDelay(
-        3800,
-        withSpring(-92, { damping: 14, stiffness: 100 }, () => {
-          runOnJS(hapticFeedback.selection)();
-        })
-      );
-      item1Y.value = withDelay(
-        3800,
-        withSpring(184, { damping: 14, stiffness: 100 })
-      );
+      item3Y.value = withDelay(3800, withSpring(-92, { damping: 14, stiffness: 100 }, () => {
+        runOnJS(hapticFeedback.selection)();
+      }));
+      item1Y.value = withDelay(3800, withSpring(184, { damping: 14, stiffness: 100 }));
 
-      // T: 4500ms: Card 3 snaps & drops into Slot 2
-      item3Scale.value = withDelay(
-        4500,
-        withSpring(1.0, { damping: 11, stiffness: 140 })
-      );
-      item3Elevation.value = withDelay(
-        4500,
-        withTiming(2, { duration: 200 })
-      );
-      item3ShadowOpacity.value = withDelay(
-        4500,
-        withTiming(0.02, { duration: 200 })
-      );
+      item3Scale.value = withDelay(4500, withSpring(1.0, { damping: 11, stiffness: 140 }));
+      item3Elevation.value = withDelay(4500, withTiming(2, { duration: 200 }));
+      item3ShadowOpacity.value = withDelay(4500, withTiming(0.02, { duration: 200 }));
 
-      // --- ROUND 3: Smooth Reset ---
-      // T: 6200ms to 7000ms: All cards timing-slide back to Slot 0
-      item1Y.value = withDelay(
-        6200,
-        withTiming(0, { duration: 800 })
-      );
-      item2Y.value = withDelay(
-        6200,
-        withTiming(0, { duration: 800 })
-      );
-      item3Y.value = withDelay(
-        6200,
-        withTiming(0, { duration: 800 })
-      );
+      item1Y.value = withDelay(6200, withTiming(0, { duration: 800 }));
+      item2Y.value = withDelay(6200, withTiming(0, { duration: 800 }));
+      item3Y.value = withDelay(6200, withTiming(0, { duration: 800 }));
     };
 
     loopReorder();
@@ -1164,8 +1280,6 @@ function SlidePlaylistReorder() {
   const styleParticle2 = useAnimatedStyle(() => ({ transform: [{ translateX: particle2X.value }, { translateY: particle2Y.value }] }));
   const styleParticle3 = useAnimatedStyle(() => ({ transform: [{ translateX: particle3X.value }, { translateY: particle3Y.value }] }));
 
-  // Sprout style removed
-
   const styleLine1 = useAnimatedStyle(() => ({
     width: `${line1Width.value * 94}%`,
     opacity: line1Width.value * 0.45,
@@ -1179,12 +1293,10 @@ function SlidePlaylistReorder() {
     opacity: line3Width.value * 0.45,
   }));
 
-  // Reorder Item 1: Course Schedule II
   const animatedItem1 = useAnimatedStyle(() => ({
     transform: [{ translateY: item1Y.value }],
   }));
 
-  // Reorder Item 2: Merge K Sorted Lists (the actively dragged one)
   const animatedItem2 = useAnimatedStyle(() => ({
     transform: [
       { translateY: item2Y.value },
@@ -1196,7 +1308,6 @@ function SlidePlaylistReorder() {
     backgroundColor: item2Scale.value > 1.01 ? '#FFFFFF' : 'rgba(255, 255, 255, 0.85)',
   }));
 
-  // Reorder Item 3: 0/1 Knapsack Core
   const animatedItem3 = useAnimatedStyle(() => ({
     transform: [
       { translateY: item3Y.value },
@@ -1210,13 +1321,10 @@ function SlidePlaylistReorder() {
 
   return (
     <View style={styles.slideInner}>
-      
-      {/* Background large ultra-soft pastel breathing blob */}
       <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
         <Animated.View style={[styles.breathingBlobBg, animatedBlobStyle]} />
       </View>
 
-      {/* Background drifting particles */}
       <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
         <Animated.View style={[styles.floatingBgItem, { top: '12%', left: '8%' }, styleParticle1]}>
           <GraduationCap color="rgba(139, 92, 246, 0.05)" size={20} strokeWidth={1.5} />
@@ -1229,7 +1337,6 @@ function SlidePlaylistReorder() {
         </Animated.View>
       </View>
 
-      {/* Notebook Paper Lines Behind Text */}
       <View style={styles.notebookPaper} pointerEvents="none">
         <Animated.View style={[styles.notebookPaperLine, styleLine1]} />
         <Animated.View style={[styles.notebookPaperLine, styleLine2]} />
@@ -1242,7 +1349,7 @@ function SlidePlaylistReorder() {
         </View>
         
         <Text style={styles.appleBody}>
-          Revision isn’t linear.{"\n"}Come back to what matters most.
+          Revision isn’t linear. Easily drag and reorder the cards in your playlist to prioritize what you need to master first according to your revision plan.
         </Text>
 
         <Animated.View style={animatedHashtagStyle}>
@@ -1252,11 +1359,9 @@ function SlidePlaylistReorder() {
         </Animated.View>
       </View>
 
-      {/* Spacious, premium reorder card playlist visual deck */}
       <View style={styles.welcomeVisualContainer}>
         <View style={styles.playlistBox}>
           
-          {/* Card 1: Course Schedule II */}
           <Animated.View style={[styles.playlistItem, animatedItem1]}>
             <View style={styles.playlistItemLeft}>
               <Text style={styles.playlistTopic}>GRAPHS</Text>
@@ -1268,7 +1373,6 @@ function SlidePlaylistReorder() {
             <GripVertical color="#CBD5E1" size={24} />
           </Animated.View>
 
-          {/* Card 2: Merge K Sorted Lists */}
           <Animated.View style={[styles.playlistItem, styles.activeItem, animatedItem2]}>
             <View style={styles.playlistItemLeft}>
               <Text style={styles.playlistTopic}>HEAPS</Text>
@@ -1280,7 +1384,6 @@ function SlidePlaylistReorder() {
             <GripVertical color="#CBD5E1" size={24} />
           </Animated.View>
 
-          {/* Card 3: 0/1 Knapsack Core */}
           <Animated.View style={[styles.playlistItem, animatedItem3]}>
             <View style={styles.playlistItemLeft}>
               <Text style={styles.playlistTopic}>DYNAMIC PROGRAMMING</Text>
@@ -1354,16 +1457,30 @@ function SlideFlashcardsReels() {
     <View style={styles.slideInner}>
       <View style={styles.appleTextBlock}>
         <View style={styles.welcomeTitleRow}>
-          <Text style={styles.appleTitle}>Flashcards,{"\n"}but built for scrolling.</Text>
+          <Text style={styles.appleTitle}>Scroll & Swipe</Text>
         </View>
         
         <Text style={styles.appleBody}>
-   Scroll through questions{`\n`}Swipe through concept{`\n`}Revise anywhere/anytime
-</Text>
-<Text style={{color: '#8B5CF6', fontWeight: '600', marginTop: 4}}>#RevisionMadeConvinient</Text>
+          Scroll vertically to browse questions. Swipe horizontally on any card to switch between intuitive concept explanations and code implementations.
+        </Text>
+        <Text style={{color: '#8B5CF6', fontWeight: '600', marginTop: 4}}>#ScrollQuestions #SwipeConcepts #RevisionReels</Text>
       </View>
 
       <View style={styles.visualContainer}>
+        {/* Horizontal Swipe Indicator badges */}
+        <View style={{ position: 'absolute', left: 4, top: 125, zIndex: 100, backgroundColor: 'rgba(255,255,255,0.95)', padding: 4, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' }}>
+          <ChevronLeft color="#8B5CF6" size={14} strokeWidth={3} />
+        </View>
+        <View style={{ position: 'absolute', right: 4, top: 125, zIndex: 100, backgroundColor: 'rgba(255,255,255,0.95)', padding: 4, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' }}>
+          <ChevronRight color="#8B5CF6" size={14} strokeWidth={3} />
+        </View>
+
+        {/* Scroll Indicator labels */}
+        <View style={{ position: 'absolute', bottom: -5, zIndex: 100, backgroundColor: '#FAF6F0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <ArrowDown color="#64748B" size={12} strokeWidth={2.5} />
+          <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#64748B' }}>Scroll Down for Next Question</Text>
+        </View>
+
         <View style={styles.modeTabsRow}>
           <View style={[styles.modeTab, modeState === 'concept' && styles.modeTabActive]}>
             <Brain color={modeState === 'concept' ? '#8B5CF6' : '#64748B'} size={12} strokeWidth={2.5} />
@@ -1392,7 +1509,7 @@ function SlideFlashcardsReels() {
               <Text style={[styles.complexitySmall, { color: '#6366F1' }]}>C++ Implementation</Text>
             </View>
             <View style={styles.codeSnippetBox}>
-              <Text style={styles.codeLine}><Text style={{ color: '#D946EF' }}>ListNode*</Text> prev = <Text style={{ color: '#D946EF' }}>nullptr</Text>;</Text>
+              <Text style={styles.codeLine}><Text style={{ color: '#D946EF' }}>ListNode*</Text> prev = nullptr;</Text>
               <Text style={styles.codeLine}><Text style={{ color: '#F59E0B' }}>while</Text> (curr) &#123;</Text>
               <Text style={styles.codeLine}>  ListNode* next = curr-&gt;next;</Text>
               <Text style={styles.codeLine}>  curr-&gt;next = prev;</Text>
@@ -1416,7 +1533,6 @@ function SlideAskGPT() {
   const fullPrompt = "Explain this code snippet like I'm 5...";
 
   useEffect(() => {
-    // Typewriter simulation logic (Ghost Typewriter loop)
     let charIndex = 0;
     let isTyping = true;
     let timer: NodeJS.Timeout;
@@ -1426,27 +1542,25 @@ function SlideAskGPT() {
         if (charIndex <= fullPrompt.length) {
           setTypedText(fullPrompt.slice(0, charIndex));
           charIndex++;
-          timer = setTimeout(runTypewriter, 75); // rapid typing
+          timer = setTimeout(runTypewriter, 75);
         } else {
           isTyping = false;
-          timer = setTimeout(runTypewriter, 2200); // long pause
+          timer = setTimeout(runTypewriter, 2200);
         }
       } else {
-        // delete / reset
         if (charIndex > 0) {
           charIndex--;
           setTypedText(fullPrompt.slice(0, charIndex));
-          timer = setTimeout(runTypewriter, 35); // fast delete
+          timer = setTimeout(runTypewriter, 35);
         } else {
           isTyping = true;
-          timer = setTimeout(runTypewriter, 1000); // pause before restart
+          timer = setTimeout(runTypewriter, 1000);
         }
       }
     };
 
     runTypewriter();
 
-    // Cursor blinking loop
     const cursorInterval = setInterval(() => {
       setCursorVisible(v => !v);
     }, 530);
@@ -1475,7 +1589,6 @@ function SlideAskGPT() {
       </View>
 
       <View style={styles.visualContainer}>
-        {/* The Ghost Typewriter search input bar */}
         <View style={styles.mockSearchBar}>
           <View style={styles.plusCircle}>
             <Plus color="#94A3B8" size={14} strokeWidth={3} />
@@ -1492,121 +1605,270 @@ function SlideAskGPT() {
 }
 
 // -------------------------------------------------------------
-// SCREEN 5: LET'S BEGIN
+// SCREEN 5: SCHEDULE REVISION & GET NOTIFIED
 // -------------------------------------------------------------
-interface BeginProps {
-  onGoogle: () => void;
-  onGuest: () => void;
-  isLoading: boolean;
-}
-
-function SlideBegin({ onGoogle, onGuest, isLoading }: BeginProps) {
-  const logoScale = useSharedValue(0.95);
+function SlideScheduleRevision() {
+  const bellScale = useSharedValue(1);
 
   useEffect(() => {
-    logoScale.value = withRepeat(
+    bellScale.value = withRepeat(
       withSequence(
-        withTiming(1.05, { duration: 2000 }),
-        withTiming(0.95, { duration: 2000 })
+        withTiming(1.18, { duration: 600 }),
+        withTiming(1.0, { duration: 600 })
       ),
       -1,
       true
     );
-    return () => cancelAnimation(logoScale);
+    return () => cancelAnimation(bellScale);
   }, []);
 
-  const animatedLogo = useAnimatedStyle(() => ({
-    transform: [{ scale: logoScale.value }],
+  const animatedBell = useAnimatedStyle(() => ({
+    transform: [{ scale: bellScale.value }],
   }));
 
   return (
     <View style={styles.slideInner}>
-      <View style={styles.textBlock}>
-        <Text style={styles.title}>Let’s begin.</Text>
-        <Text style={styles.desc}>
-          We hope this makes learning feel a little lighter.
+      <View style={styles.appleTextBlock}>
+        <View style={styles.welcomeTitleRow}>
+          <Text style={styles.appleTitle}>Schedule your revision</Text>
+        </View>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#8B5CF6', marginTop: -4 }}>And get notified</Text>
+        <Text style={styles.appleBody}>
+          Set custom daily reminders that match your study schedule, and receive timely notifications to keep your recall sharp.
+        </Text>
+        <Text style={styles.appleHashtags}>
+          #StudyReminders #ConsistentRevision #DailyHabits
         </Text>
       </View>
 
-      <View style={styles.visualContainer}>
-        <Animated.View style={[styles.beginLogoRing, animatedLogo]}>
-          <View style={[styles.beginLogoInner, { alignItems: 'center', justifyContent: 'center' }]}>
-            <View style={{ width: 50, height: 50, alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-              <Text 
-                style={{ 
-                  fontSize: 44, 
-                  fontWeight: '900', 
-                  color: '#8B5CF6', 
-                  fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-condensed',
-                  lineHeight: 52,
-                }}
-              >
-                R
-              </Text>
-              
-              {/* Star Sparkle (Top Right) */}
-              <View style={{ position: 'absolute', top: -6, right: -10 }}>
-                <Sparkles color="#8B5CF6" size={16} strokeWidth={1.5} />
-              </View>
+      <View style={styles.welcomeVisualContainer}>
+        {/* Mock Push Notification Card */}
+        <View style={{
+          width: '90%',
+          backgroundColor: '#FFFFFF',
+          borderRadius: 20,
+          borderWidth: 1,
+          borderColor: '#E2E8F0',
+          padding: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.05,
+          shadowRadius: 10,
+          elevation: 2,
+          marginTop: 15,
+        }}>
+          <Animated.View style={[{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: '#EEF2F6',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }, animatedBell]}>
+            <Bell color="#8B5CF6" size={18} strokeWidth={2.5} />
+          </Animated.View>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontWeight: '800', color: '#0F172A', fontSize: 13 }}>ReeWise Reminder</Text>
+              <Text style={{ color: '#64748B', fontSize: 10 }}>Just now</Text>
+            </View>
+            <Text style={{ color: '#475569', fontSize: 12, marginTop: 2, fontWeight: '500' }}>
+              Time to revise Graphs! Spend 3 mins on 'Course Schedule II' 🧠
+            </Text>
+          </View>
+        </View>
 
-              {/* Star Sparkle (Bottom Left) */}
-              <View style={{ position: 'absolute', bottom: -4, left: -10 }}>
-                <Sparkles color="#A78BFA" size={12} strokeWidth={1.2} />
-              </View>
-
-              {/* Glowing Purple Dot (Top Left) */}
-              <View 
-                style={{ 
-                  position: 'absolute', 
-                  top: 2, 
-                  left: -4, 
-                  width: 5, 
-                  height: 5, 
-                  borderRadius: 2.5, 
-                  backgroundColor: '#8B5CF6', 
-                  opacity: 0.8 
-                }} 
-              />
-
-              {/* Glowing Purple Dot (Bottom Right) */}
-              <View 
-                style={{ 
-                  position: 'absolute', 
-                  bottom: 4, 
-                  right: -4, 
-                  width: 6, 
-                  height: 6, 
-                  borderRadius: 3, 
-                  backgroundColor: '#C084FC', 
-                  opacity: 0.7 
-                }} 
-              />
+        {/* Mock Schedule Toggles */}
+        <View style={{ width: '90%', gap: 10, marginTop: 20 }}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#F8FAFC',
+            borderRadius: 14,
+            padding: 12,
+            borderWidth: 1,
+            borderColor: '#E2E8F0',
+          }}>
+            <Text style={{ fontWeight: 'bold', color: '#0F172A', fontSize: 13 }}>Morning Review (8:30 AM)</Text>
+            <View style={{ width: 34, height: 20, borderRadius: 10, backgroundColor: '#8B5CF6', padding: 2, justifyContent: 'center', alignItems: 'flex-end' }}>
+              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFFFFF' }} />
             </View>
           </View>
-        </Animated.View>
+
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#F8FAFC',
+            borderRadius: 14,
+            padding: 12,
+            borderWidth: 1,
+            borderColor: '#E2E8F0',
+          }}>
+            <Text style={{ fontWeight: 'bold', color: '#0F172A', fontSize: 13 }}>Evening Recall (7:00 PM)</Text>
+            <View style={{ width: 34, height: 20, borderRadius: 10, backgroundColor: '#8B5CF6', padding: 2, justifyContent: 'center', alignItems: 'flex-end' }}>
+              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFFFFF' }} />
+            </View>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// -------------------------------------------------------------
+// SCREEN 6: STUNNING THEMES (Zen, Sunset, Midnight)
+// -------------------------------------------------------------
+function SlideThemeAccents() {
+  const themeIndex = useSharedValue(0);
+  const [currentThemeLabel, setCurrentThemeLabel] = useState("Zen Garden");
+
+  useEffect(() => {
+    const labels = ["Zen Garden", "Crimson Sunset", "Midnight Focus"];
+    const interval = setInterval(() => {
+      themeIndex.value = (themeIndex.value + 1) % 3;
+      setTimeout(() => {
+        setCurrentThemeLabel(labels[Math.round(themeIndex.value)]);
+      }, 150);
+    }, 2200);
+    return () => clearInterval(interval);
+  }, []);
+
+  const animatedCardTheme = useAnimatedStyle(() => {
+    const activeIdx = themeIndex.value;
+    
+    const backgroundColor = withTiming(
+      activeIdx < 0.5 
+        ? '#FAF6F0' 
+        : activeIdx < 1.5 
+          ? '#FFF3EE' 
+          : '#030509', 
+      { duration: 400 }
+    );
+
+    const borderColor = withTiming(
+      activeIdx < 0.5 
+        ? '#EADEC9' 
+        : activeIdx < 1.5 
+          ? '#F6E1D7' 
+          : '#263352',
+      { duration: 400 }
+    );
+
+    return {
+      backgroundColor,
+      borderColor,
+    };
+  });
+
+  const animatedTextTheme = useAnimatedStyle(() => {
+    const activeIdx = themeIndex.value;
+    const color = withTiming(
+      activeIdx > 1.5 
+        ? '#F8FAFC' 
+        : '#0F172A',
+      { duration: 400 }
+    );
+    return { color };
+  });
+
+  const animatedDescTheme = useAnimatedStyle(() => {
+    const activeIdx = themeIndex.value;
+    const color = withTiming(
+      activeIdx > 1.5 
+        ? '#94A3B8' 
+        : '#64748B',
+      { duration: 400 }
+    );
+    return { color };
+  });
+
+  const getThemeBubbleStyle = (idx: number) => {
+    return useAnimatedStyle(() => {
+      const activeIdx = themeIndex.value;
+      const isHighlighted = Math.round(activeIdx) === idx;
+      return {
+        transform: [
+          { scale: withSpring(isHighlighted ? 1.15 : 1.0, { damping: 10 }) }
+        ],
+        borderWidth: isHighlighted ? 2 : 0,
+        borderColor: idx === 0 ? '#8C6A5C' : idx === 1 ? '#E05A47' : '#818CF8',
+      };
+    });
+  };
+
+  return (
+    <View style={styles.slideInner}>
+      <View style={styles.appleTextBlock}>
+        <View style={styles.welcomeTitleRow}>
+          <Text style={styles.appleTitle}>Gorgeous Themes</Text>
+        </View>
+        <Text style={styles.appleBody}>
+          Revision should look beautiful. Find the aesthetic that helps you focus.
+        </Text>
+        <Text style={styles.appleHashtags}>
+          #JapaneseZen #CrimsonSunset #MidnightFocus
+        </Text>
       </View>
 
-      <View style={styles.authBlock}>
-        <SpringPressable
-          disabled={isLoading}
-          onPress={onGoogle}
-          style={styles.googleBtn}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.googleBtnText}>Continue with Google</Text>
-          )}
-        </SpringPressable>
+      <View style={styles.welcomeVisualContainer}>
+        
+        <Animated.View style={[{
+          width: '80%',
+          padding: 16,
+          borderRadius: 20,
+          borderWidth: 1,
+          alignSelf: 'center',
+          marginTop: 15,
+          height: 110,
+          justifyContent: 'center',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.05,
+          shadowRadius: 10,
+          elevation: 2,
+        }, animatedCardTheme]}>
+          
+          <Text style={{ 
+            fontSize: 10, 
+            fontWeight: 'bold', 
+            color: '#8B5CF6', 
+            letterSpacing: 1,
+            marginBottom: 4 
+          }}>
+            ACTIVE THEME
+          </Text>
+          <Animated.Text style={[{ 
+            fontSize: 18, 
+            fontWeight: 'bold', 
+            opacity: 0.9,
+          }, animatedTextTheme]}>
+            {currentThemeLabel}
+          </Animated.Text>
+          <Animated.Text style={[{ 
+            fontSize: 12, 
+            marginTop: 4 
+          }, animatedDescTheme]}>
+            Theme shifts colors across the entire app interface.
+          </Animated.Text>
+        </Animated.View>
 
-        <TouchableOpacity
-          disabled={isLoading}
-          onPress={onGuest}
-          style={styles.guestBtn}
-          activeOpacity={0.6}
-        >
-          <Text style={styles.guestBtnText}>See how it works</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 20, alignSelf: 'center', marginTop: 25 }}>
+          <Animated.View style={[{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#FAF6F0', alignItems: 'center', justifyContent: 'center' }, getThemeBubbleStyle(0)]}>
+            <Text style={{ fontSize: 14 }}>🎋</Text>
+          </Animated.View>
+          <Animated.View style={[{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF3EE', alignItems: 'center', justifyContent: 'center' }, getThemeBubbleStyle(1)]}>
+            <Text style={{ fontSize: 14 }}>🍁</Text>
+          </Animated.View>
+          <Animated.View style={[{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#0F1524', alignItems: 'center', justifyContent: 'center' }, getThemeBubbleStyle(2)]}>
+            <Text style={{ fontSize: 14 }}>🌙</Text>
+          </Animated.View>
+        </View>
+
       </View>
     </View>
   );
@@ -2360,5 +2622,36 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     position: 'relative',
+  },
+  repetitionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    shadowColor: '#94A3B8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  playlistCardVisual: {
+    position: 'absolute',
+    top: 10,
+    width: '75%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    shadowColor: '#94A3B8',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+    zIndex: 5,
   },
 });

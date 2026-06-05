@@ -88,9 +88,10 @@ export function useLazyInvalidate() {
 
   const lazyInvalidate = useCallback(
     (queryKey: string | string[]) => {
+      const key = Array.isArray(queryKey) ? queryKey : [queryKey];
       // Mark as stale without immediate refetch
       queryClient.invalidateQueries({
-        queryKey,
+        queryKey: key,
         refetchType: 'none', // Don't refetch immediately
       });
     },
@@ -146,7 +147,7 @@ export const QUERY_CONFIG = {
     gcTime: 1000 * 60 * 60, // 1 hour
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: 'stale', // Refetch if stale on reconnect
+    refetchOnReconnect: true, // Refetch if stale on reconnect
   },
 
   // Card content - rarely changes, aggressive cache
@@ -164,7 +165,7 @@ export const QUERY_CONFIG = {
     gcTime: 1000 * 60 * 5, // 5 minutes
     refetchOnMount: 'stale',
     refetchOnWindowFocus: false,
-    refetchOnReconnect: 'stale',
+    refetchOnReconnect: true,
   },
 
   // Reels feed - volatile, cache only for fast re-navigation
@@ -173,7 +174,7 @@ export const QUERY_CONFIG = {
     gcTime: 1000 * 60, // 1 minute (fast re-nav cache)
     refetchOnMount: false, // Don't auto-refetch on component mount
     refetchOnWindowFocus: false, // Don't refetch on tab switch
-    refetchOnReconnect: 'stale', // Refetch on reconnect if needed
+    refetchOnReconnect: true, // Refetch on reconnect if needed
   },
 
   // Real-time data - must always be fresh
@@ -195,8 +196,8 @@ export function useStableSelector<T, R>(
   selector: (data: T) => R,
   equalityFn?: (a: R, b: R) => boolean
 ) {
-  const prevRef = useRef<R | undefined>();
-  const memoizedRef = useRef<R | undefined>();
+  const prevRef = useRef<R | undefined>(undefined);
+  const memoizedRef = useRef<R | undefined>(undefined);
 
   const defaultEquality = (a: any, b: any) => {
     // Shallow equality check

@@ -88,3 +88,9 @@ export const markReelAsSeen = async (cardId: string): Promise<any> => {
   await markReelAsSeenLocally(userId, cardId);
   return { success: true };
 };
+
+export const getReplenishmentAttemptsCount = (): number => {
+  const { getReplenishmentAttemptsCount: getCount } = require('@/utils/reelsFeedOfflineManager');
+  return getCount();
+};
+

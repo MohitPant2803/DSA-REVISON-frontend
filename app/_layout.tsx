@@ -18,7 +18,8 @@ import { isNetworkConnected } from '@/utils/network';
 import * as Linking from 'expo-linking';
 
 import { useOnboardingStore } from "@/store/useOnboardingStore";
-import * as SplashScreen from 'expo-splash-screen';
+import { useWalkthroughStore } from "@/store/useWalkthroughStore";
+// import * as SplashScreen from 'expo-splash-screen';
 
 // singleton configuration guard to prevent native bridge desync
 export function ensureGoogleConfigured() {
@@ -32,8 +33,8 @@ export function ensureGoogleConfigured() {
   (globalThis as any).__googleConfigured = true;
 }
 
-// Keep splash visible until auth state is resolved
-SplashScreen.preventAutoHideAsync();
+// Keep splash visible until auth state is resolved (removed)
+// SplashScreen.preventAutoHideAsync();
 
 const decodeBase64 = (input: string): string => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -117,10 +118,25 @@ function ToastWrapper() {
   // Strict initial sync check: disabled to allow instant zero-delay boots
   const isSyncGated = false;
 
-  // 1. Trigger session restoration on mount
+  // 1. Unified Serialized Startup Pipeline: Database Ready -> Session Restored -> Hydrated
   useEffect(() => {
     ensureGoogleConfigured();
-    restoreSession();
+
+    (async () => {
+      try {
+        const { initializeDatabase } = require('@/utils/appBootstrapGate');
+        const { bootstrapHydrateFromSQLite } = require('@/store/usePlaylistStateStore');
+
+        console.log('[RootLayout] Phase 1: Initializing SQLite database and schema...');
+        await initializeDatabase();
+
+        console.log('[RootLayout] Phase 2: Restoring user session credentials...');
+        await restoreSession();
+      } catch (err: any) {
+        console.error('[RootLayout] Critical: Serialized startup pipeline failed:', err.message);
+        usePlaylistStateStore.setState({ bootstrapStatus: 'failed' });
+      }
+    })();
   }, []);
 
   const isOnboardingHydrated = useOnboardingStore((s) => s.hasHydrated);
@@ -151,14 +167,7 @@ function ToastWrapper() {
               const store = usePlaylistStateStore.getState();
               store.hydratePlaylistCards('all', slice.cardsSlice);
               
-              // Pre-hydrate first 10 card explanation details from SQLite database
-              const prewarmCount = Math.min(slice.cardsSlice.length, 10);
-              for (let i = 0; i < prewarmCount; i++) {
-                const card = slice.cardsSlice[i];
-                if (card && card._id) {
-                  store.hydrateCardContentOnDemand(card._id).catch(() => {});
-                }
-              }
+
             }
           })
           .catch(() => {});
@@ -199,49 +208,87 @@ function ToastWrapper() {
     };
   }, []);
 
-  // 2. Hydration Gate & SplashScreen Timing
-  useEffect(() => {
-    // Hide splash only when BOTH Zustand and Auth session rehydrations are fully complete
-    // And if initial sync is required, wait until it has synced!
-    if (!isLoading && isStoreReady && !isSyncGated) {
-      SplashScreen.hideAsync();
-    }
-  }, [isLoading, isStoreReady, isSyncGated]);
+  // 2. Hydration Gate & SplashScreen Timing (disabled)
 
   // 3. Navigation Guard gating with isStoreReady
   useEffect(() => {
     // Prevent any optimistic redirects until auth and onboarding finishes loading
     if (isLoading || !isOnboardingHydrated) return;
     // Wait for store hydration only when user has access (needs data). After logout, skip this.
-    if (!isStoreReady && (isAuthenticated || isGuest)) return;
+    if (!isStoreReady && isAuthenticated) return;
     if (isSyncGated) return;
+
+    const isRoot = (segments as string[]).length === 0 || !segments[0];
+    if (isRoot) return;
+
+    const currentPath = segments.join('/');
+    const isGuest = user?.id === 'guest-user';
+    const isWalkthroughComplete = useWalkthroughStore.getState().isComplete;
+
+    // Hard walkthrough navigation guard for guest users
+    if (isGuest && !isWalkthroughComplete) {
+      const walkthroughStep = useWalkthroughStore.getState().step;
+      if (walkthroughStep !== 'none') {
+        let allowed = false;
+        if (walkthroughStep === 'point-reels') {
+          allowed = currentPath === '(protected)/(tabs)/learn';
+        } else if (walkthroughStep === 'reels-tutorial' || walkthroughStep === 'point-myspace') {
+          allowed = currentPath === '(protected)/(tabs)/reels';
+        } else if (['myspace-theme', 'myspace-settings-arrow', 'myspace-hard-focus'].includes(walkthroughStep)) {
+          allowed = currentPath === '(protected)/(tabs)/personal';
+        } else if (['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(walkthroughStep)) {
+          allowed = currentPath === '(protected)/playlist/[playlistId]';
+        }
+
+        if (!allowed) {
+          if (__DEV__) {
+            console.warn(`[Walkthrough Guard] Blocking navigation attempt to /${currentPath} during step: ${walkthroughStep}`);
+          }
+          if (walkthroughStep === 'point-reels') {
+            router.replace('/(protected)/(tabs)/learn');
+          } else if (walkthroughStep === 'reels-tutorial' || walkthroughStep === 'point-myspace') {
+            router.replace('/(protected)/(tabs)/reels');
+          } else if (['myspace-theme', 'myspace-settings-arrow', 'myspace-hard-focus'].includes(walkthroughStep)) {
+            router.replace('/(protected)/(tabs)/personal');
+          } else if (['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(walkthroughStep)) {
+            router.replace('/(protected)/playlist/hard');
+          }
+          return;
+        }
+      }
+    }
+
+    // Guest is only allowed if they haven't completed the walkthrough yet
+    if (isGuest && isWalkthroughComplete) {
+      logout();
+      return;
+    }
+
+    const hasAccess = !!isAuthenticated || (isGuest && !isWalkthroughComplete);
 
     const inAuthGroup = segments[0] === '(auth)';
     const inOnboarding = (segments as string[])[1] === 'onboarding';
-    const hasAccess = !!isAuthenticated || isGuest;
 
     // Only block navigation during onboarding generation — not globally
     if (isGeneratingSystem && inOnboarding) return;
 
-    // 1. If not onboarded and not logged in, they must go to onboarding first
-    if (!isOnboarded && !hasAccess) {
-      if (!inOnboarding) {
+    // 1. If not logged in, they must go to onboarding or login page
+    if (!hasAccess && !inAuthGroup) {
+      if (!isOnboarded) {
         router.replace("/(auth)/onboarding");
+      } else {
+        router.replace("/(auth)/login");
       }
       return;
     }
 
-    // 2. If onboarded but not logged in, they must go to login
-    if (!hasAccess && !inAuthGroup) {
-      router.replace("/(auth)/login");
-    } 
-    // 3. If logged in and on an auth screen, redirect to protected tabs
-    else if (hasAccess && inAuthGroup) {
+    // 2. If logged in and on an auth screen, redirect to protected tabs
+    if (hasAccess && inAuthGroup) {
       if (!inOnboarding) {
         router.replace("/(protected)/(tabs)/learn");
       }
     }
-  }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, isGeneratingSystem, segments, user?.id, isGuest, isOnboarded]);
+  }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, isGeneratingSystem, segments, user?.id, isOnboarded]);
 
   // 4. Silent Background token expiration checking
   useEffect(() => {
@@ -274,6 +321,29 @@ function ToastWrapper() {
     }
   }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, token]);
 
+  // 5. Remote push notifications registration
+  useEffect(() => {
+    if (isLoading || !isStoreReady || !isAuthenticated || isGuest || !token) return;
+
+    const setupPushNotifications = async () => {
+      try {
+        const { registerForPushNotificationsAsync } = require('@/services/notificationService');
+        const pushToken = await registerForPushNotificationsAsync();
+        if (pushToken) {
+          const apiModule = require('@/services/api').default;
+          await apiModule.put('/auth/push-token', { pushToken });
+          if (__DEV__) {
+            console.log('[Push Notifications] Push token successfully registered on backend');
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Push Notifications] Registration failed:', err.message);
+      }
+    };
+
+    setupPushNotifications();
+  }, [isLoading, isStoreReady, isAuthenticated, isGuest, token]);
+
   // Show logout overlay first — before any other gates
   if (isLoggingOut) {
     return (
@@ -289,23 +359,21 @@ function ToastWrapper() {
     );
   }
 
-  // Prevent rendering stacked routes before store hydration is solved
-  // But after logout (!isAuthenticated && !isLoading), skip the gate so nav guard can redirect to login
-  if (!isStoreReady && (isLoading || isAuthenticated)) {
+  if (!isStoreReady && (isLoading || isAuthenticated || isGuest)) {
     return <AppSkeleton />;
   }
   // Initial sync gate overlay removed for instant, zero-delay booting
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FAF6F0' }}>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{ flex: 1, backgroundColor: '#FAF6F0' }}>
         <QueryProvider>
           <SyncEngineMount />
           <StatusBar style="dark" />
-          <View style={{ flex: 1, position: 'relative' }}>
-            <Stack screenOptions={{ headerShown: false, animation: 'none' }}>
+          <View style={{ flex: 1, position: 'relative', backgroundColor: '#FAF6F0' }}>
+            <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#FAF6F0' } }}>
               <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(protected)" options={{ animation: 'none' }} />
+              <Stack.Screen name="(protected)" options={{ animation: 'fade' }} />
             </Stack>
           </View>
           <ToastWrapper />

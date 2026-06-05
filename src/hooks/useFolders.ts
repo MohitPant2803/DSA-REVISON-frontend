@@ -62,7 +62,7 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
     gcTime: 1000 * 60 * 60,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: 'stale',
+    refetchOnReconnect: true,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);

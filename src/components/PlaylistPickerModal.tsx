@@ -236,9 +236,6 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
         const isAddedNow = !!tempMembership[playlist.id];
 
         if (wasAdded !== isAddedNow) {
-          // Instantly update local Zustand store for synchronous real-time UI changes
-          usePlaylistStateStore.getState().toggleCustomPlaylistItemInStore(playlist.id, cleanCardId, isAddedNow);
-
           promises.push(
             togglePlaylistItem.mutateAsync({
               playlistId: playlist.id,
@@ -304,12 +301,12 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
           onPress={onClose} 
         />
 
-        <View style={styles.modalContent}>
+        <View style={[styles.modalContent, isGuest && { height: 210 }]}>
           {/* Header row */}
           <View style={styles.headerRow}>
             <View>
               <Text style={styles.headerTitle}>Save to Playlist</Text>
-              <Text style={styles.headerSubtitle}>Organize your DSA cards</Text>
+              <Text style={styles.headerSubtitle}>Organize your cards</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <X color="#64748B" size={16} strokeWidth={2.5} />
@@ -328,9 +325,6 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
               <Text style={styles.guestSubtitle}>
                 Sign in with an account to create custom playlists and sync your revision progress across devices.
               </Text>
-              <TouchableOpacity onPress={handleLogout} style={styles.guestBtn}>
-                <Text style={styles.guestBtnText}>Sign In / Register</Text>
-              </TouchableOpacity>
             </View>
           ) : (
             <View style={{ flex: 1, marginVertical: 8 }}>
@@ -372,32 +366,34 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
           )}
 
           {/* Dialog Action Buttons */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              onPress={() => {
-                lightHaptic();
-                setIsCreatingNew(true);
-              }}
-              style={styles.ctaNewBtn}
-            >
-              <Text style={styles.ctaNewBtnText}>+ New Playlist</Text>
-            </TouchableOpacity>
+          {!isGuest && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  lightHaptic();
+                  setIsCreatingNew(true);
+                }}
+                style={styles.ctaNewBtn}
+              >
+                <Text style={styles.ctaNewBtnText}>+ New Playlist</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={handleSubmitPlaylists}
-              disabled={isPlaylistSubmitting || isGuest}
-              style={[
-                styles.saveBtn,
-                (isPlaylistSubmitting || isGuest) && { opacity: 0.5 }
-              ]}
-            >
-              {isPlaylistSubmitting ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.saveBtnText}>Save</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                onPress={handleSubmitPlaylists}
+                disabled={isPlaylistSubmitting}
+                style={[
+                  styles.saveBtn,
+                  isPlaylistSubmitting && { opacity: 0.5 }
+                ]}
+              >
+                {isPlaylistSubmitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
 
@@ -477,7 +473,7 @@ const styles = StyleSheet.create({
   guestContainer: {
     paddingVertical: 24,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 0,
   },
   guestTitle: {
     color: '#0F172A',
@@ -492,7 +488,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     paddingHorizontal: 16,
-    marginBottom: 20,
+    marginBottom: 0,
     lineHeight: 18,
   },
   guestBtn: {

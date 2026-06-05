@@ -70,6 +70,14 @@ export const useResumeStore = create<ResumeStore>()(
     {
       name: 'resume-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => {
+        const { useAuthStore } = require('./useAuthStore');
+        const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+        if (isGuest) {
+          return {};
+        }
+        return state;
+      }
     }
   )
 );

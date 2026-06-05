@@ -1,6 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import { useCallback, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { getAllDescendantFolderIds } from '@/utils/folderHelpers';
 import * as revisionService from '@/services/revisionService';
 import { useAuthStore } from '@/store/useAuthStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
@@ -26,10 +27,11 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
       let list = Object.values(s.cardsById);
 
       if (query?.folderId) {
+        const descendantIds = getAllDescendantFolderIds(query.folderId, s.foldersById);
         list = list.filter((c) => {
           if (!c) return false;
           const fid = typeof c.folderId === 'object' && c.folderId !== null ? c.folderId._id : c.folderId;
-          return fid === query.folderId || c.rootFolderId === query.folderId || c.subfolderIds?.includes(query.folderId!);
+          return descendantIds.has(fid) || (c.rootFolderId && descendantIds.has(c.rootFolderId));
         });
       }
 
@@ -69,7 +71,7 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
     gcTime: 1000 * 60 * 60,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: 'stale',
+    refetchOnReconnect: true,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -144,11 +146,12 @@ export const useGetCardsByFolder = (
 
   const filteredCards = useMemo(() => {
     if (!folderId) return [];
+    const descendantIds = getAllDescendantFolderIds(folderId, usePlaylistStateStore.getState().foldersById);
     return Object.values(cardsById)
       .filter((c) => {
         if (!c) return false;
         const fid = typeof c.folderId === 'object' && c.folderId !== null ? c.folderId._id : c.folderId;
-        return fid === folderId || c.rootFolderId === folderId || c.subfolderIds?.includes(folderId!);
+        return descendantIds.has(fid) || (c.rootFolderId && descendantIds.has(c.rootFolderId));
       })
       .sort((a, b) => (a.order || 0) - (b.order || 0));
   }, [cardsById, folderId]);

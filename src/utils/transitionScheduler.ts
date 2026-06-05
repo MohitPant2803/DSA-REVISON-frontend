@@ -32,7 +32,7 @@ class TransitionProtectedScheduler {
   private highPriorityTasks: DeferredTask[] = [];
   private normalPriorityTasks: DeferredTask[] = [];
   private lowPriorityTasks: DeferredTask[] = [];
-  private activeTasks = new Map<string, Task>();
+  private activeTasks = new Map<string, any>();
   private inTransition = false;
 
   /**
@@ -90,7 +90,7 @@ class TransitionProtectedScheduler {
    * Safe wrapper for haptics, analytics, cache warming that might block thread
    */
   runAfterInteractions(task: DeferredTask) {
-    const wrappedTask: Task = InteractionManager.runAfterInteractions(async () => {
+    const wrappedTask: any = InteractionManager.runAfterInteractions(async () => {
       try {
         await task.fn();
       } catch (err) {

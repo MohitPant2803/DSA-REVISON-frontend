@@ -34,6 +34,7 @@ import { canModifyItem, UserRole } from '@/utils/permissions';
 import * as userCardStateService from '@/services/userCardStateService';
 import Toast from 'react-native-toast-message';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
+import { useThemePalette } from '@/hooks/useThemePalette';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -136,6 +137,7 @@ interface ConceptCardPreviewProps {
 }
 
 export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatchLater, onToggleWatchLater, onCardStateUpdate, activePlaylistId, scrollEnabled = true }: ConceptCardPreviewProps) => {
+  const palette = useThemePalette();
   const router = useRouter();
   const ctaScale = useSharedValue(1);
 
@@ -330,8 +332,8 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
       <View className="gap-y-3">
         {/* Modern Apple-style Capsule Tags (Flat, transparent background) */}
         <View className="flex-row flex-wrap gap-2 items-center">
-          <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
-            <Text className="text-slate-600 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
+          <View className="px-3 py-1 rounded-full bg-transparent border" style={{ borderColor: palette.border }}>
+            <Text className="text-[10px] font-extrabold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{card.topic}</Text>
           </View>
           <View className={`px-3 py-1 rounded-full bg-transparent ${
             card.difficulty === 'Easy' ? 'border border-emerald-200' :
@@ -345,15 +347,15 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
             }`}>{card.difficulty}</Text>
           </View>
           {card.complexity && (
-            <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
-              <Text className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</Text>
+            <View className="px-3 py-1 rounded-full bg-transparent border" style={{ borderColor: palette.border }}>
+              <Text className="text-[10px] font-mono font-extrabold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{card.complexity}</Text>
             </View>
           )}
         </View>
 
         {/* Title (Striking, Extremely Large Typographical Focal Point) */}
         <Text
-          style={{ fontSize: 35, fontWeight: '900', color: '#0F172A', letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
+          style={{ fontSize: 35, fontWeight: '900', color: palette.textPrimary, letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
           numberOfLines={2}
         >
           {card.title}
@@ -361,8 +363,8 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
 
         {/* Premium Compact Companies Pill (Flat, transparent, zero nested background/border/shadow) */}
         <View className="mt-1 self-start flex-row items-center gap-x-2">
-          <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8' }}>Companies:</Text>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
+          <Text style={{ fontSize: 9, fontWeight: '800', color: palette.textMuted }}>Companies:</Text>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: palette.textSecondary }}>
             {companies}
           </Text>
         </View>
@@ -371,11 +373,11 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
       {/* Spacer 1: 1/3 distance (flex: 1) */}
       <View style={{ flex: 1 }} />
 
-      {/* Middle Section (Spacious Problem Statement Explanation in a curved light blue box) */}
-      <View style={{ maxHeight: 380, flexShrink: 1, backgroundColor: '#EFF6FF', borderRadius: 24, borderWidth: 1.5, borderColor: '#93C5FD' }}>
+      {/* Middle Section (Spacious Problem Statement Explanation in a curved themed box) */}
+      <View style={{ maxHeight: 380, flexShrink: 1, backgroundColor: palette.accentBg, borderRadius: 24, borderWidth: 1.5, borderColor: palette.border }}>
         <View className="p-4 gap-y-3 justify-between" style={{ maxHeight: '100%', flexShrink: 1 }}>
           <View className="flex-row items-center justify-between">
-            <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
+            <Text className="font-black tracking-tight text-[27px] leading-tight" style={{ color: palette.textPrimary }}>🎯 {card.title}</Text>
           </View>
           <ScrollView 
             showsVerticalScrollIndicator={false} 
@@ -386,8 +388,8 @@ export const ConceptCardPreview = React.memo(({ card, onViewExplanation, isWatch
           >
             <RichText
               text={card.explanation || ''}
-              style={{ color: '#1E293B', fontSize: 15, lineHeight: 22, fontWeight: '600' }}
-              boldStyle={{ color: '#0F172A', fontWeight: '900' }}
+              style={{ color: palette.textSecondary, fontSize: 15, lineHeight: 22, fontWeight: '600' }}
+              boldStyle={{ color: palette.textPrimary, fontWeight: '900' }}
             />
           </ScrollView>
         </View>
@@ -438,6 +440,7 @@ interface ConceptCardPreviewStaticProps {
 }
 
 export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true }: ConceptCardPreviewStaticProps) => {
+  const palette = useThemePalette();
   const { companies } = useMemo(() => {
     const hash = card.title.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const knownCompanies = ['Google', 'Meta', 'Amazon', 'Microsoft', 'Apple', 'Netflix', 'Uber', 'Airbnb', 'Adobe', 'Atlassian'];
@@ -466,8 +469,8 @@ export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true
       <View className="gap-y-3">
         {/* Modern Apple-style Capsule Tags */}
         <View className="flex-row flex-wrap gap-2 items-center">
-          <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
-            <Text className="text-slate-600 text-[10px] font-extrabold uppercase tracking-wider">{card.topic}</Text>
+          <View className="px-3 py-1 rounded-full bg-transparent border" style={{ borderColor: palette.border }}>
+            <Text className="text-[10px] font-extrabold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{card.topic}</Text>
           </View>
           <View className={`px-3 py-1 rounded-full bg-transparent ${
             card.difficulty === 'Easy' ? 'border border-emerald-200' :
@@ -481,15 +484,15 @@ export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true
             }`}>{card.difficulty}</Text>
           </View>
           {card.complexity && (
-            <View className="px-3 py-1 rounded-full bg-transparent border border-slate-200/60">
-              <Text className="text-slate-600 text-[10px] font-mono font-extrabold uppercase tracking-wider">{card.complexity}</Text>
+            <View className="px-3 py-1 rounded-full bg-transparent border" style={{ borderColor: palette.border }}>
+              <Text className="text-[10px] font-mono font-extrabold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{card.complexity}</Text>
             </View>
           )}
         </View>
 
         {/* Title */}
         <Text
-          style={{ fontSize: 35, fontWeight: '900', color: '#0F172A', letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
+          style={{ fontSize: 35, fontWeight: '900', color: palette.textPrimary, letterSpacing: -0.6, lineHeight: 35, marginTop: 4 }}
           numberOfLines={2}
         >
           {card.title}
@@ -497,8 +500,8 @@ export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true
 
         {/* Companies Pill */}
         <View className="mt-1 self-start flex-row items-center gap-x-2">
-          <Text style={{ fontSize: 9, fontWeight: '800', color: '#94A3B8' }}>Companies:</Text>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
+          <Text style={{ fontSize: 9, fontWeight: '800', color: palette.textMuted }}>Companies:</Text>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: palette.textSecondary }}>
             {companies}
           </Text>
         </View>
@@ -508,10 +511,10 @@ export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true
       <View style={{ flex: 1 }} />
 
       {/* Middle Section */}
-      <View style={{ maxHeight: 380, flexShrink: 1, backgroundColor: '#EFF6FF', borderRadius: 24, borderWidth: 1.5, borderColor: '#93C5FD' }}>
+      <View style={{ maxHeight: 380, flexShrink: 1, backgroundColor: palette.accentBg, borderRadius: 24, borderWidth: 1.5, borderColor: palette.border }}>
         <View className="p-4 gap-y-3 justify-between" style={{ maxHeight: '100%', flexShrink: 1 }}>
           <View className="flex-row items-center justify-between">
-            <Text className="text-slate-900 font-black tracking-tight text-[27px] leading-tight">🎯 {card.title}</Text>
+            <Text className="font-black tracking-tight text-[27px] leading-tight" style={{ color: palette.textPrimary }}>🎯 {card.title}</Text>
           </View>
           <ScrollView 
             showsVerticalScrollIndicator={false} 
@@ -520,7 +523,7 @@ export const ConceptCardPreviewStatic = React.memo(({ card, scrollEnabled = true
             contentContainerStyle={{ flexGrow: 1 }}
             scrollEnabled={scrollEnabled}
           >
-            <Text style={{ color: '#1E293B', fontSize: 15, lineHeight: 22, fontWeight: '600' }}>
+            <Text style={{ color: palette.textSecondary, fontSize: 15, lineHeight: 22, fontWeight: '600' }}>
               {card.explanation || ''}
             </Text>
           </ScrollView>

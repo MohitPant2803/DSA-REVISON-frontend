@@ -217,16 +217,23 @@ export const useTrackingStore = create<TrackingState>()(
     {
       name: 'dsa-tracking-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        currentMode: state.currentMode,
-        infiniteLoop: state.infiniteLoop,
-        loopsCompleted: state.loopsCompleted,
-        reelsSessionId: state.reelsSessionId,
-        reelsSessionCards: state.reelsSessionCards,
-        reelsActiveIndex: state.reelsActiveIndex,
-        reelsSourceType: state.reelsSourceType,
-        reelsSourceId: state.reelsSourceId,
-      }),
+      partialize: (state) => {
+        const { useAuthStore } = require('./useAuthStore');
+        const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+        if (isGuest) {
+          return {};
+        }
+        return {
+          currentMode: state.currentMode,
+          infiniteLoop: state.infiniteLoop,
+          loopsCompleted: state.loopsCompleted,
+          reelsSessionId: state.reelsSessionId,
+          reelsSessionCards: state.reelsSessionCards,
+          reelsActiveIndex: state.reelsActiveIndex,
+          reelsSourceType: state.reelsSourceType,
+          reelsSourceId: state.reelsSourceId,
+        };
+      },
     }
   )
 );

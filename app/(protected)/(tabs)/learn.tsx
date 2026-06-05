@@ -53,9 +53,10 @@ import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 import api from '@/services/api';
 import { useUIStore } from '@/store/useUIStore';
 import { interactionScheduler } from '@/utils/interactionScheduler';
-import { useOptimizedFlatListSettings, useStableKeyExtractor } from '@/utils/listOptimizations';
 import { transitionScheduler } from '@/utils/transitionScheduler';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
+import { ThemeBackground } from '@/components/ThemeBackground';
+import { useThemePalette } from '@/hooks/useThemePalette';
 
 import Animated, {
   useSharedValue,
@@ -127,6 +128,7 @@ const StaggeredCard = ({
 };
 
 const FolderCardSkeleton = () => {
+  const palette = useThemePalette();
   const opacity = useSharedValue(0.4);
   useEffect(() => {
     opacity.value = withRepeat(
@@ -144,16 +146,17 @@ const FolderCardSkeleton = () => {
   }));
 
   return (
-    <Animated.View style={[styles.skeletonCard, skeletonStyle]}>
-      <View style={styles.skeletonTitle} />
-      <View style={styles.skeletonSub} />
-      <View style={styles.skeletonBar} />
+    <Animated.View style={[styles.skeletonCard, skeletonStyle, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+      <View style={[styles.skeletonTitle, { backgroundColor: palette.inputBg }]} />
+      <View style={[styles.skeletonSub, { backgroundColor: palette.inputBg }]} />
+      <View style={[styles.skeletonBar, { backgroundColor: palette.inputBg }]} />
     </Animated.View>
   );
 };
 
 export default function LearnScreen() {
   useAppBackHandler();
+  const palette = useThemePalette();
   
   const [isTransitionReady, setIsTransitionReady] = useState(true);
 
@@ -221,6 +224,10 @@ export default function LearnScreen() {
   const [quotesList, setQuotesList] = useState<any[]>(cachedQuotes || []);
 
   useEffect(() => {
+    if (user?.id === 'guest-user') {
+      // Strictly bypass network requests for guest users to remain completely offline
+      return;
+    }
     const fetchQuotes = async () => {
       try {
         const response = await api.get('/senior-quotes');
@@ -234,15 +241,26 @@ export default function LearnScreen() {
       }
     };
     fetchQuotes();
-  }, [setSeniorQuotes]);
+  }, [setSeniorQuotes, user?.id]);
 
   // Selected Quote Selection for Ghost Typing - sequential rotation per user entry
   const [selectedQuote, setSelectedQuote] = useState<any>(null);
 
   useEffect(() => {
-    if (selectedQuote || !quotesList || quotesList.length === 0) return;
+    if (!quotesList || quotesList.length === 0) return;
 
     const store = usePlaylistStateStore.getState();
+
+    // If we have already selected a quote in this mount, keep it, but reactively
+    // update the reference if its author or text has changed in the refreshed list.
+    if (selectedQuote) {
+      const updatedQuote = quotesList.find((q) => q._id === selectedQuote._id);
+      if (updatedQuote && (updatedQuote.author !== selectedQuote.author || updatedQuote.text !== selectedQuote.text)) {
+        setSelectedQuote(updatedQuote);
+      }
+      return;
+    }
+
     let index = store.currentQuoteIndex;
 
     // Safety bounds check: if out of bounds, reset back to 0th index
@@ -284,10 +302,12 @@ export default function LearnScreen() {
     ],
   }));
 
-  // Reveal senior author gently exactly 0.5s after animations settle
+  // Trigger bottom tab bar slide up as soon as typewriter ends/author reveal starts
   useEffect(() => {
-    if (phase === 'authorReveal' || phase === 'contentReady' || phase === 'settled') {
+    if (phase === 'settled' || phase === 'authorReveal') {
       setHasAppBeenAnimated(true);
+    }
+    if (phase === 'authorReveal' || phase === 'contentReady' || phase === 'settled') {
       if (phase === 'settled' && !globalHasPlayedLearnAnimation) {
         // Trigger wobbly 3-jump entry sequence for ReeW!
         const jumpDuration = 420;
@@ -637,7 +657,8 @@ export default function LearnScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+    <ThemeBackground>
+      <View style={{ flex: 1, backgroundColor: 'transparent', paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <Animated.View style={[{ flex: 1 }, screenAnimatedStyle]}>
         {/* Main Scrollable Content */}
         <ScrollView
@@ -656,7 +677,7 @@ export default function LearnScreen() {
         {/* Top welcome line and centered quote anchor */}
         <View style={styles.headerBlock}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
+            <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle, { color: palette.textPrimary }]}>
               Welcome back, {firstName}
             </Animated.Text>
             <Animated.View style={reewEntryStyle}>
@@ -667,10 +688,10 @@ export default function LearnScreen() {
           {/* ONE Persistent, continuous Quote block that slides upward with 100% object permanence */}
           {selectedQuote && (
             <Animated.View style={[styles.headerQuoteContainer, quoteAnimatedStyle]}>
-              <Text style={styles.greetingSub}>
+              <Text style={[styles.greetingSub, { color: palette.textSecondary }]}>
                 {displayedMessage}
                 {!isTypingComplete && (
-                  <Animated.Text style={[styles.cursor, cursorAnimatedStyle]}>|</Animated.Text>
+                  <Animated.Text style={[styles.cursor, cursorAnimatedStyle, { color: palette.accent }]}>|</Animated.Text>
                 )}
               </Text>
               
@@ -686,7 +707,7 @@ export default function LearnScreen() {
                   onPress={() => setSeniorModalVisible(true)} 
                   activeOpacity={0.6}
                 >
-                  <Text style={styles.headerAuthorText}>— {authorName}</Text>
+                  <Text style={[styles.headerAuthorText, { color: palette.accent }]}>— {authorName}</Text>
                 </TouchableOpacity>
               </Animated.View>
             </Animated.View>
@@ -700,9 +721,18 @@ export default function LearnScreen() {
           <View style={styles.sectionHeaderRow}>
             <View />
             {canManageContent && (
-              <TouchableOpacity onPress={openCreate} style={styles.addSheetBtn}>
-                <Plus color="#64748B" size={15} strokeWidth={2.2} />
-                <Text style={styles.addSheetText}>New journal</Text>
+              <TouchableOpacity 
+                onPress={openCreate} 
+                style={[
+                  styles.addSheetBtn,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: palette.border,
+                  }
+                ]}
+              >
+                <Plus color={palette.textSecondary} size={15} strokeWidth={2.2} />
+                <Text style={[styles.addSheetText, { color: palette.textSecondary }]}>New journal</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -757,33 +787,43 @@ export default function LearnScreen() {
           style={styles.modalOverlay}
         >
           <TouchableOpacity 
-            style={styles.modalBackground} 
+            style={[
+              styles.modalBackground,
+              { backgroundColor: palette.isDark ? 'rgba(0,0,0,0.6)' : 'rgba(15, 23, 42, 0.35)' }
+            ]} 
             activeOpacity={1} 
             onPress={() => setSeniorModalVisible(false)} 
           />
           <Animated.View 
             entering={FadeIn.duration(200)} 
-            style={styles.modalCard}
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+                shadowColor: palette.isDark ? '#000000' : '#0F172A',
+              }
+            ]}
           >
             {/* Frosted Glass accent top line */}
-            <View style={styles.modalStripe} />
+            <View style={[styles.modalStripe, { backgroundColor: palette.accent }]} />
             
             <View style={styles.modalContent}>
-              <Text style={styles.modalQuote}>"{selectedQuote.text}"</Text>
+              <Text style={[styles.modalQuote, { color: palette.textSecondary }]}>"{selectedQuote.text}"</Text>
               
-              <View style={styles.divider} />
+              <View style={[styles.divider, { backgroundColor: palette.border }]} />
               
-              <Text style={styles.seniorName}>{authorName}</Text>
+              <Text style={[styles.seniorName, { color: palette.textPrimary }]}>{authorName}</Text>
               
               <View style={styles.detailsBlock}>
-                <Text style={styles.detailValue}>{selectedQuote.collegeName}</Text>
-                <Text style={styles.detailValue}>{selectedQuote.branch}</Text>
-                <Text style={styles.detailValue}>{selectedQuote.yearOfGraduation}</Text>
+                {selectedQuote.collegeName ? <Text style={[styles.detailValue, { color: palette.textSecondary }]}>{selectedQuote.collegeName}</Text> : null}
+                {selectedQuote.branch ? <Text style={[styles.detailValue, { color: palette.textSecondary }]}>{selectedQuote.branch}</Text> : null}
+                {selectedQuote.yearOfGraduation ? <Text style={[styles.detailValue, { color: palette.textSecondary }]}>{selectedQuote.yearOfGraduation}</Text> : null}
               </View>
             </View>
 
             <TouchableOpacity 
-              style={styles.closeBtn} 
+              style={[styles.closeBtn, { backgroundColor: palette.accent }]} 
               onPress={() => setSeniorModalVisible(false)}
             >
               <Text style={styles.closeBtnText}>Close</Text>
@@ -793,6 +833,7 @@ export default function LearnScreen() {
       )}
       </Animated.View>
     </View>
+  </ThemeBackground>
   );
 }
 

@@ -20,6 +20,8 @@ import api from '@/services/api';
 import { SuperchargedPressable } from '@/components/motion/SuperchargedPressable';
 import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 import { hapticFeedback } from '@/utils/haptics';
+import ThemeBackground from '@/components/ThemeBackground';
+import { Image } from 'expo-image';
 
 const { width } = Dimensions.get('window');
 
@@ -32,7 +34,10 @@ export default function LoginScreen() {
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const pageOpacity = useSharedValue(0);
+
   useEffect(() => {
+    pageOpacity.value = withTiming(1, { duration: 800 });
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -108,6 +113,21 @@ export default function LoginScreen() {
         const res = await api.post('/auth/google', { idToken, deviceId, clockEpoch });
         const { token, user: rawUser } = res.data.data;
 
+        // Reset walkthrough state to make sure tutorial starts fresh for new Google sign-in accounts
+        const createdAt = new Date(rawUser.createdAt).getTime();
+        const updatedAt = new Date(rawUser.updatedAt).getTime();
+        const isNewUser = Math.abs(createdAt - updatedAt) < 10000;
+        if (isNewUser) {
+          const { useWalkthroughStore } = require('@/store/useWalkthroughStore');
+          useWalkthroughStore.getState().setStep('point-reels');
+          
+          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+          await AsyncStorage.removeItem('dsa-reels-walkthrough-complete');
+          await AsyncStorage.removeItem('dsa-reels-tutorial-complete');
+          await AsyncStorage.removeItem('guest-dsa-reels-walkthrough-complete');
+          await AsyncStorage.removeItem('guest-dsa-reels-tutorial-complete');
+        }
+
         const user = {
           id: rawUser._id,
           name: rawUser.name,
@@ -153,69 +173,67 @@ export default function LoginScreen() {
     }
   };
 
+  const handleSeeTrial = async () => {
+    setAuthError(null);
+    try {
+      setIsAuthenticating(true);
+      hapticFeedback.success();
+      
+      const mockToken = '';
+      const mockUser = {
+        id: 'guest-user',
+        name: 'Guest Explorer',
+        email: 'guest@dsa-reels.com',
+        avatarUrl: 'https://ui-avatars.com/api/?name=Guest',
+        role: 'user' as const,
+      };
+
+      // Reset walkthrough state to make sure tutorial starts fresh
+      const { useWalkthroughStore } = require('@/store/useWalkthroughStore');
+      useWalkthroughStore.getState().setStep('point-reels');
+      
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.removeItem('dsa-reels-walkthrough-complete');
+      await AsyncStorage.removeItem('dsa-reels-tutorial-complete');
+      await AsyncStorage.removeItem('guest-dsa-reels-walkthrough-complete');
+      await AsyncStorage.removeItem('guest-dsa-reels-tutorial-complete');
+
+      // Set onboarding as completed for trial so they go straight to walkthrough
+      const { useOnboardingStore } = require('@/store/useOnboardingStore');
+      await useOnboardingStore.getState().completeOnboarding();
+
+      await login(mockToken, mockUser);
+      
+      router.replace('/(protected)/(tabs)/learn');
+    } catch (error: any) {
+      setAuthError(error.message || 'Failed to start guest trial. Please try again.');
+      setIsAuthenticating(false);
+    }
+  };
+
   const logoAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: logoScale.value }],
   }));
 
+  const pageAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: pageOpacity.value,
+    flex: 1,
+  }));
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+    <Animated.View style={pageAnimatedStyle}>
+      <ThemeBackground style={{ flex: 1 }}>
+      <SafeAreaView style={[styles.container, { backgroundColor: 'transparent' }]}>
+        <View style={styles.content}>
         
-        {/* TOP: Floating app logo with breathing animation */}
         <CinematicFadeIn delay={100} style={styles.brandingBlock}>
-          <Animated.View style={[styles.logoTile, logoAnimatedStyle]}>
-            <View style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-              <Text 
-                style={{ 
-                  fontSize: 38, 
-                  fontWeight: '900', 
-                  color: '#8B5CF6', 
-                  fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-condensed',
-                  lineHeight: 46,
-                }}
-              >
-                R
-              </Text>
-              
-              {/* Star Sparkle (Top Right) */}
-              <View style={{ position: 'absolute', top: -4, right: -8 }}>
-                <Sparkles color="#8B5CF6" size={14} strokeWidth={1.5} />
-              </View>
-
-              {/* Star Sparkle (Bottom Left) */}
-              <View style={{ position: 'absolute', bottom: -2, left: -8 }}>
-                <Sparkles color="#A78BFA" size={10} strokeWidth={1.2} />
-              </View>
-
-              {/* Glowing Purple Dot (Top Left) */}
-              <View 
-                style={{ 
-                  position: 'absolute', 
-                  top: 4, 
-                  left: -2, 
-                  width: 4, 
-                  height: 4, 
-                  borderRadius: 2, 
-                  backgroundColor: '#8B5CF6', 
-                  opacity: 0.8 
-                }} 
-              />
-
-              {/* Glowing Purple Dot (Bottom Right) */}
-              <View 
-                style={{ 
-                  position: 'absolute', 
-                  bottom: 6, 
-                  right: -2, 
-                  width: 5, 
-                  height: 5, 
-                  borderRadius: 2.5, 
-                  backgroundColor: '#C084FC', 
-                  opacity: 0.7 
-                }} 
-              />
-            </View>
-          </Animated.View>
+          <View style={styles.logoTile}>
+            <Image
+              source={require('../../assets/icon213.png')}
+              style={{ width: '100%', height: '100%', borderRadius: 24 }}
+              contentFit="cover"
+            />
+          </View>
         </CinematicFadeIn>
 
         {/* CENTER: Typography content */}
@@ -272,6 +290,22 @@ export default function LoginScreen() {
             )}
           </SuperchargedPressable>
 
+          {/* SECONDARY CTA: See Trial Button */}
+          <SuperchargedPressable
+            disabled={isAuthenticating}
+            onPress={handleSeeTrial}
+            activeScale={0.96}
+            style={styles.trialBtn}
+            accessibilityLabel="See Trial button"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isAuthenticating }}
+          >
+            <View style={styles.btnContent}>
+              <Text style={styles.trialBtnText}>See Trial</Text>
+              <ArrowRight color="#8B5CF6" size={16} strokeWidth={2.5} style={styles.btnArrow} />
+            </View>
+          </SuperchargedPressable>
+
           {/* Accessible Inline Error Display */}
           {authError && (
             <View 
@@ -292,6 +326,8 @@ export default function LoginScreen() {
         </CinematicFadeIn>
       </View>
     </SafeAreaView>
+    </ThemeBackground>
+    </Animated.View>
   );
 }
 
@@ -369,6 +405,27 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 3,
     marginBottom: 16,
+  },
+  trialBtn: {
+    backgroundColor: '#FFFFFF',
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 16,
+  },
+  trialBtnText: {
+    color: '#8B5CF6',
+    fontSize: 15,
+    fontWeight: 'bold',
   },
   btnContent: {
     flexDirection: 'row',

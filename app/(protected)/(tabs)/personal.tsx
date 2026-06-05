@@ -13,7 +13,17 @@ import {
   TouchableOpacity,
   InteractionManager,
 } from 'react-native';
-import Animated, { FadeInUp, FadeOut } from 'react-native-reanimated';
+import Animated, { 
+  FadeInUp, 
+  FadeOut, 
+  useSharedValue, 
+  useAnimatedStyle, 
+  withTiming, 
+  interpolateColor, 
+  cancelAnimation,
+  withRepeat,
+  withSequence
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -43,11 +53,14 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
+import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 import { SyncPauseGate } from '@/components/SyncPauseGate';
 import { usePlaylistCount } from '@/hooks/usePlaylistStoreSelectors';
 import { useBiometricReauth } from '@/hooks/useBiometricReauth';
 import { theme } from '@/theme';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
+import { ThemeBackground } from '@/components/ThemeBackground';
+import { useThemePalette } from '@/hooks/useThemePalette';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -57,24 +70,28 @@ const lightHaptic = () => {
   }
 };
 
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
 // -------------------------------------------------------------
 // PINNED SMART PLAYLIST CARD
 // -------------------------------------------------------------
 interface SmartPlaylistCardProps {
   playlist: any;
   onPress: () => void;
+  shouldGlow?: boolean;
 }
 
-const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardProps) => {
+const SmartPlaylistCard = React.memo(({ playlist, onPress, shouldGlow = false }: SmartPlaylistCardProps) => {
+  const palette = useThemePalette();
+  
   const getCardTheme = () => {
     switch (playlist.id) {
       case 'easy':
         return {
-          bg: '#FFFFFF',
-          border: 'rgba(16, 185, 129, 0.15)',
+          bg: palette.surface,
+          border: palette.border,
           text: '#10B981',
           iconBg: 'rgba(16, 185, 129, 0.08)',
-          blobColor: 'rgba(16, 185, 129, 0.02)',
           displayName: 'Easy progress',
           statusText: 'Keep it going',
           statusColor: '#10B981',
@@ -82,39 +99,36 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
         };
       case 'medium':
         return {
-          bg: '#FFFFFF',
-          border: 'rgba(245, 158, 11, 0.15)',
-          text: '#D97706',
-          iconBg: 'rgba(245, 158, 11, 0.08)',
-          blobColor: 'rgba(245, 158, 11, 0.02)',
+          bg: palette.surface,
+          border: palette.border,
+          text: '#F97316', // Sleek orange instead of yellowish amber
+          iconBg: 'rgba(249, 115, 22, 0.08)',
           displayName: 'Medium practice',
           statusText: 'Good to review',
-          statusColor: '#D97706',
+          statusColor: '#F97316',
           icon: Zap,
         };
       case 'hard':
         return {
-          bg: '#FFFFFF',
-          border: 'rgba(239, 68, 68, 0.15)',
-          text: '#DC2626',
+          bg: palette.surface,
+          border: palette.border,
+          text: '#EF4444',
           iconBg: 'rgba(239, 68, 68, 0.08)',
-          blobColor: 'rgba(239, 68, 68, 0.02)',
           displayName: 'Hard focus',
-          statusText: 'Cards need attention',
-          statusColor: '#DC2626',
+          statusText: 'Needs attention',
+          statusColor: '#EF4444',
           icon: Brain,
         };
       case 'skipped':
       default:
         return {
-          bg: '#FFFFFF',
-          border: 'rgba(59, 130, 246, 0.15)',
-          text: '#2563EB',
+          bg: palette.surface,
+          border: palette.border,
+          text: '#3B82F6',
           iconBg: 'rgba(59, 130, 246, 0.08)',
-          blobColor: 'rgba(59, 130, 246, 0.02)',
           displayName: 'Skipped for now',
           statusText: 'Come back later',
-          statusColor: '#2563EB',
+          statusColor: '#3B82F6',
           icon: SkipForward,
         };
     }
@@ -123,47 +137,84 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
   const theme = getCardTheme();
   const IconComponent = theme.icon;
 
+  const glowAnim = useSharedValue(0);
+
+  useEffect(() => {
+    if (shouldGlow) {
+      glowAnim.value = withTiming(1, { duration: 400 });
+    } else {
+      glowAnim.value = withTiming(0, { duration: 300 });
+    }
+    return () => {
+      cancelAnimation(glowAnim);
+    };
+  }, [shouldGlow]);
+
+  const animatedGlowStyle = useAnimatedStyle(() => {
+    const borderColor = interpolateColor(
+      glowAnim.value,
+      [0, 1],
+      [theme.border, '#EF4444']
+    );
+
+    const defaultShadowOpacity = palette.isDark ? 0.2 : 0.03;
+    const shadowOpacity = defaultShadowOpacity + glowAnim.value * (0.45 - defaultShadowOpacity);
+
+    const shadowRadius = 14 + glowAnim.value * 6;
+
+    const shadowColor = interpolateColor(
+      glowAnim.value,
+      [0, 1],
+      [palette.isDark ? '#000000' : '#0F172A', '#EF4444']
+    );
+
+    const elevation = 2 + glowAnim.value * 4;
+
+    return {
+      borderColor,
+      shadowColor,
+      shadowOpacity,
+      shadowRadius,
+      elevation,
+      shadowOffset: {
+        width: 0,
+        height: 6 + glowAnim.value * 2,
+      },
+    };
+  });
+
   return (
     <View style={{ width: '48%', marginBottom: 12 }}>
-      <TouchableOpacity
+      <AnimatedTouchableOpacity
         onPress={onPress}
         activeOpacity={0.85}
-        className="w-full p-5 rounded-[26px] border relative overflow-hidden"
-        style={{
-          backgroundColor: theme.bg,
-          borderColor: theme.border,
-          shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.03,
-          shadowRadius: 14,
-          elevation: 2,
-        }}
+        className="w-full p-5 border relative overflow-hidden"
+        style={[
+          {
+            backgroundColor: theme.bg,
+            shadowColor: palette.isDark ? '#000000' : '#0F172A',
+            shadowOffset: { width: 0, height: 6 },
+            shadowOpacity: palette.isDark ? 0.2 : 0.03,
+            shadowRadius: 14,
+            elevation: 2,
+            borderColor: theme.border,
+            borderRadius: 26,
+          },
+          animatedGlowStyle,
+        ]}
       >
-        {/* Soft corner blob decoration */}
-        <View
-          style={{
-            position: 'absolute',
-            top: -24,
-            right: -24,
-            width: 76,
-            height: 76,
-            borderRadius: 38,
-            backgroundColor: theme.blobColor,
-          }}
-        />
-
         {/* Header containing icon */}
         <View className="flex-row items-center justify-between">
           <View
-            className="w-9 h-9 rounded-full items-center justify-center border"
-            style={{ backgroundColor: theme.iconBg, borderColor: 'rgba(15,23,42,0.04)' }}
+            className="w-9 h-9 rounded-xl items-center justify-center border"
+            style={{ backgroundColor: theme.iconBg, borderColor: palette.border }}
           >
             <IconComponent color={theme.text} size={15} strokeWidth={2.0} />
           </View>
         </View>
 
         {/* Label */}
-        <Text className="font-bold text-[13px] text-[#0F172A] mt-4 tracking-tight">
+        <Text className="font-bold text-[13px] mt-4 tracking-tight" style={{ color: palette.textPrimary }}>
           {theme.displayName}
         </Text>
 
@@ -174,7 +225,7 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress }: SmartPlaylistCardPr
         >
           {theme.statusText}
         </Text>
-      </TouchableOpacity>
+      </AnimatedTouchableOpacity>
     </View>
   );
 });
@@ -191,6 +242,7 @@ interface CustomPlaylistCardProps {
 const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: CustomPlaylistCardProps) => {
   const count = usePlaylistCount(playlist.id);
   const displayCount = count !== undefined ? count : (playlist.itemCount ?? 0);
+  const palette = useThemePalette();
 
   return (
     <View style={{ width: '48%', marginBottom: 12 }}>
@@ -198,34 +250,43 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
         onPress={onPress}
         onLongPress={onLongPress}
         activeOpacity={0.85}
-        className="w-full flex-row items-center p-4 rounded-[22px] border bg-white justify-between"
+        className="w-full flex-row items-center p-4 border justify-between"
         style={{
-          borderColor: '#E2E8F0',
-          shadowColor: '#0F172A',
+          backgroundColor: palette.surface,
+          borderColor: palette.border,
+          shadowColor: palette.isDark ? '#000000' : '#0F172A',
           shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.02,
+          shadowOpacity: palette.isDark ? 0.2 : 0.02,
           shadowRadius: 14,
           elevation: 2,
+          borderRadius: 26,
         }}
       >
         <View className="flex-row items-center flex-1 mr-2">
-          {/* Soft purple rounded icon container */}
+          {/* Dynamic soft active rounded icon container */}
           <View 
-            className="w-10 h-10 rounded-2xl items-center justify-center bg-[#F5F3FF] border"
-            style={{ borderColor: 'rgba(139, 92, 246, 0.05)' }}
+            className="w-10 h-10 rounded-xl items-center justify-center border"
+            style={{ 
+              backgroundColor: palette.accentBg,
+              borderColor: palette.border,
+            }}
           >
-            <ListMusic color="#8B5CF6" size={16} strokeWidth={2.0} />
+            <ListMusic color={palette.accent} size={16} strokeWidth={2.0} />
           </View>
 
           {/* Title & Metadata */}
           <View className="ml-3 flex-1">
             <Text 
-              className="font-bold text-[13px] text-[#0F172A]" 
+              className="font-bold text-[13px]" 
+              style={{ color: palette.textPrimary }}
               numberOfLines={1}
             >
               {playlist.name}
             </Text>
-            <Text className="text-[10px] font-semibold text-[#64748B] mt-0.5">
+            <Text 
+              className="text-[10px] font-semibold mt-0.5"
+              style={{ color: palette.textSecondary }}
+            >
               {displayCount === 0 ? 'Empty' : `${displayCount} cards`}
             </Text>
           </View>
@@ -236,7 +297,7 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
           onPress={onLongPress}
           className="p-1"
         >
-          <MoreHorizontal color="#64748B" size={16} />
+          <MoreHorizontal color={palette.textSecondary} size={16} />
         </TouchableOpacity>
       </TouchableOpacity>
     </View>
@@ -249,6 +310,7 @@ const CustomPlaylistCard = React.memo(({ playlist, onPress, onLongPress }: Custo
 const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => {
   const [playlistName, setPlaylistName] = useState('');
   const createPlaylistMutation = useCreatePlaylist();
+  const palette = useThemePalette();
 
   const handleCreate = () => {
     const name = playlistName.trim();
@@ -276,10 +338,11 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
     <Modal visible={true} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable className="flex-1 bg-black/25 justify-center items-center px-6" onPress={onClose}>
         <View 
-          className="bg-white w-full rounded-[32px] p-6 border bg-white"
+          className="w-full rounded-3xl p-6 border"
           style={{
-            borderColor: 'rgba(148,163,184,0.10)',
-            shadowColor: '#0F172A',
+            backgroundColor: palette.surface,
+            borderColor: palette.border,
+            shadowColor: palette.isDark ? '#000000' : '#0F172A',
             shadowOffset: { width: 0, height: 8 },
             shadowOpacity: 0.03,
             shadowRadius: 18,
@@ -287,15 +350,19 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
           }}
           onTouchEnd={(e) => e.stopPropagation()}
         >
-          <Text className="text-[#0F172A] text-base font-bold tracking-tight mb-4 text-center">
+          <Text className="text-base font-bold tracking-tight mb-4 text-center" style={{ color: palette.textPrimary }}>
             Create Custom Collection
           </Text>
 
           <TextInput
-            className="border text-[#0F172A] p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center bg-[#FAF9F7]"
-            style={{ borderColor: 'rgba(148,163,184,0.12)' }}
+            className="border p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center"
+            style={{ 
+              backgroundColor: palette.inputBg,
+              borderColor: palette.border,
+              color: palette.textPrimary 
+            }}
             placeholder="e.g. Trees, Dynamic Programming..."
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={palette.textMuted}
             value={playlistName}
             onChangeText={setPlaylistName}
             autoFocus
@@ -308,8 +375,11 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
               onPress={handleCreate}
               disabled={createPlaylistMutation.isPending}
               activeOpacity={0.8}
-              className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
-              style={{ opacity: createPlaylistMutation.isPending ? 0.7 : 1 }}
+              className="flex-1 py-3.5 rounded-2xl items-center justify-center"
+              style={{ 
+                opacity: createPlaylistMutation.isPending ? 0.7 : 1,
+                backgroundColor: palette.accent 
+              }}
             >
               {createPlaylistMutation.isPending ? (
                 <ActivityIndicator color="#fff" size="small" />
@@ -322,10 +392,13 @@ const CreatePlaylistForm = React.memo(({ onClose }: { onClose: () => void }) => 
               onPress={onClose}
               disabled={createPlaylistMutation.isPending}
               activeOpacity={0.85}
-              className="flex-1 py-3.5 rounded-2xl items-center justify-center border bg-white"
-              style={{ borderColor: 'rgba(148,163,184,0.10)' }}
+              className="flex-1 py-3.5 rounded-2xl items-center justify-center border"
+              style={{ 
+                backgroundColor: palette.inputBg,
+                borderColor: palette.border 
+              }}
             >
-              <Text className="text-[#64748B] font-semibold text-sm">Cancel</Text>
+              <Text className="font-semibold text-sm" style={{ color: palette.textSecondary }}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -345,6 +418,7 @@ interface SignInPromptModalProps {
 const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProps) => {
   const { login } = useAuthStore();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const palette = useThemePalette();
 
   const handleSignIn = async () => {
     lightHaptic();
@@ -398,10 +472,11 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
     <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable className="flex-1 bg-black/35 justify-center items-center px-6" onPress={onClose}>
         <View 
-          className="bg-white w-full rounded-[32px] p-6 border"
+          className="w-full rounded-3xl p-6 border"
           style={{
-            borderColor: 'rgba(148,163,184,0.12)',
-            shadowColor: '#0F172A',
+            backgroundColor: palette.surface,
+            borderColor: palette.border,
+            shadowColor: palette.isDark ? '#000000' : '#0F172A',
             shadowOffset: { width: 0, height: 10 },
             shadowOpacity: 0.05,
             shadowRadius: 20,
@@ -412,20 +487,20 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
           {/* Top glowing lock icon */}
           <View className="items-center mb-5">
             <View 
-              className="w-14 h-14 rounded-2xl items-center justify-center bg-[#F5F3FF] border mb-1"
-              style={{ borderColor: 'rgba(139, 92, 246, 0.08)' }}
+              className="w-14 h-14 rounded-2xl items-center justify-center border mb-1"
+              style={{ backgroundColor: palette.accentBg, borderColor: palette.border }}
             >
-              <Lock color="#8B5CF6" size={24} strokeWidth={2.0} />
+              <Lock color={palette.accent} size={24} strokeWidth={2.0} />
             </View>
           </View>
 
           {/* Heading */}
-          <Text className="text-[#0B1327] text-lg font-black tracking-tight text-center mb-2 leading-tight">
+          <Text className="text-lg font-black tracking-tight text-center mb-2 leading-tight" style={{ color: palette.textPrimary }}>
             Sign In Required
           </Text>
 
           {/* Body */}
-          <Text className="text-[#7F8A9E] text-[13px] font-semibold text-center leading-relaxed mb-6 px-4">
+          <Text className="text-[13px] font-semibold text-center leading-relaxed mb-6 px-4" style={{ color: palette.textSecondary }}>
             Connect a secure account to create custom playlists, back up your progress, and protect your revision streak.
           </Text>
 
@@ -435,8 +510,11 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
               onPress={handleSignIn}
               disabled={isAuthenticating}
               activeOpacity={0.8}
-              className="w-full py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
-              style={{ opacity: isAuthenticating ? 0.75 : 1 }}
+              className="w-full py-3.5 rounded-2xl items-center justify-center"
+              style={{ 
+                opacity: isAuthenticating ? 0.75 : 1,
+                backgroundColor: palette.accent
+              }}
             >
               {isAuthenticating ? (
                 <ActivityIndicator color="#fff" size="small" />
@@ -449,10 +527,10 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
               onPress={onClose}
               disabled={isAuthenticating}
               activeOpacity={0.85}
-              className="w-full py-3.5 rounded-2xl items-center justify-center border bg-[#FAF9F7]"
-              style={{ borderColor: 'rgba(148,163,184,0.10)' }}
+              className="w-full py-3.5 rounded-2xl items-center justify-center border"
+              style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
             >
-              <Text className="text-[#64748B] font-semibold text-sm">Maybe Later</Text>
+              <Text className="font-semibold text-sm" style={{ color: palette.textSecondary }}>Maybe Later</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -467,6 +545,7 @@ const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProp
 const AnalyticsStatsRow = React.memo(() => {
   const totalSwipes = useTrackingStore((state) => state.totalSwipes);
   const totalScrolls = useTrackingStore((state) => state.totalScrolls);
+  const palette = useThemePalette();
 
   // Compact formatter following exact rules:
   // - 999 -> 999
@@ -488,13 +567,13 @@ const AnalyticsStatsRow = React.memo(() => {
   return (
     <View className="flex-row items-center gap-4 mt-3 mb-1">
       <View>
-        <Text className="text-[10px] font-bold text-[#7F8A9E] uppercase tracking-wider">Swipes</Text>
-        <Text className="text-base font-extrabold text-[#8B5CF6]">{formatCompact(totalSwipes)}</Text>
+        <Text className="text-[10px] font-bold uppercase tracking-wider" style={{ color: palette.textSecondary }}>Swipes</Text>
+        <Text className="text-base font-extrabold" style={{ color: palette.accent }}>{formatCompact(totalSwipes)}</Text>
       </View>
-      <View style={{ width: 1, height: 16, backgroundColor: '#E2E8F0' }} />
+      <View style={{ width: 1, height: 16, backgroundColor: palette.border }} />
       <View>
-        <Text className="text-[10px] font-bold text-[#7F8A9E] uppercase tracking-wider">Scrolls</Text>
-        <Text className="text-base font-extrabold text-[#8B5CF6]">{formatCompact(totalScrolls)}</Text>
+        <Text className="text-[10px] font-bold uppercase tracking-wider" style={{ color: palette.textSecondary }}>Scrolls</Text>
+        <Text className="text-base font-extrabold" style={{ color: palette.accent }}>{formatCompact(totalScrolls)}</Text>
       </View>
     </View>
   );
@@ -515,6 +594,7 @@ const getGreeting = () => {
 export default function PersonalScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const palette = useThemePalette();
   const { user, logout, isSessionExpired } = useAuthStore();
   const { triggerBiometricReauth } = useBiometricReauth();
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
@@ -550,12 +630,18 @@ export default function PersonalScreen() {
   useEffect(() => {
     if (playlists && playlists.length > 0) {
       const initialCounts: Record<string, number> = {};
+      const customPlaylistsToHydrate: Array<{ id: string; orderedCardIds: string[] }> = [];
+
       playlists.forEach((p: any) => {
         initialCounts[p.id] = p.itemCount ?? 0;
         if (!['easy', 'medium', 'hard', 'skipped'].includes(p.id)) {
-          usePlaylistStateStore.getState().hydrateCustomPlaylistOrder(p.id, p.orderedCardIds || []);
+          customPlaylistsToHydrate.push({ id: p.id, orderedCardIds: p.orderedCardIds || [] });
         }
       });
+
+      if (customPlaylistsToHydrate.length > 0) {
+        usePlaylistStateStore.getState().hydrateAllCustomPlaylistsOrder(customPlaylistsToHydrate);
+      }
       hydrateSmartCounts(initialCounts);
     }
   }, [playlists, hydrateSmartCounts]);
@@ -564,6 +650,51 @@ export default function PersonalScreen() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false);
   const [isAnalyticsOverlayOpen, setIsAnalyticsOverlayOpen] = useState(false);
+
+  const { step, setStep } = useWalkthroughStore();
+  const prevSettingsOpen = React.useRef(isSettingsOpen);
+
+  useEffect(() => {
+    if (step === 'myspace-settings-arrow' && isSettingsOpen) {
+      setStep('myspace-settings-open');
+    } else if (step === 'myspace-settings-open' && prevSettingsOpen.current && !isSettingsOpen) {
+      // Opened and now closed settings!
+      setStep('myspace-hard-focus');
+    }
+    prevSettingsOpen.current = isSettingsOpen;
+  }, [isSettingsOpen, step, setStep]);
+
+  const settingsPulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (step === 'myspace-settings-arrow') {
+      settingsPulse.value = withRepeat(
+        withSequence(
+          withTiming(0.4, { duration: 800 }),
+          withTiming(1.0, { duration: 800 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      cancelAnimation(settingsPulse);
+      settingsPulse.value = 1;
+    }
+    return () => cancelAnimation(settingsPulse);
+  }, [step]);
+
+  const settingsAnimatedStyle = useAnimatedStyle(() => {
+    if (step !== 'myspace-settings-arrow') {
+      return {
+        opacity: 1,
+        transform: [{ scale: 1 }],
+      };
+    }
+    return {
+      opacity: settingsPulse.value,
+      transform: [{ scale: 0.96 + (1 - settingsPulse.value) * 0.15 }],
+    };
+  });
 
   const totalSwipes = useTrackingStore((state) => state.totalSwipes);
   const totalScrolls = useTrackingStore((state) => state.totalScrolls);
@@ -578,10 +709,11 @@ export default function PersonalScreen() {
 
   // Smart split lists sorted exactly like the reference screenshot grid layout
   const smartPlaylists = useMemo(() => {
+    const safePlaylists = Array.isArray(playlists) ? playlists : [];
     const order = ['hard', 'easy', 'medium', 'skipped'];
     return order
       .map(id => {
-        const p = playlists.find(pl => pl.id === id);
+        const p = safePlaylists.find(pl => pl.id === id);
         if (!p) return undefined;
         let count = p.itemCount ?? 0;
         if (id === 'easy') count = easyCount ?? 0;
@@ -597,7 +729,8 @@ export default function PersonalScreen() {
   }, [playlists, easyCount, mediumCount, hardCount, skippedCount]);
 
   const customPlaylists = useMemo(() => {
-    return playlists.filter((p) => 
+    const safePlaylists = Array.isArray(playlists) ? playlists : [];
+    return safePlaylists.filter((p) => 
       p && 
       !['easy', 'medium', 'hard', 'skipped'].includes(p.id) &&
       !['easy', 'medium', 'hard', 'skipped'].includes(p.name?.toLowerCase())
@@ -687,7 +820,7 @@ export default function PersonalScreen() {
 
   if (!isTransitionReady) {
     return (
-      <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
+      <SafeAreaView className="flex-1" style={{ backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
         {/* Skeleton Header */}
         <View className="px-6 pb-6 pt-2">
           <View style={{ width: 140, height: 28, backgroundColor: '#E2E8F0', borderRadius: 8, marginBottom: 8 }} />
@@ -717,36 +850,9 @@ export default function PersonalScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#FAF9F7]" edges={['top', 'left', 'right']}>
-      <SyncPauseGate />
-      
-      {/* Sleek Minimalist Background Ambient Orbs */}
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', zIndex: -1 }}>
-        <View
-          style={{
-            position: 'absolute',
-            top: 50,
-            right: -120,
-            width: 500,
-            height: 500,
-            borderRadius: 250,
-            backgroundColor: 'rgba(139, 92, 246, 0.008)', // Reduced opacity significantly
-            filter: Platform.OS === 'web' ? 'blur(100px)' : undefined,
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            bottom: 80,
-            left: -150,
-            width: 450,
-            height: 450,
-            borderRadius: 225,
-            backgroundColor: 'rgba(245, 158, 11, 0.006)', // Reduced opacity significantly
-            filter: Platform.OS === 'web' ? 'blur(110px)' : undefined,
-          }}
-        />
-      </View>
+    <ThemeBackground>
+      <SafeAreaView className="flex-1" style={{ backgroundColor: 'transparent' }} edges={['top', 'left', 'right']}>
+        <SyncPauseGate />
 
       <ScrollView
         className="flex-1"
@@ -759,10 +865,16 @@ export default function PersonalScreen() {
         <View className="px-6 pb-6 pt-2">
           <View className="flex-row items-center justify-between">
             <View>
-              <Text className="text-[#0B1327] text-[32px] font-black tracking-tight leading-none">
+              <Text 
+                className="text-[32px] font-black tracking-tight leading-none"
+                style={{ color: palette.textPrimary }}
+              >
                 My Space
               </Text>
-              <Text className="text-[#475569] text-[13px] font-semibold mt-1.5 leading-none">
+              <Text 
+                className="text-[13px] font-semibold mt-1.5 leading-none"
+                style={{ color: palette.textSecondary }}
+              >
                 Your personal revision deck
               </Text>
             </View>
@@ -770,25 +882,26 @@ export default function PersonalScreen() {
             {/* Streak & Floating Capsule Navigation */}
             <View className="flex-row items-center gap-3">
               <ReeWCharacter state="streak" size={64} />
-              <TouchableOpacity
-                onPress={handlePressSettings}
-                activeOpacity={0.8}
-                className="w-8 h-8 rounded-full items-center justify-center bg-white border"
-                style={{
-                  borderColor: '#E2E8F0',
-                  shadowColor: '#0F172A',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.02,
-                  shadowRadius: 10,
-                  elevation: 1,
-                }}
-              >
-                <Settings2 color="#64748B" size={14} strokeWidth={2.0} />
-              </TouchableOpacity>
+              <Animated.View style={settingsAnimatedStyle}>
+                <TouchableOpacity
+                  onPress={handlePressSettings}
+                  activeOpacity={0.8}
+                  className="w-8 h-8 rounded-full items-center justify-center border"
+                  style={{
+                    backgroundColor: palette.surface,
+                    borderColor: palette.border,
+                    shadowColor: '#0F172A',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.02,
+                    shadowRadius: 10,
+                    elevation: 1,
+                  }}
+                >
+                  <Settings2 color={palette.textSecondary} size={14} strokeWidth={2.0} />
+                </TouchableOpacity>
+              </Animated.View>
             </View>
           </View>
-
-
         </View>
 
         {/* ==========================================
@@ -796,9 +909,10 @@ export default function PersonalScreen() {
             ========================================== */}
         <View className="px-6 mb-6">
           <View 
-            className="flex-row items-center justify-between p-6 rounded-[28px] bg-white border"
+            className="flex-row items-center justify-between p-6 rounded-[28px] border"
             style={{
-              borderColor: '#E2E8F0',
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
               shadowColor: '#0F172A',
               shadowOffset: { width: 0, height: 8 },
               shadowOpacity: 0.03,
@@ -810,19 +924,29 @@ export default function PersonalScreen() {
             <View className="flex-1 mr-4">
               {/* Smiling emoji avatar */}
               <View 
-                className="w-10 h-10 rounded-full items-center justify-center bg-[#F5F3FF] mb-3 border border-[#8B5CF6]/5"
+                className="w-10 h-10 rounded-full items-center justify-center border mb-3"
+                style={{
+                  backgroundColor: palette.accentBg,
+                  borderColor: palette.border,
+                }}
               >
-                <Smile color="#8B5CF6" size={20} strokeWidth={2.0} />
+                <Smile color={palette.accent} size={20} strokeWidth={2.0} />
               </View>
 
-              <Text className="text-[#0B1327] text-base font-bold tracking-tight">
+              <Text 
+                className="text-base font-bold tracking-tight"
+                style={{ color: palette.textPrimary }}
+              >
                 {getGreeting()}, {user?.name ? user.name.split(' ')[0] : 'there'}
               </Text>
               
               {/* Dynamic Analytics Stats Row (Isolated to avoid page rerenders) */}
               <AnalyticsStatsRow />
 
-              <Text className="text-[#475569] text-xs font-semibold leading-normal mt-1">
+              <Text 
+                className="text-xs font-semibold leading-normal mt-1"
+                style={{ color: palette.textSecondary }}
+              >
                 Let's keep the flow going.
               </Text>
 
@@ -830,7 +954,8 @@ export default function PersonalScreen() {
               <TouchableOpacity
                 onPress={() => router.push('/(protected)/(tabs)/reels')}
                 activeOpacity={0.85}
-                className="flex-row items-center px-4 py-2 rounded-full bg-[#8B5CF6] self-start mt-4 justify-between"
+                className="flex-row items-center px-4 py-2 rounded-full self-start mt-4 justify-between"
+                style={{ backgroundColor: palette.accent }}
               >
                 <Text className="text-white font-bold text-[11px] tracking-tight">
                     Continue Revising
@@ -842,12 +967,14 @@ export default function PersonalScreen() {
             {/* Right Column: Dynamic Vector-styled Illustration */}
             <View className="relative w-24 h-24 items-center justify-center">
               {/* Background circular glow */}
-              <View className="absolute w-20 h-20 rounded-full bg-[#8B5CF6]/5 opacity-5" />
+              <View className="absolute w-20 h-20 rounded-full" style={{ backgroundColor: palette.accent, opacity: 0.08 }} />
               
               {/* Stacking Book Layer 1 */}
               <View 
-                className="absolute w-14 h-9 rounded-lg bg-[#E2E8F0] border border-slate-200"
+                className="absolute w-14 h-9 rounded-lg border"
                 style={{
+                  backgroundColor: palette.isDark ? '#1E293B' : '#E2E8F0',
+                  borderColor: palette.border,
                   transform: [{ rotate: '-8deg' }, { translateY: 6 }, { translateX: -4 }],
                   shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 4 },
@@ -858,8 +985,10 @@ export default function PersonalScreen() {
               
               {/* Stacking Book Layer 2 */}
               <View 
-                className="absolute w-14 h-9 rounded-lg bg-[#CBD5E1] border border-slate-300"
+                className="absolute w-14 h-9 rounded-lg border"
                 style={{
+                  backgroundColor: palette.isDark ? '#334155' : '#CBD5E1',
+                  borderColor: palette.border,
                   transform: [{ rotate: '4deg' }, { translateY: -2 }, { translateX: 2 }],
                   shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 4 },
@@ -870,8 +999,10 @@ export default function PersonalScreen() {
               
               {/* Stacking Book Layer 3 (Top) */}
               <View 
-                className="absolute w-14 h-9 rounded-lg bg-[#F1F5F9] border border-slate-200 items-center justify-center"
+                className="absolute w-14 h-9 rounded-lg border items-center justify-center"
                 style={{
+                  backgroundColor: palette.inputBg,
+                  borderColor: palette.border,
                   transform: [{ rotate: '-2deg' }, { translateY: -10 }],
                   shadowColor: '#0F172A',
                   shadowOffset: { width: 0, height: 6 },
@@ -881,22 +1012,26 @@ export default function PersonalScreen() {
                 }}
               >
                 {/* Book cover spine marker line */}
-                <View className="w-8 h-1 bg-[#8B5CF6]/30 rounded-full mb-1" />
-                <View className="w-6 h-1 bg-[#8B5CF6]/20 rounded-full" />
+                <View className="w-8 h-1 rounded-full mb-1" style={{ backgroundColor: palette.accent, opacity: 0.3 }} />
+                <View className="w-6 h-1 rounded-full" style={{ backgroundColor: palette.accent, opacity: 0.2 }} />
               </View>
               
               {/* Plant branch leaf decorations */}
               <View 
-                className="absolute w-2 h-5 rounded-full bg-[#10B981]/15"
+                className="absolute w-2 h-5 rounded-full"
                 style={{
+                  backgroundColor: palette.accent,
+                  opacity: 0.25,
                   top: 14,
                   right: 8,
                   transform: [{ rotate: '25deg' }],
                 }}
               />
               <View 
-                className="absolute w-1.5 h-3 rounded-full bg-[#10B981]/10"
+                className="absolute w-1.5 h-3 rounded-full"
                 style={{
+                  backgroundColor: palette.accent,
+                  opacity: 0.18,
                   top: 28,
                   right: 4,
                   transform: [{ rotate: '45deg' }],
@@ -906,11 +1041,11 @@ export default function PersonalScreen() {
           </View>
         </View>
 
-        {/* ==========================================
-            COGNITIVE CORES: 4 PERMANENT SMART CORES
-            ========================================== */}
         <View className="px-6 mt-4">
-          <Text className="text-[#0B1327] text-[16px] font-black tracking-tight mb-4">
+          <Text 
+            className="text-[16px] font-black tracking-tight mb-4"
+            style={{ color: palette.textPrimary }}
+          >
             Focus areas
           </Text>
 
@@ -919,8 +1054,8 @@ export default function PersonalScreen() {
               {[1, 2, 3, 4].map((i) => (
                 <View
                   key={i}
-                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px] justify-between"
-                  style={{ borderColor: 'rgba(148,163,184,0.08)' }}
+                  className="w-[48%] p-5 border bg-white h-[100px] justify-between"
+                  style={{ borderColor: 'rgba(148,163,184,0.08)', borderRadius: 26 }}
                 >
                   <View className="w-8 h-8 rounded-xl bg-slate-100/50" />
                   <View className="h-4 w-12 bg-slate-100/50 rounded-full" />
@@ -933,6 +1068,7 @@ export default function PersonalScreen() {
                 <SmartPlaylistCard
                   key={pl.id}
                   playlist={pl}
+                  shouldGlow={pl.id === 'hard' && step === 'myspace-hard-focus'}
                   onPress={() => {
                       router.push({
                         pathname: '/(protected)/playlist/[playlistId]',
@@ -951,8 +1087,11 @@ export default function PersonalScreen() {
         <View className="px-6 mt-6">
           <View className="flex-row items-center justify-between mb-4 mt-2">
             <View className="flex-row items-center gap-2">
-              <Folder color="#8B5CF6" size={18} strokeWidth={2.0} />
-              <Text className="text-[#0B1327] text-[16px] font-black tracking-tight">
+              <Folder color={palette.accent} size={18} strokeWidth={2.0} />
+              <Text 
+                className="text-[16px] font-black tracking-tight"
+                style={{ color: palette.textPrimary }}
+              >
                 Playlists
               </Text>
             </View>
@@ -960,10 +1099,11 @@ export default function PersonalScreen() {
             <TouchableOpacity
               onPress={() => isGuest ? promptSignIn() : setIsCreating(true)}
               activeOpacity={0.8}
-              className="px-3.5 py-1.5 rounded-full bg-[#F3E8FF]/60 flex-row items-center gap-1"
+              className="px-3.5 py-1.5 rounded-full flex-row items-center gap-1"
+              style={{ backgroundColor: palette.accentBg }}
             >
-              <Plus color="#8B5CF6" size={12} strokeWidth={2.5} />
-              <Text className="text-[#8B5CF6] font-bold text-[11px]">New playlist</Text>
+              <Plus color={palette.accent} size={12} strokeWidth={2.5} />
+              <Text className="font-bold text-[11px]" style={{ color: palette.accent }}>New playlist</Text>
             </TouchableOpacity>
           </View>
 
@@ -972,8 +1112,8 @@ export default function PersonalScreen() {
               {[1, 2].map((i) => (
                 <View
                   key={i}
-                  className="w-[48%] p-5 rounded-[30px] border bg-white h-[100px]"
-                  style={{ borderColor: 'rgba(148,163,184,0.08)' }}
+                  className="w-[48%] p-5 border bg-white h-[100px]"
+                  style={{ borderColor: 'rgba(148,163,184,0.08)', borderRadius: 26 }}
                 />
               ))}
             </View>
@@ -1007,26 +1147,31 @@ export default function PersonalScreen() {
             </View>
           )}
 
-          {!playlistsLoading && isFetched && customPlaylists.length === 0 && (
+           {!playlistsLoading && isFetched && customPlaylists.length === 0 && (
             <View 
-              className="py-9 items-center bg-white rounded-[30px] border px-6"
+              className="py-9 items-center border px-6"
               style={{
-                borderColor: 'rgba(148,163,184,0.08)',
-                shadowColor: '#0F172A',
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+                shadowColor: palette.isDark ? '#000000' : '#0F172A',
                 shadowOffset: { width: 0, height: 8 },
-                shadowOpacity: 0.03,
+                shadowOpacity: palette.isDark ? 0.2 : 0.03,
                 shadowRadius: 18,
                 elevation: 2,
+                borderRadius: 26,
               }}
             >
               <View 
-                className="w-12 h-12 rounded-2xl items-center justify-center bg-[#F5F3FF]/40 border mb-4"
-                style={{ borderColor: 'rgba(139, 92, 246, 0.04)' }}
+                className="w-12 h-12 rounded-xl items-center justify-center border mb-4"
+                style={{ 
+                  backgroundColor: palette.accentBg,
+                  borderColor: palette.border,
+                }}
               >
-                <BookOpen color="#8B5CF6" size={20} strokeWidth={1.8} />
+                <BookOpen color={palette.accent} size={20} strokeWidth={1.8} />
               </View>
-              <Text className="text-[#0F172A] font-bold text-sm mb-1.5">No Playlists Yet</Text>
-              <Text className="text-[#64748B]/70 text-xs text-center leading-relaxed">
+              <Text className="font-bold text-sm mb-1.5" style={{ color: palette.textPrimary }}>No Playlists Yet</Text>
+              <Text className="text-xs text-center leading-relaxed" style={{ color: palette.textSecondary }}>
                 Create your own path. Bundle topics, key tags, or custom card decks into single peaceful collections.
               </Text>
             </View>
@@ -1123,18 +1268,19 @@ export default function PersonalScreen() {
       <Modal visible={isMenuOpen} transparent animationType="fade" onRequestClose={() => setIsMenuOpen(false)}>
         <Pressable className="flex-1 bg-black/25 justify-end" onPress={() => setIsMenuOpen(false)}>
           <View 
-            className="bg-white mx-4 mb-10 rounded-[32px] p-6 border bg-white"
+            className="mx-4 mb-10 rounded-3xl p-6 border"
             style={{
-              borderColor: 'rgba(148,163,184,0.10)',
-              shadowColor: '#0F172A',
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+              shadowColor: palette.isDark ? '#000000' : '#0F172A',
               shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.03,
+              shadowOpacity: palette.isDark ? 0.2 : 0.03,
               shadowRadius: 18,
               elevation: 3,
             }}
             onTouchEnd={(e) => e.stopPropagation()}
           >
-            <Text className="text-[#64748B] text-xs font-semibold text-center mb-5">
+            <Text className="text-xs font-semibold text-center mb-5" style={{ color: palette.textSecondary }}>
               {selectedPlaylist?.name}
             </Text>
 
@@ -1142,17 +1288,20 @@ export default function PersonalScreen() {
               <TouchableOpacity
                 onPress={handleRename}
                 activeOpacity={0.85}
-                className="w-full py-3.5 rounded-2xl bg-[#FAF9F7] border items-center"
-                style={{ borderColor: 'rgba(148,163,184,0.08)' }}
+                className="w-full py-3.5 rounded-2xl border items-center"
+                style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
               >
-                <Text className="text-[#0F172A] text-sm font-semibold">Rename collection</Text>
+                <Text className="text-sm font-semibold" style={{ color: palette.textPrimary }}>Rename collection</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleDelete}
                 activeOpacity={0.85}
-                className="w-full py-3.5 rounded-2xl bg-[#FFF5F5] border items-center"
-                style={{ borderColor: 'rgba(239, 68, 68, 0.08)' }}
+                className="w-full py-3.5 rounded-2xl border items-center"
+                style={{ 
+                  backgroundColor: palette.isDark ? 'rgba(239, 68, 68, 0.12)' : '#FFF5F5', 
+                  borderColor: palette.isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.08)' 
+                }}
               >
                 <Text className="text-[#E11D48] text-sm font-semibold">Delete collection</Text>
               </TouchableOpacity>
@@ -1160,10 +1309,10 @@ export default function PersonalScreen() {
               <TouchableOpacity
                 onPress={() => setIsMenuOpen(false)}
                 activeOpacity={0.85}
-                className="w-full py-3.5 mt-1.5 rounded-2xl bg-white border items-center"
-                style={{ borderColor: 'rgba(148,163,184,0.10)' }}
+                className="w-full py-3.5 mt-1.5 rounded-2xl border items-center"
+                style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
               >
-                <Text className="text-[#64748B] text-sm font-semibold">Cancel</Text>
+                <Text className="text-sm font-semibold" style={{ color: palette.textSecondary }}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1174,26 +1323,31 @@ export default function PersonalScreen() {
       <Modal visible={isRenameOpen} transparent animationType="fade" onRequestClose={() => setIsRenameOpen(false)}>
         <Pressable className="flex-1 bg-black/25 justify-center items-center px-6" onPress={() => setIsRenameOpen(false)}>
           <View 
-            className="bg-white w-full rounded-[32px] p-6 border bg-white"
+            className="w-full rounded-3xl p-6 border"
             style={{
-              borderColor: 'rgba(148,163,184,0.10)',
-              shadowColor: '#0F172A',
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+              shadowColor: palette.isDark ? '#000000' : '#0F172A',
               shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.03,
+              shadowOpacity: palette.isDark ? 0.2 : 0.03,
               shadowRadius: 18,
               elevation: 3,
             }}
             onTouchEnd={(e) => e.stopPropagation()}
           >
-            <Text className="text-[#0F172A] text-base font-bold tracking-tight mb-4 text-center">
+            <Text className="text-base font-bold tracking-tight mb-4 text-center" style={{ color: palette.textPrimary }}>
               Rename Collection
             </Text>
 
             <TextInput
-              className="border text-[#0F172A] p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center bg-[#FAF9F7]"
-              style={{ borderColor: 'rgba(148,163,184,0.12)' }}
+              className="border p-3.5 rounded-2xl text-[14px] mb-5 font-semibold text-center"
+              style={{ 
+                backgroundColor: palette.inputBg,
+                borderColor: palette.border,
+                color: palette.textPrimary 
+              }}
               placeholder="Enter name..."
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={palette.textMuted}
               value={renameValue}
               onChangeText={setRenameValue}
               autoFocus
@@ -1204,7 +1358,8 @@ export default function PersonalScreen() {
               <TouchableOpacity
                 onPress={submitRename}
                 activeOpacity={0.8}
-                className="flex-1 py-3.5 rounded-2xl items-center justify-center bg-[#8B5CF6]"
+                className="flex-1 py-3.5 rounded-2xl items-center justify-center"
+                style={{ backgroundColor: palette.accent }}
               >
                 <Text className="text-white font-semibold text-sm">Save</Text>
               </TouchableOpacity>
@@ -1212,15 +1367,16 @@ export default function PersonalScreen() {
               <TouchableOpacity
                 onPress={() => setIsRenameOpen(false)}
                 activeOpacity={0.85}
-                className="flex-1 py-3.5 rounded-2xl items-center justify-center border bg-white"
-                style={{ borderColor: 'rgba(148,163,184,0.10)' }}
+                className="flex-1 py-3.5 rounded-2xl items-center justify-center border"
+                style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
               >
-                <Text className="text-[#64748B] font-semibold text-sm">Cancel</Text>
+                <Text className="font-semibold text-sm" style={{ color: palette.textSecondary }}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
         </Pressable>
       </Modal>
     </SafeAreaView>
+  </ThemeBackground>
   );
 }

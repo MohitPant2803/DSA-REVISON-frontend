@@ -440,6 +440,18 @@ class SyncManager {
       const payload = response.data?.data;
 
       if (payload) {
+        if (payload.appConfig) {
+          const ac = payload.appConfig;
+          const { saveAppConfigToSQLite } = require('./sqliteSyncBridge');
+          saveAppConfigToSQLite(ac.latestVersion, ac.updateUrl, ac.shareMessage).catch((e: any) => {
+            console.error('[Sync Manager] Failed to save appConfig to SQLite:', e.message);
+          });
+          usePlaylistStateStore.setState({
+            latestVersion: ac.latestVersion || '1.0.5',
+            updateUrl: 'https://ree-wise-download-website.vercel.app/',
+            shareMessage: "Here's the link of the cool app you were asking about 😉 \n\nhttps://ree-wise-download-website.vercel.app/",
+          });
+        }
         const allowRemoteDestructiveSync = payload.allowRemoteDestructiveSync === true;
         // Complete reconciliation delta updates
         const {
@@ -523,9 +535,23 @@ class SyncManager {
             
             if (localTempDuplicate) {
               delete mergedFolders[localTempDuplicate._id];
-              const { getDatabase } = require('./sqliteDatabase');
-              const db = getDatabase();
-              db.runAsync('DELETE FROM folders WHERE id = ?;', [localTempDuplicate._id]).catch(() => {});
+              sqliteWriteManager.enqueue({
+                id: `delete-temp-folder-${localTempDuplicate._id}-${Date.now()}`,
+                type: 'custom',
+                userId: activeUserId,
+                data: {
+                  executor: (db: any) => {
+                    const stmt = db.prepareSync('DELETE FROM folders WHERE id = ?;');
+                    try {
+                      stmt.executeSync([localTempDuplicate._id]);
+                    } finally {
+                      stmt.finalizeSync();
+                    }
+                  }
+                },
+                timestamp: Date.now(),
+                priority: 'normal'
+              }).catch(() => {});
             }
 
             mergedFolders[f._id] = f;
@@ -555,9 +581,23 @@ class SyncManager {
               p.cardIds = finalCardIds;
               p.orderedCardIds = finalCardIds;
               
-              const { getDatabase } = require('./sqliteDatabase');
-              const db = getDatabase();
-              db.runAsync('DELETE FROM playlists WHERE id = ?;', [localTempDuplicate._id]).catch(() => {});
+              sqliteWriteManager.enqueue({
+                id: `delete-temp-playlist-${localTempDuplicate._id}-${Date.now()}`,
+                type: 'custom',
+                userId: activeUserId,
+                data: {
+                  executor: (db: any) => {
+                    const stmt = db.prepareSync('DELETE FROM playlists WHERE id = ?;');
+                    try {
+                      stmt.executeSync([localTempDuplicate._id]);
+                    } finally {
+                      stmt.finalizeSync();
+                    }
+                  }
+                },
+                timestamp: Date.now(),
+                priority: 'normal'
+              }).catch(() => {});
             } else {
               // Mongo is an update channel, not the local authority. If a same-name local playlist
               // exists, keep local and let the pending local queue settle upstream.
@@ -578,6 +618,7 @@ class SyncManager {
 
         const acceptedCards: any[] = [];
         const acceptedCardsMap = new Map<string, any>();
+        const cardIdTranslations = new Map<string, string>();
 
         if (cards.length > 0) {
           cards.forEach((c: any) => {
@@ -585,7 +626,40 @@ class SyncManager {
             const cleanId = c._id.split('-loop-')[0];
             if (deletedCardIds.has(cleanId)) return;
             if (isDirty(cleanId) || store.cardsById[cleanId]?.dirty) return;
-            mergedCards[cleanId] = { ...mergedCards[cleanId], ...c };
+
+            // Reconcile temporary card with server real card (defensive match on folderId as well):
+            const getFolderIdStr = (fid: any) => {
+              if (typeof fid === 'object' && fid !== null) return fid._id;
+              return String(fid || '');
+            };
+            const localTempDuplicate = Object.values(store.cardsById).find(
+              (localC: any) =>
+                localC.title === c.title &&
+                localC.topic === c.topic &&
+                getFolderIdStr(localC.folderId) === getFolderIdStr(c.folderId) &&
+                String(localC._id).startsWith('temp-')
+            ) as any;
+
+            if (localTempDuplicate) {
+              const tempId = localTempDuplicate._id;
+              cardIdTranslations.set(tempId, cleanId);
+              delete mergedCards[tempId];
+              sqliteWriteManager.enqueue({
+                id: `delete-temp-card-${tempId}-${Date.now()}`,
+                type: 'custom',
+                userId: activeUserId,
+                data: {
+                  executor: async (db: any) => {
+                    await db.runAsync('DELETE FROM cards_metadata WHERE id = ?;', [tempId]);
+                    await db.runAsync('DELETE FROM cards_content WHERE cardId = ?;', [tempId]);
+                  }
+                },
+                timestamp: Date.now(),
+                priority: 'normal'
+              }).catch(() => {});
+            }
+
+            mergedCards[cleanId] = { ...mergedCards[cleanId], ...c, isContentFullyHydrated: true };
             acceptedCardsMap.set(cleanId, mergedCards[cleanId]);
           });
         }
@@ -596,6 +670,10 @@ class SyncManager {
             if (!p || !p.revisionCardId) return;
             const cardId = p.revisionCardId.toString();
             if (mergedCards[cardId]) {
+              // Skip overwriting local progress settings if there are unsynced changes
+              const isDiffDirty = isDirty(cardId) || mergedCards[cardId].dirty || store.cardDifficultyMap[cardId]?.dirty;
+              const isFavDirty = activeQueue.some((a: OfflineAction) => a.action === 'TOGGLE_FAVORITE' && a.payload?.cardId === cardId);
+
               // Loops Completed uses commutative max(loops)
               const existingLoops = (mergedCards[cardId].currentUserQuestionProgress as any)?.completedLoops || 0;
               const serverLoops = p.completedLoops || 0;
@@ -606,8 +684,13 @@ class SyncManager {
                 perceivedDifficultyByUser: null,
                 completedLoops: finalLoops,
               } as any;
-              mergedCards[cardId].difficultyState = p.difficultyState;
-              mergedCards[cardId].isFavorite = p.favorite;
+              
+              if (!isDiffDirty) {
+                mergedCards[cardId].difficultyState = p.difficultyState;
+              }
+              if (!isFavDirty) {
+                mergedCards[cardId].isFavorite = p.favorite;
+              }
               
               acceptedCardsMap.set(cardId, mergedCards[cardId]);
             }
@@ -676,6 +759,39 @@ class SyncManager {
           if (__DEV__) console.log(`[SYNC RECONCILE] Merged ${questionProgress.length} classification entries into cardDifficultyMap.`);
         }
 
+        // Apply ID translations to mergedDifficultyMap, mergedOrderMap, and fullPlaylistCards
+        const nextFullPlaylistCards = { ...store.fullPlaylistCards };
+        const nextHydratedPlaylistCardCounts = { ...store.hydratedPlaylistCardCounts };
+        let fullPlaylistCardsChanged = false;
+
+        cardIdTranslations.forEach((cleanId, tempId) => {
+          if (mergedDifficultyMap[tempId]) {
+            mergedDifficultyMap[cleanId] = mergedDifficultyMap[tempId];
+            delete mergedDifficultyMap[tempId];
+          }
+
+          Object.keys(mergedOrderMap).forEach((pId) => {
+            mergedOrderMap[pId] = (mergedOrderMap[pId] || []).map((id) => id === tempId ? cleanId : id);
+          });
+
+          Object.keys(nextFullPlaylistCards).forEach((pId) => {
+            const cardsList = nextFullPlaylistCards[pId] || [];
+            let changed = false;
+            const mapped = cardsList.map((c) => {
+              if (c && c._id === tempId) {
+                changed = true;
+                return { ...c, _id: cleanId };
+              }
+              return c;
+            });
+            if (changed) {
+              nextFullPlaylistCards[pId] = mapped;
+              nextHydratedPlaylistCardCounts[pId] = mapped.length;
+              fullPlaylistCardsChanged = true;
+            }
+          });
+        });
+
         // Merge and save senior quotes delta
         const seniorQuotes = payload.delta?.seniorQuotes || [];
         let mergedSeniorQuotes = [...store.seniorQuotes];
@@ -701,18 +817,29 @@ class SyncManager {
 
         // Commit fully reconciled states back to Zustand in a single react tick!
         const commitReconciledState = () => {
-          usePlaylistStateStore.setState({
+          const nextHydratedPlaylists: Record<string, boolean> = { ...usePlaylistStateStore.getState().hydratedPlaylists };
+          Object.keys(mergedPlaylists).forEach((pId) => {
+            nextHydratedPlaylists[pId] = true;
+          });
+
+          const nextState: any = {
             cardsById: mergedCards,
             foldersById: mergedFolders,
             playlistsById: mergedPlaylists,
             playlistCardOrderMap: mergedOrderMap,
             cardDifficultyMap: mergedDifficultyMap,
             seniorQuotes: mergedSeniorQuotes,
+            hydratedPlaylists: nextHydratedPlaylists,
             lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
             lastSyncedAt: payload.timestamp || new Date().toISOString(),
             lastSuccessfulSyncAt: Date.now(),
             syncFailureCount: 0,
-          });
+          };
+          if (fullPlaylistCardsChanged) {
+            nextState.fullPlaylistCards = nextFullPlaylistCards;
+            nextState.hydratedPlaylistCardCounts = nextHydratedPlaylistCardCounts;
+          }
+          usePlaylistStateStore.setState(nextState);
         };
 
         if (interactionScheduler.isInteracting()) {
@@ -730,12 +857,16 @@ class SyncManager {
           type: 'custom',
           userId: activeUserId,
           data: {
-            executor: async (db: any) => {
-              await db.runAsync(
+            executor: (db: any) => {
+              const stmt = db.prepareSync(
                 `INSERT INTO sync_cursors (userId, lastPulledRevision, updatedAt) VALUES (?, ?, ?)
-                 ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`,
-                [activeUserId, payload.toRevision || payload.currentRevision || 0, Date.now()]
+                 ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`
               );
+              try {
+                stmt.executeSync([activeUserId, payload.toRevision || payload.currentRevision || 0, Date.now()]);
+              } finally {
+                stmt.finalizeSync();
+              }
             }
           },
           timestamp: Date.now(),
@@ -783,7 +914,7 @@ export async function forceFlushOnClose(): Promise<void> {
   try {
     const state = usePlaylistStateStore.getState();
     const userId = state.userId;
-    if (!userId) return;
+    if (!userId || userId === 'guest-user') return;
 
     // 1. Flush swipe and scroll counts to SQLite immediately
     const trackingState = useTrackingStore.getState();

@@ -10,6 +10,6 @@ export function AppSkeleton() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F7',
+    backgroundColor: '#FAF6F0',
   },
 });

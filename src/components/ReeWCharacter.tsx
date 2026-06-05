@@ -11,7 +11,9 @@ import Animated, {
   withSequence,
   withDelay,
   Easing,
+  cancelAnimation,
 } from 'react-native-reanimated';
+import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 
 // Custom Animated SVG Components for hardware-accelerated transitions
 const AnimatedPath = Animated.createAnimatedComponent(Path) as any;
@@ -42,6 +44,18 @@ const ALL_STATES = [
   'flashcards',
   'quiz_time',
   'coffee_break',
+  'v_fingers',
+  'tutorial_walk',
+  'tutorial_tired',
+  'superman_stand',
+  'superman_fly',
+  'engineer_reew',
+  'grad_reew',
+  'grad_sweat',
+  'dj_reew',
+  'cute_sad',
+  'sort_reew',
+  'smirk',
 ] as const;
 
 type ReeWState = typeof ALL_STATES[number];
@@ -65,11 +79,14 @@ const CYCLE_STATES = [
 ] as const;
 
 interface ReeWCharacterProps {
-  state?: 'idle' | 'blep' | 'skipping' | 'focused' | 'sleeping' | 'happy' | 'celebrating' | 'thinking' | 'loading' | 'onboarding' | 'completion' | 'zen' | 'streak' | 'coffee_coding' | 'angry_coding' | 'cocoon' | 'pillow_scroll' | 'knocked_out' | 'searching' | 'note_stack' | 'flashcards' | 'quiz_time' | 'coffee_break';
+  state?: 'idle' | 'blep' | 'skipping' | 'focused' | 'sleeping' | 'happy' | 'celebrating' | 'thinking' | 'loading' | 'onboarding' | 'completion' | 'zen' | 'streak' | 'coffee_coding' | 'angry_coding' | 'cocoon' | 'pillow_scroll' | 'knocked_out' | 'searching' | 'note_stack' | 'flashcards' | 'quiz_time' | 'coffee_break' | 'v_fingers' | 'tutorial_walk' | 'tutorial_tired' | 'superman_stand' | 'superman_fly' | 'engineer_reew' | 'grad_reew' | 'grad_sweat' | 'dj_reew' | 'cute_sad' | 'sort_reew' | 'smirk';
   size?: number;
+  disableIdleCycle?: boolean;
 }
 
-export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWCharacterProps) => {
+export const ReeWCharacter = React.memo(({ state = 'idle', size = 80, disableIdleCycle = false }: ReeWCharacterProps) => {
+  const isComplete = useWalkthroughStore((s) => s.isComplete);
+
   // --- STATE ALIGNMENT & CYCLING ---
   const initialResolvedState = resolveState(state);
   const [currentState, setCurrentState] = useState<ReeWState>(() => initialResolvedState);
@@ -81,6 +98,11 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
   const squashStretchX = useSharedValue(1);
   const squashStretchY = useSharedValue(1);
   const earTwitch = useSharedValue(0);
+  const walkLegY = useSharedValue(0);
+  const sweatDropY = useSharedValue(0);
+  const sweatOpacity = useSharedValue(0);
+  const engineerLeftArmY = useSharedValue(0);
+  const engineerRightArmY = useSharedValue(0);
   
   // Continuous slow, extremely cute side-to-side rocking dance (very small steps)
   const danceSway = useSharedValue(0);
@@ -99,6 +121,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
   const swipeArrow = useSharedValue(24); // Stroke dash offset for onboarding arrow
   const checkmarkScale = useSharedValue(0.85); // Scale for completion checkmark
   const loadingScale = useSharedValue(1);
+  const sortAnim = useSharedValue(0);
 
   // Interactive Touch Squash shared values
   const touchSquashX = useSharedValue(1);
@@ -296,12 +319,14 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
 
   // --- TOUCH SQUEEZE HANDLERS ---
   const handlePressIn = () => {
+    if (!isComplete) return;
     // Squeeze down very gently on press start to maintain structural stability
     touchSquashX.value = withSpring(1.02, { damping: 15, stiffness: 200 });
     touchSquashY.value = withSpring(0.98, { damping: 15, stiffness: 200 });
   };
 
   const handlePressOut = () => {
+    if (!isComplete) return;
     // Rebound back smoothly with stable spring recoil on release
     touchSquashX.value = withSpring(1.0, { damping: 15, stiffness: 180 });
     touchSquashY.value = withSpring(1.0, { damping: 15, stiffness: 180 });
@@ -309,6 +334,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
 
   // --- INTERACTIVE TAP CYCLING ---
   const handleTap = () => {
+    if (!isComplete) return;
     // 1. Determine next cycled state synchronously
     const currentIndex = CYCLE_STATES.indexOf(currentState as any);
     let nextState: ReeWState = 'idle';
@@ -358,6 +384,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
 
   // --- 30-SECOND IDLE AUTO-TRANSITION TIMER ---
   useEffect(() => {
+    if (disableIdleCycle) return;
     const isInCycle = CYCLE_STATES.includes(currentState as any);
     if (!isInCycle) return;
 
@@ -373,7 +400,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
     }, 30000); // 30 seconds
 
     return () => clearTimeout(timer);
-  }, [currentState]);
+  }, [currentState, disableIdleCycle]);
 
   // --- CALM ANIMATION LIFECYCLE (LINEAR / HEADSPACE INSPIRATION) ---
   useEffect(() => {
@@ -405,6 +432,9 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
     } else if (currentState === 'focused' || currentState === 'loading') {
       breathDuration = 2800;
       breathScale = 1.018;
+    } else if (currentState === 'tutorial_tired') {
+      breathDuration = 800;
+      breathScale = 1.06;
     }
     
     breathing.value = withRepeat(
@@ -583,6 +613,74 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
       false
     );
 
+    if (currentState === 'tutorial_walk') {
+      walkLegY.value = withRepeat(
+        withSequence(
+          withTiming(-4, { duration: 180, easing: Easing.linear }),
+          withTiming(0, { duration: 180, easing: Easing.linear })
+        ),
+        -1,
+        true
+      );
+    } else {
+      cancelAnimation(walkLegY);
+      walkLegY.value = withTiming(0, { duration: 200 });
+    }
+
+    if (currentState === 'tutorial_tired') {
+      sweatDropY.value = 0;
+      sweatOpacity.value = withTiming(1, { duration: 200 });
+      sweatDropY.value = withRepeat(
+        withSequence(
+          withTiming(8, { duration: 1000, easing: Easing.linear }),
+          withTiming(0, { duration: 0 })
+        ),
+        -1,
+        false
+      );
+    } else {
+      cancelAnimation(sweatDropY);
+      sweatOpacity.value = withTiming(0, { duration: 200 });
+    }
+
+    if (currentState === 'engineer_reew') {
+      engineerLeftArmY.value = withRepeat(
+        withSequence(
+          withTiming(-4, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(4, { duration: 500, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      engineerRightArmY.value = withRepeat(
+        withSequence(
+          withTiming(4, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+          withTiming(-4, { duration: 800, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+    } else {
+      cancelAnimation(engineerLeftArmY);
+      cancelAnimation(engineerRightArmY);
+      engineerLeftArmY.value = withTiming(0, { duration: 200 });
+      engineerRightArmY.value = withTiming(0, { duration: 200 });
+    }
+
+    if (currentState === 'sort_reew') {
+      sortAnim.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0, { duration: 900, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+    } else {
+      cancelAnimation(sortAnim);
+      sortAnim.value = 0;
+    }
+
     return () => {
       clearInterval(blinkInterval);
       clearInterval(earInterval);
@@ -604,6 +702,19 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
 
   const onboardingArrowProps = useAnimatedProps(() => ({
     strokeDashoffset: swipeArrow.value,
+  }));
+
+  const leftFootProps = useAnimatedProps(() => ({
+    translateY: currentState === 'tutorial_walk' ? walkLegY.value : 0,
+  }));
+
+  const rightFootProps = useAnimatedProps(() => ({
+    translateY: currentState === 'tutorial_walk' ? -walkLegY.value : 0,
+  }));
+
+  const sweatProps = useAnimatedProps(() => ({
+    opacity: sweatOpacity.value,
+    translateY: sweatDropY.value,
   }));
 
   // --- ANIMATED STYLES FOR REANIMATED ---
@@ -642,10 +753,16 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
       tx = 3;
     } else if (currentState === 'coffee_coding' || currentState === 'angry_coding') {
       ty = typingPawLeftY.value;
+    } else if (currentState === 'tutorial_walk') {
+      ty = walkLegY.value;
+    } else if (currentState === 'engineer_reew') {
+      ty = engineerLeftArmY.value;
     }
     return {
-      translateX: tx,
-      translateY: ty,
+      transform: [
+        { translateX: tx },
+        { translateY: ty },
+      ] as any,
     };
   });
 
@@ -661,10 +778,18 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
       ty = -6;
     } else if (currentState === 'coffee_coding' || currentState === 'angry_coding') {
       ty = typingPawRightY.value;
+    } else if (currentState === 'tutorial_walk') {
+      ty = -walkLegY.value;
+    } else if (currentState === 'engineer_reew') {
+      ty = engineerRightArmY.value;
+    } else if (currentState === 'sort_reew') {
+      tx = sortAnim.value * -36;
     }
     return {
-      translateX: tx,
-      translateY: ty,
+      transform: [
+        { translateX: tx },
+        { translateY: ty },
+      ] as any,
     };
   });
 
@@ -790,6 +915,10 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
   const focusedProps = useAnimatedProps(() => ({
     opacity: focusedProgress.value,
   }));
+
+  if (!isComplete && (state === 'zen' || state === 'streak')) {
+    return null;
+  }
 
   return (
     <Pressable 
@@ -1105,23 +1234,60 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
               <Path d="M 74,71 Q 74,74 71,74 Q 74,74 74,77 Q 74,74 77,74 Q 74,74 74,71 Z" fill="#FBBF24" />
             </AnimatedG>
 
-            {/* --- CUTE ROUND COMIC EARS (DARK COCOA PANDA EARS - #4A3B32) --- */}
-            <AnimatedPath
-              d="M 18,28 C 13,26 14,14 22,14 C 29,14 27,24 24,28 Z"
-              fill="#4A3B32"
-              stroke="#4A3B32"
-              strokeWidth={2.4}
-              strokeLinejoin="round"
-              animatedProps={leftEarProps}
-            />
-            <AnimatedPath
-              d="M 82,28 C 87,26 86,14 78,14 C 71,14 73,24 76,28 Z"
-              fill="#4A3B32"
-              stroke="#4A3B32"
-              strokeWidth={2.4}
-              strokeLinejoin="round"
-              animatedProps={rightEarProps}
-            />
+            <G transform={
+              currentState === 'v_fingers'
+                ? 'rotate(-6, 50, 42)'
+                : currentState === 'tutorial_tired'
+                  ? 'rotate(3, 50, 42)'
+                  : undefined
+            }>
+              {/* --- CUTE ROUND COMIC EARS (DARK COCOA PANDA EARS - #4A3B32) --- */}
+              <AnimatedPath
+                d="M 18,28 C 13,26 14,14 22,14 C 29,14 27,24 24,28 Z"
+                fill="#4A3B32"
+                stroke="#4A3B32"
+                strokeWidth={2.4}
+                strokeLinejoin="round"
+                animatedProps={leftEarProps}
+              />
+              <AnimatedPath
+                d="M 82,28 C 87,26 86,14 78,14 C 71,14 73,24 76,28 Z"
+                fill="#4A3B32"
+                stroke="#4A3B32"
+                strokeWidth={2.4}
+                strokeLinejoin="round"
+                animatedProps={rightEarProps}
+              />
+            </G>
+
+            {/* --- RED SUPERMAN CAPE (Flows behind body and neck) --- */}
+            {(currentState === 'superman_stand' || currentState === 'superman_fly') && (
+              <G>
+                {/* Red cape body */}
+                <Path
+                  d="M 32,60 C 14,64 6,80 12,98 C 24,96 38,92 50,88 C 62,92 76,96 88,98 C 94,80 86,64 68,60 Z"
+                  fill="#CE4B4B"
+                  stroke="#4A3B32"
+                  strokeWidth={2.4}
+                  strokeLinejoin="round"
+                />
+                {/* Cape folds shading */}
+                <Path
+                  d="M 38,68 C 30,76 26,84 28,94"
+                  fill="none"
+                  stroke="#9B3333"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
+                <Path
+                  d="M 62,68 C 70,76 74,84 72,94"
+                  fill="none"
+                  stroke="#9B3333"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
+              </G>
+            )}
 
             {/* --- CHUBBY PANDA BODY (PURE WHITE SURFACES) --- */}
             <Ellipse
@@ -1135,8 +1301,8 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
             />
 
             {/* --- FEET (DARK FEET UNDER THE BODY) --- */}
-            <Circle cx="36" cy="90" r="5" fill="#4A3B32" stroke="#4A3B32" strokeWidth={1} />
-            <Circle cx="64" cy="90" r="5" fill="#4A3B32" stroke="#4A3B32" strokeWidth={1} />
+            <AnimatedCircle cx="36" cy="90" r="5" fill="#4A3B32" stroke="#4A3B32" strokeWidth={1} animatedProps={leftFootProps} />
+            <AnimatedCircle cx="64" cy="90" r="5" fill="#4A3B32" stroke="#4A3B32" strokeWidth={1} animatedProps={rightFootProps} />
 
             {/* --- STATE SPECIFIC BACKGROUND BAGS (EXPRESSION B - IMAGE 2 STYLE) --- */}
             {currentState === 'skipping' && (
@@ -1174,23 +1340,139 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
               <Circle cx="0" cy="0" r="2.5" fill="#4A3B32" />
             </G>
 
-            {/* --- FAT CHUBBY ORGANIC PANDA HEAD (Pear shape with bulging cheeks - matches Image 1/2) --- */}
-            <Path
-              d="M 50,16 C 33,16 20,24 17,34 C 13,44 14,56 25,62 C 33,66 67,66 75,62 C 86,56 87,44 83,34 C 80,24 67,16 50,16 Z"
-              fill="#FFFFFF"
-              stroke="#4A3B32"
-              strokeWidth={2.8}
-              strokeLinejoin="round"
-            />
+            <G transform={
+              currentState === 'v_fingers'
+                ? 'rotate(-6, 50, 42)'
+                : currentState === 'tutorial_tired'
+                  ? 'rotate(3, 50, 42)'
+                  : undefined
+            }>
+              {/* --- FAT CHUBBY ORGANIC PANDA HEAD (Pear shape with bulging cheeks - matches Image 1/2) --- */}
+              <Path
+                d="M 50,16 C 33,16 20,24 17,34 C 13,44 14,56 25,62 C 33,66 67,66 75,62 C 86,56 87,44 83,34 C 80,24 67,16 50,16 Z"
+                fill="#FFFFFF"
+                stroke="#4A3B32"
+                strokeWidth={2.8}
+                strokeLinejoin="round"
+              />
 
-            {/* --- SOFT CORAL-PEACH PANDA BLUSH (EXACT COLOR MATCH - #FFA8A8) --- */}
-            <Ellipse
-              cx="23"
-              cy="51"
-              rx="6.5"
-              ry="5"
-              fill="#FFA8A8"
-            />
+              {currentState === 'engineer_reew' && (
+                <G>
+                  {/* Yellow safety helmet dome */}
+                  <Path
+                    d="M 26,26 A 24,22 0 0,1 74,26 Z"
+                    fill="#FBBF24"
+                    stroke="#4A3B32"
+                    strokeWidth={2.8}
+                    strokeLinejoin="round"
+                  />
+                  {/* Helmet crest / top ridge */}
+                  <Path
+                    d="M 45,26 Q 50,13 55,26"
+                    fill="#FBBF24"
+                    stroke="#4A3B32"
+                    strokeWidth={2.5}
+                    strokeLinejoin="round"
+                  />
+                  {/* Shading/amber highlight details on dome */}
+                  <Path
+                    d="M 33,24 Q 50,19 67,24"
+                    fill="none"
+                    stroke="#F59E0B"
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                  />
+                  {/* Brim of safety helmet */}
+                  <Path
+                    d="M 20,28 Q 50,23 80,28"
+                    fill="none"
+                    stroke="#4A3B32"
+                    strokeWidth={5.0}
+                    strokeLinecap="round"
+                  />
+                  <Path
+                    d="M 21,28 Q 50,23.5 79,28"
+                    fill="none"
+                    stroke="#FBBF24"
+                    strokeWidth={3.0}
+                    strokeLinecap="round"
+                  />
+                </G>
+              )}
+
+              {currentState === 'dj_reew' && (
+                <G>
+                  {/* Headphone band connecting the ear cups */}
+                  <Path
+                    d="M 22,26 C 22,7 78,7 78,26"
+                    fill="none"
+                    stroke="#4A3B32"
+                    strokeWidth={4.5}
+                    strokeLinecap="round"
+                  />
+                  <Path
+                    d="M 22,26 C 22,7 78,7 78,26"
+                    fill="none"
+                    stroke="#8B5CF6"
+                    strokeWidth={2.5}
+                    strokeLinecap="round"
+                  />
+                  {/* Left ear cup */}
+                  <Ellipse
+                    cx="20"
+                    cy="27"
+                    rx="5.5"
+                    ry="9.5"
+                    fill="#EC4899"
+                    stroke="#4A3B32"
+                    strokeWidth={2.0}
+                  />
+                  <Rect
+                    x="21"
+                    y="21"
+                    width="2"
+                    height="12"
+                    rx="1"
+                    fill="#10B981"
+                  />
+                  {/* Right ear cup */}
+                  <Ellipse
+                    cx="80"
+                    cy="27"
+                    rx="5.5"
+                    ry="9.5"
+                    fill="#EC4899"
+                    stroke="#4A3B32"
+                    strokeWidth={2.0}
+                  />
+                  <Rect
+                    x="77"
+                    y="21"
+                    width="2"
+                    height="12"
+                    rx="1"
+                    fill="#10B981"
+                  />
+                </G>
+              )}
+
+            <G transform={
+              currentState === 'tutorial_walk'
+                ? 'translate(-8, 0)'
+                : currentState === 'tutorial_tired'
+                  ? 'translate(-2, 2)'
+                  : currentState === 'superman_fly'
+                    ? 'translate(0, -6)'
+                    : undefined
+            }>
+              {/* --- SOFT CORAL-PEACH PANDA BLUSH (EXACT COLOR MATCH - #FFA8A8) --- */}
+              <Ellipse
+                cx="23"
+                cy="51"
+                rx={currentState === 'tutorial_walk' ? 2.5 : 6.5}
+                ry="5"
+                fill="#FFA8A8"
+              />
             <Ellipse
               cx="77"
               cy="51"
@@ -1200,7 +1482,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
             />
 
             {/* --- FACIAL DETAILS --- */}
-            {(currentState === 'sleeping' || currentState === 'pillow_scroll') ? (
+            {(currentState === 'sleeping' || currentState === 'pillow_scroll' || currentState === 'tutorial_tired') ? (
               // Sleepy curved arches
               <>
                 <Path
@@ -1218,7 +1500,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                   strokeLinecap="round"
                 />
               </>
-            ) : (currentState === 'happy' || currentState === 'celebrating' || currentState === 'note_stack' || currentState === 'coffee_break') ? (
+            ) : (currentState === 'happy' || currentState === 'celebrating' || currentState === 'note_stack' || currentState === 'coffee_break' || currentState === 'v_fingers' || currentState === 'engineer_reew' || currentState === 'grad_reew' || currentState === 'grad_sweat' || currentState === 'dj_reew' || currentState === 'sort_reew' || currentState === 'smirk') ? (
               // Gentle closed-eye smile arches (Image 4 style)
               <>
                 <Path
@@ -1235,6 +1517,14 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                   strokeWidth={2.8}
                   strokeLinecap="round"
                 />
+                {currentState === 'grad_sweat' && (
+                  <Path
+                    d="M 28,38 C 26,40 26,42 28,44 C 30,44 30,42 28,38"
+                    fill="#60A5FA"
+                    stroke="#4A3B32"
+                    strokeWidth={0.8}
+                  />
+                )}
               </>
             ) : currentState === 'angry_coding' ? (
               // Determined shiny eyes with angry eyebrows
@@ -1288,6 +1578,60 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                   />
                 </G>
               </>
+             ) : currentState === 'superman_fly' ? (
+              // Ambitious looking-up eyes and determined eyebrows
+              <>
+                {/* Ambitious tilted eyebrows */}
+                <Path d="M 31,40 L 39,42" stroke="#4A3B32" strokeWidth={2.5} strokeLinecap="round" />
+                <Path d="M 69,40 L 61,42" stroke="#4A3B32" strokeWidth={2.5} strokeLinecap="round" />
+                <G>
+                  <AnimatedEllipse
+                    cx="35"
+                    cy="46"
+                    rx={4.5}
+                    animatedProps={eyeProps}
+                    fill="#4A3B32"
+                  />
+                  <AnimatedCircle
+                    cx="33.5"
+                    cy="44.5"
+                    r={1.5}
+                    animatedProps={eyeHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                  <AnimatedCircle
+                    cx="36.5"
+                    cy="47.5"
+                    r={0.7}
+                    animatedProps={eyeSubHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                </G>
+                <G>
+                  <AnimatedEllipse
+                    cx="65"
+                    cy="46"
+                    rx={4.5}
+                    animatedProps={eyeProps}
+                    fill="#4A3B32"
+                  />
+                  <AnimatedCircle
+                    cx="63.5"
+                    cy="44.5"
+                    r={1.5}
+                    animatedProps={eyeHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                  <AnimatedCircle
+                    cx="66.5"
+                    cy="47.5"
+                    r={0.7}
+                    animatedProps={eyeSubHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                </G>
+              </>
+
             ) : currentState === 'loading' ? (
               // Winking / Inspecting Close-up Eye (Left eye winks, Right eye open shiny with lens)
               <>
@@ -1366,6 +1710,59 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                   />
                 </G>
               </>
+            ) : currentState === 'cute_sad' ? (
+              // Pleading, shiny eyes 🥺
+              <>
+                {/* Pleading slanted eyebrows */}
+                <Path d="M 29,42 Q 34,39 39,39" stroke="#4A3B32" strokeWidth={2.5} strokeLinecap="round" fill="none" />
+                <Path d="M 71,42 Q 66,39 61,39" stroke="#4A3B32" strokeWidth={2.5} strokeLinecap="round" fill="none" />
+                <G>
+                  <AnimatedEllipse
+                    cx="35"
+                    cy="46"
+                    rx={5.0}
+                    animatedProps={eyeProps}
+                    fill="#4A3B32"
+                  />
+                  <AnimatedCircle
+                    cx="33.2"
+                    cy="43.5"
+                    r={2.2}
+                    animatedProps={eyeHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                  <AnimatedCircle
+                    cx="36.5"
+                    cy="48.5"
+                    r={1.2}
+                    animatedProps={eyeSubHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                </G>
+                <G>
+                  <AnimatedEllipse
+                    cx="65"
+                    cy="46"
+                    rx={5.0}
+                    animatedProps={eyeProps}
+                    fill="#4A3B32"
+                  />
+                  <AnimatedCircle
+                    cx="63.2"
+                    cy="43.5"
+                    r={2.2}
+                    animatedProps={eyeHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                  <AnimatedCircle
+                    cx="66.5"
+                    cy="48.5"
+                    r={1.2}
+                    animatedProps={eyeSubHighlightProps}
+                    fill="#FFFFFF"
+                  />
+                </G>
+              </>
             ) : (
               // Normal shiny dot eyes (blinking accelerated on UI thread)
               <>
@@ -1425,6 +1822,23 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
               <Path d="M 42.5,46 L 57.5,46" stroke="#4A3B32" strokeWidth={1.8} />
             </AnimatedG>
 
+            {(currentState === 'grad_reew' || currentState === 'grad_sweat') && (
+              <G>
+                {/* Left lens frame */}
+                <Circle cx="35" cy="47" r="9" fill="rgba(74,59,50,0.05)" stroke="#4A3B32" strokeWidth={2.0} />
+                {/* Right lens frame */}
+                <Circle cx="65" cy="47" r="9" fill="rgba(74,59,50,0.05)" stroke="#4A3B32" strokeWidth={2.0} />
+                {/* Bridge */}
+                <Path d="M 44,47 Q 50,44 56,47" fill="none" stroke="#4A3B32" strokeWidth={2.0} strokeLinecap="round" />
+                {/* Temple extensions (sides of glasses) */}
+                <Path d="M 26,47 L 19,47" fill="none" stroke="#4A3B32" strokeWidth={2.0} strokeLinecap="round" />
+                <Path d="M 74,47 L 81,47" fill="none" stroke="#4A3B32" strokeWidth={2.0} strokeLinecap="round" />
+                {/* Glass reflections/shines */}
+                <Path d="M 31,43 Q 35,39 39,43" fill="none" stroke="#FFFFFF" strokeWidth={1.2} opacity={0.6} strokeLinecap="round" />
+                <Path d="M 61,43 Q 65,39 69,43" fill="none" stroke="#FFFFFF" strokeWidth={1.2} opacity={0.6} strokeLinecap="round" />
+              </G>
+            )}
+
             {/* --- STUDIOUS WOODEN DESK (STAYS STILL IN FRONT) --- */}
             <AnimatedG animatedProps={loadingProps}>
               {/* Wooden desk surface */}
@@ -1436,7 +1850,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
             {/* Magnifying glass scales inside absolute overlay outside Svg */}
 
             {/* --- CUTE SMILES --- */}
-            {(currentState === 'happy' || currentState === 'celebrating' || currentState === 'note_stack' || currentState === 'coffee_break' || currentState === 'quiz_time') ? (
+            {(currentState === 'happy' || currentState === 'celebrating' || currentState === 'note_stack' || currentState === 'coffee_break' || currentState === 'quiz_time' || currentState === 'engineer_reew' || currentState === 'grad_reew' || currentState === 'grad_sweat' || currentState === 'dj_reew') ? (
               // Big open happy mouth with tongue (Image 4 style)
               <G>
                 <Path
@@ -1475,6 +1889,15 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                 strokeWidth={1.8}
                 strokeLinecap="round"
               />
+            ) : currentState === 'tutorial_tired' ? (
+              // Small sad panting mouth
+              <Path
+                d="M 47,51 Q 50,54 53,51 Z"
+                fill="#4A3B32"
+                stroke="#4A3B32"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+              />
             ) : currentState === 'loading' ? (
               // Cute winking w-mouth
               <Path
@@ -1482,6 +1905,35 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                 fill="transparent"
                 stroke="#4A3B32"
                 strokeWidth={2.0}
+                strokeLinecap="round"
+              />
+
+            ) : currentState === 'smirk' ? (
+              // Grinning mouth showing teeth (😁 style)
+              <G>
+                {/* Mouth opening */}
+                <Path
+                  d="M 45,49 Q 50,57 55,49 Z"
+                  fill="#4A3B32"
+                />
+                {/* White teeth bar at the top */}
+                <Path
+                  d="M 46,49.5 L 54,49.5 Q 50,52.5 46,49.5 Z"
+                  fill="#FFFFFF"
+                />
+                {/* Pink tongue at the bottom */}
+                <Path
+                  d="M 48.5,53 Q 50,56.5 51.5,53 Z"
+                  fill="#FF8E9E"
+                />
+              </G>
+            ) : currentState === 'cute_sad' ? (
+              // Small cute sad frown mouth
+              <Path
+                d="M 46.5,52 Q 50,49.5 53.5,52"
+                fill="transparent"
+                stroke="#4A3B32"
+                strokeWidth={2.2}
                 strokeLinecap="round"
               />
             ) : currentState === 'completion' ? (
@@ -1503,6 +1955,26 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                 strokeLinecap="round"
               />
             )}
+            </G>
+
+            {/* Sweat drops for tutorial_tired */}
+            <AnimatedG animatedProps={sweatProps}>
+              {/* Sweat drop 1 */}
+              <Path
+                d="M 75,34 C 73,36 73,38 75,40 C 77,40 77,38 75,34"
+                fill="#60A5FA"
+                stroke="#4A3B32"
+                strokeWidth={0.8}
+              />
+              {/* Sweat drop 2 */}
+              <Path
+                d="M 79,38 C 77,40 77,42 79,44 C 81,44 81,42 79,38"
+                fill="#60A5FA"
+                stroke="#4A3B32"
+                strokeWidth={0.8}
+              />
+            </AnimatedG>
+            </G>
 
             {/* --- TINY STUBBY HANDS / PAWS (COMIC STYLED) --- */}
             {(currentState === 'sleeping' || currentState === 'pillow_scroll') ? (
@@ -1536,7 +2008,7 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                 <Circle cx="23" cy="73" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
                 <Circle cx="77" cy="73" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
               </>
-            ) : currentState === 'blep' ? (
+            ) : (currentState === 'blep' || currentState === 'v_fingers') ? (
               // Peace Sign hand gesture next to cheek (Image 1 style)
               <>
                 {/* Left hand resting cutely */}
@@ -1549,6 +2021,150 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80 }: ReeWChar
                   <Ellipse cx="0.5" cy="-3.5" rx="1.6" ry="3.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
                   <Ellipse cx="4.5" cy="-3.5" rx="1.6" ry="3.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
                 </G>
+              </>
+            ) : currentState === 'superman_fly' ? (
+              <>
+                {/* Left hand resting at the side */}
+                <Circle cx="26" cy="74" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                
+                {/* Right hand raised straight up above the shoulder */}
+                <Path d="M 72,70 L 78,48" stroke="#4A3B32" strokeWidth={5.0} strokeLinecap="round" />
+                <Path d="M 72,70 L 78,48" stroke="#FFFFFF" strokeWidth={2.6} strokeLinecap="round" />
+                <Circle cx="78" cy="48" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+              </>
+            ) : currentState === 'tutorial_walk' ? (
+              <>
+                {/* Running arms: left arm moves up/down, right arm moves out of phase */}
+                <AnimatedCircle cx="26" cy="74" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} animatedProps={leftPawProps} />
+                <AnimatedCircle cx="74" cy="74" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} animatedProps={rightPawProps} />
+              </>
+            ) : currentState === 'sort_reew' ? (
+              <>
+                {/* Right Paw holding the sliding card is rendered FIRST so it slides behind the folder */}
+                <AnimatedG animatedProps={rightPawProps}>
+                  {/* Revision Card */}
+                  <Rect x="65" y="65" width="18" height="12" rx="1.5" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={1.5} />
+                  <Path d="M 69,69 L 79,69 M 69,73 L 75,73" stroke="#94A3B8" strokeWidth={1.2} strokeLinecap="round" />
+                  {/* Paw */}
+                  <Circle cx="74" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </AnimatedG>
+
+                {/* Left Paw holding the folder is rendered SECOND (on top) */}
+                <AnimatedG animatedProps={leftPawProps}>
+                  {/* Folder paper peaking out */}
+                  <Rect x="17" y="62" width="18" height="10" rx="1" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={1.0} />
+                  {/* Folder body */}
+                  <Path d="M 14,66 L 22,66 L 25,69 L 38,69 L 38,81 L 14,81 Z" fill="#8B5CF6" stroke="#4A3B32" strokeWidth={1.5} strokeLinejoin="round" />
+                  {/* Paw */}
+                  <Circle cx="26" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </AnimatedG>
+              </>
+            ) : currentState === 'engineer_reew' ? (
+              <>
+                {/* Asymmetric waving hands holding tools */}
+                <AnimatedG animatedProps={leftPawProps}>
+                  {/* Screwdriver Handle: orange safety handle */}
+                  <Rect x="23" y="60" width="6" height="11" rx="1.5" fill="#F97316" stroke="#4A3B32" strokeWidth={1.5} />
+                  {/* Screwdriver metal shaft */}
+                  <Path d="M 26,60 L 26,49" stroke="#94A3B8" strokeWidth={2.0} strokeLinecap="round" />
+                  <Path d="M 26,60 L 26,49" stroke="#4A3B32" strokeWidth={0.8} />
+                  {/* Tip */}
+                  <Path d="M 24.5,49 L 27.5,49" stroke="#4A3B32" strokeWidth={1.2} />
+                  {/* Paw */}
+                  <Circle cx="26" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </AnimatedG>
+
+                <AnimatedG animatedProps={rightPawProps}>
+                  {/* Scissor Jack tool in right hand */}
+                  {/* Base */}
+                  <Path d="M 70,65 L 78,65" stroke="#4A3B32" strokeWidth={2.0} strokeLinecap="round" />
+                  {/* Diamond structure */}
+                  <Path d="M 74,65 L 70,59 L 74,53 L 78,59 Z" fill="#94A3B8" stroke="#4A3B32" strokeWidth={1.5} strokeLinejoin="round" />
+                  {/* Center screw */}
+                  <Path d="M 68,59 L 80,59" stroke="#4A3B32" strokeWidth={1.2} />
+                  {/* Jack top saddle */}
+                  <Path d="M 72,53 L 76,53" stroke="#4A3B32" strokeWidth={2.0} strokeLinecap="round" />
+                  {/* Right Paw holding the jack */}
+                  <Circle cx="74" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </AnimatedG>
+              </>
+            ) : (currentState === 'grad_reew' || currentState === 'grad_sweat') ? (
+              <>
+                {/* Left hand holding a degree scroll */}
+                <G>
+                  {/* Tilted white degree scroll roll */}
+                  <Rect
+                    x="18"
+                    y="63"
+                    width="14"
+                    height="7"
+                    rx="1.5"
+                    transform="rotate(-25, 25, 66)"
+                    fill="#FFFFFF"
+                    stroke="#4A3B32"
+                    strokeWidth={1.5}
+                  />
+                  {/* Red ribbon tied around scroll */}
+                  <Rect
+                    x="23"
+                    y="63"
+                    width="3.5"
+                    height="7"
+                    transform="rotate(-25, 25, 66)"
+                    fill="#EF4444"
+                  />
+                  {/* Left Paw holding it */}
+                  <Circle cx="26" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </G>
+
+                {/* Right hand raised doing peace sign next to right cheek */}
+                <G transform="translate(68, 54)">
+                  <Circle cx="2" cy="2" r="4.5" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                  {/* Two tiny V-fingers outlines */}
+                  <Ellipse cx="0.5" cy="-3.5" rx="1.6" ry="3.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                  <Ellipse cx="4.5" cy="-3.5" rx="1.6" ry="3.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </G>
+              </>
+            ) : currentState === 'dj_reew' ? (
+              <>
+                {/* Left hand holding playlist folder */}
+                <G>
+                  {/* Tilted pink binder folder */}
+                  <Rect
+                    x="18"
+                    y="60"
+                    width="14"
+                    height="18"
+                    rx="2"
+                    transform="rotate(-15, 25, 69)"
+                    fill="#EC4899"
+                    stroke="#4A3B32"
+                    strokeWidth={2.0}
+                  />
+                  {/* Music note symbol inside folder */}
+                  {/* Circle note head */}
+                  <Circle
+                    cx="23"
+                    cy="72"
+                    r="2.0"
+                    transform="rotate(-15, 25, 69)"
+                    fill="#FFFFFF"
+                  />
+                  {/* Note stem */}
+                  <Path
+                    d="M 25,72 L 25,66 Q 28,68 30,66"
+                    transform="rotate(-15, 25, 69)"
+                    fill="none"
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                  />
+                  {/* Left Paw holding it */}
+                  <Circle cx="26" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
+                </G>
+
+                {/* Right hand resting/clutching side */}
+                <Circle cx="74" cy="71" r="5.0" fill="#FFFFFF" stroke="#4A3B32" strokeWidth={2.0} />
               </>
             ) : (
               // Standard sitting arms (Image 2 style)

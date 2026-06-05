@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import offlineSeed from '../constants/offlineSeed.json';
 import { InteractionManager } from 'react-native';
 import { storageEngine } from '../utils/StorageEngine';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
@@ -165,6 +166,8 @@ export function validateStoreShape(state: any): boolean {
   if (typeof state.playlistsById !== 'object' || state.playlistsById === null) state.playlistsById = {};
   if (typeof state.cardDifficultyMap !== 'object' || state.cardDifficultyMap === null) state.cardDifficultyMap = {};
   if (typeof state.playlistCardOrderMap !== 'object' || state.playlistCardOrderMap === null) state.playlistCardOrderMap = {};
+  if (typeof state.notificationFrequency === 'undefined') state.notificationFrequency = 'daily';
+  if (!Array.isArray(state.notificationCustomDays)) state.notificationCustomDays = [1, 2, 3, 4, 5, 6, 7];
   return true;
 }
 
@@ -216,6 +219,18 @@ interface PlaylistState {
   fullPlaylistCards: Record<string, IPopulatedRevisionCard[]>;
   hydratedPlaylistCardCounts: Record<string, number>;
   selectedRootFolderIds: string[];
+  notificationsEnabled: boolean;
+  notificationHour: number;
+  notificationMinute: number;
+  notificationFrequency: 'daily' | 'three_days' | 'custom';
+  notificationCustomDays: number[];
+  updateNotificationPreferences: (
+    enabled: boolean,
+    hour: number,
+    minute: number,
+    frequency?: 'daily' | 'three_days' | 'custom',
+    customDays?: number[]
+  ) => Promise<void>;
 
   // Observability & Recovery Metrics
   lastSuccessfulSyncAt: number | null;
@@ -234,6 +249,7 @@ interface PlaylistState {
   hydrateSmartCounts: (counts: Record<string, number>) => void;
   setPlaylistCardOrder: (playlistId: string, cardIds: string[]) => Promise<void>;
   hydrateCustomPlaylistOrder: (playlistId: string, cardIds: string[]) => void;
+  hydrateAllCustomPlaylistsOrder: (playlists: { id: string; orderedCardIds: string[] }[]) => void;
   setSelectedRootFolderIdsInStore: (folderIds: string[]) => Promise<void>;
   updateReelPreferencesInStore: (folderIds: string[]) => Promise<void>;
   
@@ -292,6 +308,9 @@ interface PlaylistState {
   setSeniorQuotes: (quotes: any[]) => void;
   currentQuoteIndex: number;
   incrementQuoteIndex: (quotesCount: number) => void;
+  latestVersion: string;
+  updateUrl: string;
+  shareMessage: string;
   dbVersion: string | null;
   deviceId: string;
   logicalClockSequence: number;
@@ -329,6 +348,11 @@ const DEFAULT_STATE = {
   fullPlaylistCards: {},
   hydratedPlaylistCardCounts: {},
   selectedRootFolderIds: [],
+  notificationsEnabled: false,
+  notificationHour: 19,
+  notificationMinute: 0,
+  notificationFrequency: 'daily' as 'daily' | 'three_days' | 'custom',
+  notificationCustomDays: [1, 2, 3, 4, 5, 6, 7],
   offlineActionQueue: [],
   poisonActionIds: [],
   lastSyncedAt: null,
@@ -347,6 +371,9 @@ const DEFAULT_STATE = {
     }
   ],
   currentQuoteIndex: 0,
+  latestVersion: '1.0.5',
+  updateUrl: 'https://ree-wise-download-website.vercel.app/',
+  shareMessage: "Here's the link of the cool app you were asking about 😉 \n\nhttps://ree-wise-download-website.vercel.app/",
   dbVersion: null,
 };
 
@@ -393,7 +420,9 @@ export const syncWithSqliteSnapshot = async (userId: string) => {
       }
 
       const nextPlaylistCardOrderMap = { ...currentState.playlistCardOrderMap };
+      const nextHydratedPlaylists = { ...currentState.hydratedPlaylists };
       Object.keys(playlistsById).forEach((id) => {
+        nextHydratedPlaylists[id] = true;
         const p = playlistsById[id];
         if (p && !['easy', 'medium', 'hard', 'skipped'].includes(id)) {
           const cardIds = p.cardIds || p.orderedCardIds || [];
@@ -434,12 +463,49 @@ export const syncWithSqliteSnapshot = async (userId: string) => {
         console.warn('[Zustand Snapshot] Failed to restore tracking metrics:', metricsErr.message);
       }
 
+       // Restore notification settings from SQLite snapshot
+       if ((sqliteData as any).notificationSettings) {
+         const ns = (sqliteData as any).notificationSettings;
+         usePlaylistStateStore.setState({
+           notificationsEnabled: ns.enabled,
+           notificationHour: ns.hour,
+           notificationMinute: ns.minute,
+           notificationFrequency: ns.frequency,
+           notificationCustomDays: ns.customDays,
+         });
+
+         // Reschedule local push notifications on boot based on SQLite database settings
+         try {
+           const { scheduleReminders, scheduleStreakWarning, cancelStreakWarning } = require('../services/notificationService');
+           if (ns.enabled) {
+             scheduleReminders(true, ns.hour, ns.minute, ns.frequency, ns.customDays).catch(() => {});
+             scheduleStreakWarning(21, 0).catch(() => {});
+           } else {
+             scheduleReminders(false, ns.hour, ns.minute, ns.frequency, ns.customDays).catch(() => {});
+             cancelStreakWarning().catch(() => {});
+           }
+         } catch (nsErr: any) {
+           console.warn('[Zustand Snapshot] Failed to reschedule notifications from loaded settings:', nsErr.message);
+         }
+       }
+
+       // Restore app config from SQLite snapshot
+       if ((sqliteData as any).appConfig) {
+         const ac = (sqliteData as any).appConfig;
+         usePlaylistStateStore.setState({
+           latestVersion: ac.latestVersion || '1.0.5',
+           updateUrl: 'https://ree-wise-download-website.vercel.app/',
+           shareMessage: "Here's the link of the cool app you were asking about 😉 \n\nhttps://ree-wise-download-website.vercel.app/",
+         });
+       }
+
        usePlaylistStateStore.setState({
         foldersById,
         playlistsById,
         cardsById,
         playlistCardOrderMap: nextPlaylistCardOrderMap,
         cardDifficultyMap: nextDifficultyMap,
+        hydratedPlaylists: nextHydratedPlaylists,
         offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : currentState.offlineActionQueue,
         seniorQuotes: sqliteData.seniorQuotes || [],
         currentQuoteIndex: sqliteData.currentQuoteIndex || 0,
@@ -462,7 +528,14 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       setLiveSyncPaused: (val) => set({ isLiveSyncPaused: val }),
       triggerSync: () => set((state) => ({ syncTriggerCount: state.syncTriggerCount + 1 })),
       setHasSyncedThisSession: (val) => set({ hasSyncedThisSession: val }),
-      setSeniorQuotes: (quotes) => set({ seniorQuotes: quotes }),
+      setSeniorQuotes: (quotes) => {
+        set({ seniorQuotes: quotes });
+        const userId = get().userId || 'guest-user';
+        const { saveSeniorQuotesToSQLite } = require('../utils/sqliteSyncBridge');
+        saveSeniorQuotesToSQLite(quotes, userId).catch((err: any) => {
+          console.error('[Zustand Store] Failed to save senior quotes to SQLite:', err.message);
+        });
+      },
       incrementQuoteIndex: (quotesCount) => {
         set((state) => {
           const nextIndex = state.currentQuoteIndex + 1;
@@ -501,6 +574,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       },
 
       hardResetStore: () => {
+        console.log('hardResetStore INVOCATION');
         console.warn('[Zustand Store] Hard Reset Triggered due to Storage/Hydration Corruption recovery!');
         set({ ...DEFAULT_STATE, hasHydrated: true });
       },
@@ -589,6 +663,14 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           selectedRootFolderIds: folderIds,
           currentRevisionCounter: state.currentRevisionCounter + 1
         }));
+
+        try {
+          const { saveReelPreferencesToSQLite } = require('../utils/sqliteSyncBridge');
+          const userId = get().userId || 'guest-user';
+          await saveReelPreferencesToSQLite(userId, folderIds);
+        } catch (err: any) {
+          console.error('[Zustand Store] Failed to save reel preferences to SQLite:', err.message);
+        }
       },
 
       updateReelPreferencesInStore: async (folderIds) => {
@@ -604,12 +686,61 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           payload: { selectedRootFolderIds: folderIds },
           timestamp: Date.now(),
         });
+
+        // 3. Save directly to SQLite
+        try {
+          const { saveReelPreferencesToSQLite } = require('../utils/sqliteSyncBridge');
+          const userId = get().userId || 'guest-user';
+          await saveReelPreferencesToSQLite(userId, folderIds);
+        } catch (err: any) {
+          console.error('[Zustand Store] Failed to save reel preferences to SQLite:', err.message);
+        }
+      },
+
+      updateNotificationPreferences: async (enabled, hour, minute, frequency, customDays) => {
+        const currentFrequency = frequency !== undefined ? frequency : get().notificationFrequency;
+        const currentCustomDays = customDays !== undefined ? customDays : get().notificationCustomDays;
+
+        set({
+          notificationsEnabled: enabled,
+          notificationHour: hour,
+          notificationMinute: minute,
+          notificationFrequency: currentFrequency,
+          notificationCustomDays: currentCustomDays,
+        });
+
+        // 1. Reschedule local push alerts in Expo
+        try {
+          const { scheduleReminders, scheduleStreakWarning, cancelStreakWarning } = require('../services/notificationService');
+          if (enabled) {
+            await scheduleReminders(enabled, hour, minute, currentFrequency, currentCustomDays);
+            await scheduleStreakWarning(21, 0); // 9:00 PM streak preservation warning
+          } else {
+            await scheduleReminders(false, hour, minute, currentFrequency, currentCustomDays);
+            await cancelStreakWarning();
+          }
+        } catch (err: any) {
+          console.error('[Zustand Store] Failed to update push notifications scheduling:', err.message);
+        }
+
+        // 2. Save notification settings to SQLite database
+        try {
+          const { saveNotificationPreferencesToSQLite } = require('../utils/sqliteSyncBridge');
+          const userId = get().userId || 'guest-user';
+          await saveNotificationPreferencesToSQLite(userId, enabled, hour, minute, currentFrequency, currentCustomDays);
+        } catch (sqliteErr: any) {
+          console.error('[Zustand Store] Failed to save notification settings to SQLite:', sqliteErr.message);
+        }
       },
 
       hydrateCardContentOnDemand: async (cardId) => {
         const cleanId = cardId.split('-loop-')[0];
         const card = get().cardsById[cleanId];
         if (!card || card.isContentFullyHydrated) return;
+
+        if (get().bootstrapStatus === 'completed') {
+          console.warn(`[SQLite Safety-Net Hit] hydrateCardContentOnDemand called after bootstrap for card: ${cleanId}. Content should have been in memory.`);
+        }
 
         try {
           const { getCardFullContentFromSQLite } = require('../utils/sqliteSyncBridge');
@@ -816,6 +947,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           currentRevisionCounter: nextRev,
         });
 
+        // Persist the reordered card IDs to SQLite database
+        const userId = state.userId || 'guest-user';
+        const cleanPlaylistId = playlistId.split('-loop-')[0];
+        const cardIdsJson = JSON.stringify(cleanIds);
+        sqliteWriteManager.enqueue({
+          id: `reorder-playlist-${cleanPlaylistId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(
+                'UPDATE playlists SET cardIds = ?, updatedAt = ? WHERE id = ? AND userId = ?;',
+                [cardIdsJson, new Date().toISOString(), cleanPlaylistId, userId]
+              );
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(err => console.error('[SQLite setPlaylistCardOrder Async Error]', err.message));
       },
 
       hydrateCustomPlaylistOrder: (playlistId, cardIds) => {
@@ -844,6 +994,40 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             ...state.hydratedPlaylists,
             [playlistId]: true,
           };
+          return {
+            playlistCardOrderMap: nextPlaylistCardOrderMap,
+            hydratedPlaylists: nextHydratedPlaylists,
+          };
+        });
+      },
+
+      hydrateAllCustomPlaylistsOrder: (playlists) => {
+        set((state) => {
+          const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
+          const nextHydratedPlaylists = { ...state.hydratedPlaylists };
+          let modified = false;
+
+          playlists.forEach(({ id, orderedCardIds }) => {
+            if (['easy', 'medium', 'hard', 'skipped'].includes(id)) return;
+
+            const isHydrated = state.hydratedPlaylists[id];
+            const isDirty = state.playlistsById[id]?.dirty;
+            const hasPending = state.offlineActionQueue.some(
+              (a) =>
+                (a.action === 'TOGGLE_PLAYLIST_ITEM' && a.payload?.playlistId === id) ||
+                (a.action === 'REORDER_PLAYLIST' && a.payload?.playlistId === id)
+            );
+
+            if (isHydrated || isDirty || hasPending) return;
+
+            const cleanIds = cleanCardIds(orderedCardIds);
+            nextPlaylistCardOrderMap[id] = cleanIds;
+            nextHydratedPlaylists[id] = true;
+            modified = true;
+          });
+
+          if (!modified) return {};
+
           return {
             playlistCardOrderMap: nextPlaylistCardOrderMap,
             hydratedPlaylists: nextHydratedPlaylists,
@@ -913,6 +1097,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           hydratedPlaylistCardCounts: nextHydratedPlaylistCardCounts,
           currentRevisionCounter: nextRev,
         });
+
+        const userId = state.userId || 'guest-user';
+        const cleanPlaylistId = playlistId.split('-loop-')[0];
+        const newListJson = JSON.stringify(newList);
+        sqliteWriteManager.enqueue({
+          id: `toggle-playlist-item-${cleanPlaylistId}-${cardId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(
+                'UPDATE playlists SET cardIds = ?, itemCount = ?, updatedAt = ? WHERE id = ? AND userId = ?;',
+                [newListJson, newList.length, new Date().toISOString(), cleanPlaylistId, userId]
+              );
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(err => console.error('[SQLite toggleCustomPlaylistItemInStore Async Error]', err.message));
 
         import('@/services/sessionQueueService')
           .then(mod => mod.invalidateSession(playlistId))
@@ -1031,6 +1234,24 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           smartPlaylistDeltaCounts: nextDeltas,
           currentRevisionCounter: isOptimistic ? nextRev : state.currentRevisionCounter,
         });
+
+        // Write the classification state change directly to SQLite to ensure local durability
+        if (state.userId && state.userId !== 'guest-user') {
+          try {
+            const { saveCardProgressToSQLite } = require('../utils/sqliteSyncBridge');
+            saveCardProgressToSQLite(cleanId, newState, state.userId).catch((err: any) => {
+              console.error('[SQLite Write Error] saveCardProgressToSQLite failed inside transferCard:', err.message);
+            });
+          } catch (e: any) {
+            console.error('[SQLite Write Error] Failed importing saveCardProgressToSQLite inside transferCard:', e.message);
+          }
+        }
+
+        // Cancel today's streak risk warning since the user just successfully reviewed a card
+        try {
+          const { cancelStreakWarning } = require('../services/notificationService');
+          cancelStreakWarning().catch(() => {});
+        } catch {}
 
         // Invalidate corresponding reels sessions to prevent ghost cards in active playlist playback sessions
         if (oldState) {
@@ -1423,10 +1644,53 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           name: playlist.name,
         }, nextState);
 
+        const nextHydratedPlaylists = {
+          ...state.hydratedPlaylists,
+          [playlist._id]: true,
+        };
+
         set({
           playlistsById: nextPlaylists,
           currentRevisionCounter: nextRev,
+          hydratedPlaylists: nextHydratedPlaylists,
         });
+
+        const userId = state.userId || 'guest-user';
+        const cleanId = playlist._id.split('-loop-')[0];
+        const cardIdsJson = JSON.stringify(playlist.cardIds || playlist.orderedCardIds || []);
+        const now = new Date().toISOString();
+        sqliteWriteManager.enqueue({
+          id: `create-playlist-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(`
+                INSERT INTO playlists (
+                  id, userId, name, title, description, color1, color2, itemCount, cardIds, revision, clockEpoch, updatedAt, isDeleted, deletedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, null)
+                ON CONFLICT(id) DO UPDATE SET
+                  name=excluded.name, title=excluded.title, color1=excluded.color1, color2=excluded.color2,
+                  itemCount=excluded.itemCount, cardIds=excluded.cardIds, updatedAt=excluded.updatedAt, isDeleted=0;
+              `, [
+                cleanId,
+                userId,
+                playlist.name || '',
+                playlist.name || '',
+                playlist.description || '',
+                playlist.color1 || '',
+                playlist.color2 || '',
+                playlist.itemCount || 0,
+                cardIdsJson,
+                (playlist as any).revision || 0,
+                (playlist as any).clockEpoch || 'default-epoch',
+                now
+              ]);
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(err => console.error('[SQLite createPlaylistInStore Async Error]', err.message));
 
       },
 
@@ -1483,6 +1747,23 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             { entityId: cleanId, entityType: 'playlist', deletedAt: new Date().toISOString(), revision: (playlist as any).revision || 0 }
           ]
         }));
+
+        sqliteWriteManager.enqueue({
+          id: `delete-playlist-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync('UPDATE playlists SET isDeleted = 1, deletedAt = ?, updatedAt = ? WHERE id = ? AND userId = ?;', [new Date().toISOString(), new Date().toISOString(), cleanId, userId]);
+              await db.runAsync(`
+                INSERT OR REPLACE INTO deleted_entities (userId, entityId, entityType, deletedAt, revision)
+                VALUES (?, ?, 'playlist', ?, 0);
+              `, [userId, cleanId, new Date().toISOString()]);
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'critical'
+        }).catch(err => console.error('[SQLite deletePlaylistInStore Async Error]', err.message));
       },
 
       updatePlaylistInStore: async (playlistId, name) => {
@@ -1511,6 +1792,25 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           currentRevisionCounter: nextRev,
         });
 
+        const userId = state.userId || 'guest-user';
+        const cleanId = playlistId.split('-loop-')[0];
+        const now = new Date().toISOString();
+        sqliteWriteManager.enqueue({
+          id: `update-playlist-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(
+                'UPDATE playlists SET name = ?, title = ?, updatedAt = ? WHERE id = ? AND userId = ?;',
+                [name, name, now, cleanId, userId]
+              );
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(err => console.error('[SQLite updatePlaylistInStore Async Error]', err.message));
+
       },
 
       createFolderInStore: async (folder) => {
@@ -1530,6 +1830,46 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             currentRevisionCounter: nextRev,
           };
         });
+
+        const userId = get().userId || 'guest-user';
+        const cleanId = folder._id.split('-loop-')[0];
+        const cardIdsJson = JSON.stringify(folder.cardIds || []);
+        const now = new Date().toISOString();
+        sqliteWriteManager.enqueue({
+          id: `create-folder-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(`
+                INSERT INTO folders (
+                  id, userId, title, description, icon, color, createdBy, visibility, "order", parentFolderId, cardIds,
+                  revision, pendingLogicalSequence, ackedLogicalSequence, serverLogicalSequence, clockEpoch, updatedAt, isDeleted, deletedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, 0, null)
+                ON CONFLICT(id) DO UPDATE SET
+                  title=excluded.title, description=excluded.description, icon=excluded.icon, color=excluded.color,
+                  parentFolderId=excluded.parentFolderId, cardIds=excluded.cardIds, updatedAt=excluded.updatedAt, isDeleted=0;
+              `, [
+                cleanId,
+                userId,
+                folder.title || '',
+                folder.description || '',
+                folder.icon || 'folder',
+                (folder as any).color || '#7c3aed',
+                typeof folder.createdBy === 'object' ? JSON.stringify(folder.createdBy) : String(folder.createdBy || ''),
+                (folder as any).visibility || 'public',
+                (folder as any).order || 0,
+                folder.parentFolderId || null,
+                cardIdsJson,
+                (folder as any).revision || 0,
+                (folder as any).clockEpoch || 'default-epoch',
+                now
+              ]);
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(err => console.error('[SQLite createFolderInStore Async Error]', err.message));
 
       },
 
@@ -1553,25 +1893,41 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             }
           });
 
+          const nextFullPlaylistCards = { ...state.fullPlaylistCards };
+          const nextHydratedPlaylistCardCounts = { ...state.hydratedPlaylistCardCounts };
+
+          const deletedCleanIdsSet = new Set(deletedCardIds.map((id) => id.split('-loop-')[0]));
+
           deletedCardIds.forEach((cardId) => {
             const cleanId = cardId.split('-loop-')[0];
             delete nextDifficultyMap[cleanId];
-            
-            // Clean up card references from all playlists
-            Object.keys(nextOrderMap).forEach((pId) => {
-              const rawIds = nextOrderMap[pId] || [];
-              if (rawIds.includes(cleanId)) {
-                const validIds = rawIds.filter((id) => id !== cleanId);
-                nextOrderMap[pId] = validIds;
-                
-                if (nextPlaylists[pId]) {
-                  nextPlaylists[pId] = {
-                    ...nextPlaylists[pId],
-                    itemCount: validIds.length,
-                  };
-                }
+          });
+
+          // Clean up card references from all playlists in nextOrderMap in a single pass (O(N) total filtering)
+          Object.keys(nextOrderMap).forEach((pId) => {
+            const rawIds = nextOrderMap[pId] || [];
+            const hasAnyDeleted = rawIds.some((id) => deletedCleanIdsSet.has(id));
+            if (hasAnyDeleted) {
+              const validIds = rawIds.filter((id) => !deletedCleanIdsSet.has(id));
+              nextOrderMap[pId] = validIds;
+              
+              if (nextPlaylists[pId]) {
+                nextPlaylists[pId] = {
+                  ...nextPlaylists[pId],
+                  itemCount: validIds.length,
+                };
               }
-            });
+            }
+          });
+
+          // Clean up card references from fullPlaylistCards and hydratedPlaylistCardCounts in a single pass (O(N) total filtering)
+          Object.keys(nextFullPlaylistCards).forEach((pId) => {
+            const cards = nextFullPlaylistCards[pId] || [];
+            const filtered = cards.filter((c) => c && !deletedCleanIdsSet.has(c._id.split('-loop-')[0]));
+            if (filtered.length !== cards.length) {
+              nextFullPlaylistCards[pId] = filtered;
+              nextHydratedPlaylistCardCounts[pId] = filtered.length;
+            }
           });
 
           return {
@@ -1580,6 +1936,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             cardDifficultyMap: nextDifficultyMap,
             playlistCardOrderMap: nextOrderMap,
             playlistsById: nextPlaylists,
+            fullPlaylistCards: nextFullPlaylistCards,
+            hydratedPlaylistCardCounts: nextHydratedPlaylistCardCounts,
           };
         });
 
@@ -1590,6 +1948,23 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             { entityId: cleanId, entityType: 'folder', deletedAt: new Date().toISOString(), revision: 0 }
           ]
         }));
+
+        sqliteWriteManager.enqueue({
+          id: `delete-folder-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId: activeUserId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync('UPDATE folders SET isDeleted = 1, deletedAt = ?, updatedAt = ? WHERE id = ? AND userId = ?;', [new Date().toISOString(), new Date().toISOString(), cleanId, activeUserId]);
+              await db.runAsync(`
+                INSERT OR REPLACE INTO deleted_entities (userId, entityId, entityType, deletedAt, revision)
+                VALUES (?, ?, 'folder', ?, 0);
+              `, [activeUserId, cleanId, new Date().toISOString()]);
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'critical'
+        }).catch(err => console.error('[SQLite deleteFolderInStore Async Error]', err.message));
       },
 
       deleteCardInStore: async (cardId) => {
@@ -1625,11 +2000,26 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             }
           });
 
+          // 4. Clean up card references from fullPlaylistCards and hydratedPlaylistCardCounts
+          const nextFullPlaylistCards = { ...state.fullPlaylistCards };
+          const nextHydratedPlaylistCardCounts = { ...state.hydratedPlaylistCardCounts };
+
+          Object.keys(nextFullPlaylistCards).forEach((pId) => {
+            const cards = nextFullPlaylistCards[pId] || [];
+            const filtered = cards.filter((c) => c && c._id.split('-loop-')[0] !== cleanId);
+            if (filtered.length !== cards.length) {
+              nextFullPlaylistCards[pId] = filtered;
+              nextHydratedPlaylistCardCounts[pId] = filtered.length;
+            }
+          });
+
           return {
             cardsById: nextCards,
             cardDifficultyMap: nextDifficultyMap,
             playlistCardOrderMap: nextOrderMap,
             playlistsById: nextPlaylists,
+            fullPlaylistCards: nextFullPlaylistCards,
+            hydratedPlaylistCardCounts: nextHydratedPlaylistCardCounts,
           };
         });
 
@@ -1640,6 +2030,24 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             { entityId: cleanId, entityType: 'card', deletedAt: new Date().toISOString(), revision: 0 }
           ]
         }));
+
+        sqliteWriteManager.enqueue({
+          id: `delete-card-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId: activeUserId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync('UPDATE cards_metadata SET isDeleted = 1, updatedAt = ? WHERE id = ?;', [new Date().toISOString(), cleanId]);
+              await db.runAsync('DELETE FROM card_progress WHERE cardId = ? AND userId = ?;', [cleanId, activeUserId]);
+              await db.runAsync(`
+                INSERT OR REPLACE INTO deleted_entities (userId, entityId, entityType, deletedAt, revision)
+                VALUES (?, ?, 'card', ?, 0);
+              `, [activeUserId, cleanId, new Date().toISOString()]);
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'critical'
+        }).catch(err => console.error('[SQLite deleteCardInStore Async Error]', err.message));
       },
 
       updateFolderInStore: async (folderId, updateData) => {
@@ -1656,6 +2064,39 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           },
           currentRevisionCounter: nextRev,
         });
+
+        const userId = state.userId || 'guest-user';
+        const cleanId = folderId.split('-loop-')[0];
+        const now = new Date().toISOString();
+        sqliteWriteManager.enqueue({
+          id: `update-folder-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              const keys = Object.keys(updateData);
+              if (keys.length === 0) return;
+              
+              const setClauses = keys.map(k => {
+                if (k === 'order') return `"order" = ?`;
+                return `${k} = ?`;
+              }).join(', ');
+              
+              const values = keys.map(k => {
+                const val = (updateData as any)[k];
+                if (typeof val === 'object' && val !== null) return JSON.stringify(val);
+                return val;
+              });
+              
+              await db.runAsync(
+                `UPDATE folders SET ${setClauses}, updatedAt = ? WHERE id = ? AND userId = ?;`,
+                [...values, now, cleanId, userId]
+              );
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal'
+        }).catch(err => console.error('[SQLite updateFolderInStore Async Error]', err.message));
 
       },
 
@@ -1694,34 +2135,50 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       name: 'dsa-playlist-state',
       storage: createJSONStorage(() => storageEngine),
       version: 3,
-      partialize: (state) => ({
-        userId: state.userId,
-        offlineActionQueue: state.offlineActionQueue,
-        poisonActionIds: state.poisonActionIds,
-        deadLetterQueue: state.deadLetterQueue,
-        currentRevisionCounter: state.currentRevisionCounter,
-        foldersById: state.foldersById,
-        playlistsById: state.playlistsById,
-        cardDifficultyMap: state.cardDifficultyMap,
-        playlistCardOrderMap: state.playlistCardOrderMap,
-        lastSyncedAt: state.lastSyncedAt,
-        lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
-        lastCatalogIntegrityCheck: state.lastCatalogIntegrityCheck,
-        hydratedPlaylists: state.hydratedPlaylists,
-        initialSmartCounts: state.initialSmartCounts,
-        smartPlaylistDeltaCounts: state.smartPlaylistDeltaCounts,
-        seniorQuotes: state.seniorQuotes,
-        currentQuoteIndex: state.currentQuoteIndex,
-        dbVersion: state.dbVersion,
-        storeSchemaVersion: state.storeSchemaVersion,
-        enableRevisionSync: state.enableRevisionSync,
-        enableStrictContiguity: state.enableStrictContiguity,
-        lastSyncedRevision: state.lastSyncedRevision,
-        deviceId: state.deviceId,
-        logicalClockSequence: state.logicalClockSequence,
-        fullPlaylistCards: state.fullPlaylistCards,
-        hydratedPlaylistCardCounts: state.hydratedPlaylistCardCounts,
-      }),
+      partialize: (state) => {
+        if (state.userId === 'guest-user') {
+          return {
+            userId: 'guest-user',
+            hasHydrated: true,
+            bootstrapStatus: 'completed',
+          } as any;
+        }
+        return {
+          userId: state.userId,
+          offlineActionQueue: state.offlineActionQueue,
+          deletedEntitiesQueue: state.deletedEntitiesQueue,
+          poisonActionIds: state.poisonActionIds,
+          deadLetterQueue: state.deadLetterQueue,
+          currentRevisionCounter: state.currentRevisionCounter,
+          foldersById: state.foldersById,
+          playlistsById: state.playlistsById,
+          cardDifficultyMap: state.cardDifficultyMap,
+          playlistCardOrderMap: state.playlistCardOrderMap,
+          lastSyncedAt: state.lastSyncedAt,
+          lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
+          lastCatalogIntegrityCheck: state.lastCatalogIntegrityCheck,
+          hydratedPlaylists: state.hydratedPlaylists,
+          initialSmartCounts: state.initialSmartCounts,
+          smartPlaylistDeltaCounts: state.smartPlaylistDeltaCounts,
+          seniorQuotes: state.seniorQuotes,
+          currentQuoteIndex: state.currentQuoteIndex,
+          dbVersion: state.dbVersion,
+          storeSchemaVersion: state.storeSchemaVersion,
+          enableRevisionSync: state.enableRevisionSync,
+          enableStrictContiguity: state.enableStrictContiguity,
+          lastSyncedRevision: state.lastSyncedRevision,
+          deviceId: state.deviceId,
+          logicalClockSequence: state.logicalClockSequence,
+          fullPlaylistCards: state.fullPlaylistCards,
+          hydratedPlaylistCardCounts: state.hydratedPlaylistCardCounts,
+          selectedRootFolderIds: state.selectedRootFolderIds,
+          notificationsEnabled: state.notificationsEnabled,
+          notificationHour: state.notificationHour,
+          notificationMinute: state.notificationMinute,
+          notificationFrequency: state.notificationFrequency,
+          notificationCustomDays: state.notificationCustomDays,
+        };
+      },
       migrate: (persistedState: any, version: number) => {
         if (__DEV__) console.log(`[Schema Migration] Migrating from version ${version} to 3`);
         let state = { ...persistedState };
@@ -1771,179 +2228,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
                 console.log(`[Zustand Rehydration Completed] Local Zustand hydrated in ${duration.toFixed(2)}ms.`);
               }
 
-              // Phase 1: Mount UI shell instantly and set status to metadata_loading
+              // Phase 1: Mount UI shell instantly (Zustand storage rehydrated)
               rehydratedState.setHasHydrated(true);
-              rehydratedState.setBootstrapStatus('metadata_loading');
 
-              // Asynchronously run loading operations in background to completely unblock the main thread
-              (async () => {
-                const activeUserId = rehydratedState.userId || 'guest-user';
-                try {
-                  const { isSQLiteAvailable, initializeDatabaseAsync, verifyDatabaseIntegrity, setupDatabaseTables } = require('../utils/sqliteDatabase');
-                  const { interactionScheduler } = require('../utils/interactionScheduler');
-
-                  // Stage 1: Open SQLite Connection & Run Integrity Checks
-                  if (isSQLiteAvailable()) {
-                    console.log('[Bootstrap Phase 2] Initializing SQLite...');
-                    await initializeDatabaseAsync();
-                    
-                    const SCHEMA_VERSION_KEY = 'sqlite_schema_version';
-                    const CURRENT_SCHEMA_VERSION = 'v5';
-                    const SecureStore = require('expo-secure-store');
-                    const storedVersion = await SecureStore.getItemAsync(SCHEMA_VERSION_KEY);
-                    
-                    if (storedVersion !== CURRENT_SCHEMA_VERSION) {
-                      console.log('[Bootstrap Phase 2] Schema version mismatch or first boot. Running DDL & integrity check...');
-                      await verifyDatabaseIntegrity();
-                      await setupDatabaseTables();
-                      await SecureStore.setItemAsync(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
-                    } else {
-                      console.log('[Bootstrap Phase 2] Safe fast boot: skipping DDL & integrity check.');
-                    }
-                    await getOrCreateClockEpoch();
-                    
-                    const authStore = require('./useAuthStore').useAuthStore;
-                    const capturedGenId = authStore.getState().sessionGenerationId;
-                    
-                    // Phase 2: Lightweight metadata hydration from SQLite
-                    console.log('[Bootstrap Phase 2] Hydrating core Zustand views from SQLite snapshots...');
-                    const { loadStateFromSQLite, bulkHydrateAllCardContent } = require('../utils/sqliteSyncBridge');
-                    const sqliteData = await loadStateFromSQLite(activeUserId);
-                    
-                    // Cancel check: if user switched session mid-load, discard loaded state
-                    if (capturedGenId !== authStore.getState().sessionGenerationId) {
-                      console.log('[Zustand SQLite Rehydration] Aborting hydration commit: session switched mid-load.');
-                      return;
-                    }
-
-                    if (sqliteData) {
-                      const { foldersById, playlistsById, cardsById, offlineActionQueue } = sqliteData;
-                      const currentState = usePlaylistStateStore.getState();
-
-                      // Construct playlistCardOrderMap from loaded playlistsById
-                      const nextPlaylistCardOrderMap = { ...currentState.playlistCardOrderMap };
-                      Object.keys(playlistsById).forEach((id) => {
-                        const p = playlistsById[id];
-                        if (p && !['easy', 'medium', 'hard', 'skipped'].includes(id)) {
-                          const cardIds = p.cardIds || p.orderedCardIds || [];
-                          nextPlaylistCardOrderMap[id] = cardIds.map((cid: string) => cid.split('-loop-')[0]).filter(Boolean);
-                        }
-                      });
-
-                      // Rebuild cardDifficultyMap from persisted card difficultyState values
-                      const allCards = { ...currentState.cardsById, ...cardsById };
-                      const nextDifficultyMap: Record<string, any> = { ...currentState.cardDifficultyMap };
-                      Object.keys(allCards).forEach((cardId) => {
-                        const card = allCards[cardId] as any;
-                        if (card && card.difficultyState) {
-                          if (!nextDifficultyMap[cardId]?.optimistic) {
-                            nextDifficultyMap[cardId] = {
-                              difficulty: card.difficultyState,
-                              originalDifficulty: card.difficultyState,
-                              updatedAt: new Date(card.updatedAt || 0).getTime(),
-                              optimistic: false,
-                            };
-                          }
-                        }
-                      });
-
-                      // Rotate Senior Quote index exactly once per app launch (Stage 3 rehydration bootstrap)
-                      let nextQuoteIndex = sqliteData.currentQuoteIndex || 0;
-                      const quotesCount = sqliteData.seniorQuotes ? sqliteData.seniorQuotes.length : 0;
-                      if (quotesCount > 0) {
-                        nextQuoteIndex = (nextQuoteIndex + 1) % quotesCount;
-                      }
-
-                      // Persist nextQuoteIndex durably inside SQLite
-                      try {
-                        const { getDatabase } = require('../utils/sqliteDatabase');
-                        const db = getDatabase();
-                        await db.runAsync(
-                          'UPDATE reel_sessions SET currentQuoteIndex = ?, updatedAt = ? WHERE userId = ?;',
-                          [nextQuoteIndex, new Date().toISOString(), activeUserId]
-                        );
-                        console.log(`[Zustand Bootstrap] Rotated quote index to: ${nextQuoteIndex}/${quotesCount} for user ${activeUserId}`);
-                      } catch (dbErr: any) {
-                        console.warn('[Zustand Bootstrap] Failed to persist advanced currentQuoteIndex to SQLite:', dbErr.message);
-                      }
-
-                      // Restore tracking metrics from SQLite before background sync
-                      try {
-                        const { loadUserMetricsFromSQLite } = require('../utils/sqliteSyncBridge');
-                        const { useTrackingStore } = require('./useTrackingStore');
-                        const metrics = await loadUserMetricsFromSQLite(activeUserId);
-                        if (metrics) {
-                          useTrackingStore.getState().setMetrics({
-                            totalSwipes: metrics.totalSwipes || 0,
-                            totalScrolls: metrics.totalScrolls || 0,
-                            unsyncedSwipes: metrics.unsyncedSwipes || 0,
-                            unsyncedScrolls: metrics.unsyncedScrolls || 0,
-                          });
-                          console.log(`[Zustand Bootstrap] SQLite user metrics loaded: Swipes=${metrics.totalSwipes}, Scrolls=${metrics.totalScrolls}`);
-                        }
-                      } catch (metricsErr: any) {
-                        console.warn('[Zustand Bootstrap] Failed to restore tracking metrics:', metricsErr.message);
-                      }
-
-                      usePlaylistStateStore.setState({
-                        foldersById: { ...currentState.foldersById, ...foldersById },
-                        playlistsById: { ...currentState.playlistsById, ...playlistsById },
-                        cardsById: allCards,
-                        playlistCardOrderMap: nextPlaylistCardOrderMap,
-                        cardDifficultyMap: nextDifficultyMap,
-                        offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : currentState.offlineActionQueue,
-                        lastSyncedRevision: sqliteData.lastSyncedRevision || 0,
-                        lastSyncedAt: sqliteData.lastSyncedAt || null,
-                        selectedRootFolderIds: sqliteData.selectedRootFolderIds || [],
-                        seniorQuotes: sqliteData.seniorQuotes || [],
-                        currentQuoteIndex: nextQuoteIndex,
-                      });
-                      console.log(`[Zustand SQLite Rehydration] Canonical relational tables loaded successfully.`);
-                    }
-
-                    // Transition to cards loading phase (Phase 3)
-                    usePlaylistStateStore.setState({ bootstrapStatus: 'cards_loading' });
-                    
-                    // Phase 3: Background card hydration
-                    console.log('[Bootstrap Phase 3] Asynchronously bulk-loading all card content into memory...');
-                    const contentMap = await bulkHydrateAllCardContent();
-                    const contentCardCount = Object.keys(contentMap).length;
-                    if (contentCardCount > 0) {
-                      const latestStoreState = usePlaylistStateStore.getState();
-                      const cardsByIdCopy = { ...latestStoreState.cardsById };
-                      
-                      Object.keys(cardsByIdCopy).forEach((cardId) => {
-                        const content = contentMap[cardId];
-                        if (content) {
-                          cardsByIdCopy[cardId] = {
-                            ...cardsByIdCopy[cardId],
-                            ...content,
-                            isContentFullyHydrated: true,
-                          };
-                        }
-                      });
-                      
-                      usePlaylistStateStore.setState({ cardsById: cardsByIdCopy });
-                      console.log(`[Bootstrap Phase 3] Fully hydrated ${contentCardCount} cards into memory in background.`);
-                    }
-                  }
-                  
-                  // Transition to completed phase
-                  usePlaylistStateStore.setState({ bootstrapStatus: 'completed' });
-                  
-                  // Phase 4: Silent sync after interaction settles
-                  console.log('[Bootstrap Phase 4] Queueing background sync handshake after startup settles...');
-                  const latestState = usePlaylistStateStore.getState();
-                  interactionScheduler.runWhenIdle(() => {
-                    latestState.triggerSync();
-                  });
-
-                } catch (sqlErr: any) {
-                  console.error('[Zustand SQLite Rehydration Error] Setup failed:', sqlErr.message);
-                  usePlaylistStateStore.setState({ bootstrapStatus: 'failed' });
-                }
-              })();
-              
               // Auto-generate stable deviceId if not present
               if (!rehydratedState.deviceId) {
                 let devId;
@@ -1963,3 +2250,386 @@ export const usePlaylistStateStore = create<PlaylistState>()(
     }
   )
 );
+
+/**
+ * bootstrapHydrateFromSQLite — Hydrates the Zustand store partitions from SQLite.
+ *
+ * This is the SINGLE AUTHORITATIVE entry point for loading SQLite state on startup
+ * or account switch. It runs after Phase 1 (database is initialized and tables created)
+ * and Phase 2 (auth session is restored), ensuring no query races.
+ */
+export function initializeGuestDemoContent() {
+  console.log('initializeGuestDemoContent START');
+  console.log('parsed from offlineSeed.json:', {
+    folders: offlineSeed.folders.length,
+    cards: offlineSeed.revisionCards.length,
+    playlists: offlineSeed.playlists.length
+  });
+
+  const foldersById: Record<string, any> = {};
+  offlineSeed.folders.forEach((f: any) => {
+    foldersById[f._id] = {
+      _id: f._id,
+      userId: 'guest-user',
+      title: f.title,
+      description: f.description,
+      icon: f.icon,
+      color: f.color,
+      createdBy: f.createdBy,
+      visibility: f.visibility,
+      order: f.order,
+      parentFolderId: f.parentFolderId,
+      cardIds: f.cardIds || [],
+      revision: f.revision || 0,
+      createdAt: f.createdAt,
+      updatedAt: f.updatedAt,
+    };
+  });
+
+  const playlistsById: Record<string, any> = {};
+  offlineSeed.playlists.forEach((p: any) => {
+    playlistsById[p._id] = {
+      _id: p._id,
+      userId: 'guest-user',
+      name: p.name,
+      title: p.title,
+      description: p.description,
+      color1: p.color1,
+      color2: p.color2,
+      itemCount: p.itemCount,
+      cardIds: p.cardIds || [],
+      revision: p.revision || 0,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+    };
+  });
+
+  const cardsById: Record<string, any> = {};
+  offlineSeed.revisionCards.forEach((c: any) => {
+    cardsById[c._id] = {
+      ...c,
+      _id: c._id,
+      isDeleted: c.isDeleted === true || c.isDeleted === 1,
+      isFavorite: false,
+      difficultyState: null,
+      currentUserQuestionProgress: null,
+      isContentFullyHydrated: true,
+    };
+  });
+
+  // Rebuild playlistCardOrderMap for smart/default playlists
+  const playlistCardOrderMap: Record<string, string[]> = {
+    easy: [],
+    medium: [],
+    hard: [],
+    skipped: [],
+    likes: [],
+    'watch-later': [],
+    all: Object.keys(cardsById),
+  };
+
+  playlistsById['all'] = {
+    _id: 'all',
+    userId: 'guest-user',
+    name: 'All Cards',
+    title: 'All Cards',
+    description: 'All seeded revision cards',
+    cardIds: Object.keys(cardsById),
+    itemCount: Object.keys(cardsById).length,
+  };
+
+  const selectedRootFolderIds = Object.values(foldersById)
+    .filter((f: any) => !f.parentFolderId || f.parentFolderId === null)
+    .map((f: any) => f._id);
+
+  usePlaylistStateStore.setState({
+    foldersById,
+    playlistsById,
+    cardsById,
+    playlistCardOrderMap,
+    selectedRootFolderIds,
+    bootstrapStatus: 'completed',
+    hasHydrated: true,
+  });
+
+  console.log({
+    foldersAfterSeed:
+    Object.keys(usePlaylistStateStore.getState().foldersById).length,
+
+    cardsAfterSeed:
+    Object.keys(usePlaylistStateStore.getState().cardsById).length
+  });
+
+  setTimeout(()=>{
+    console.log("2s later", {
+      folders:
+      Object.keys(usePlaylistStateStore.getState().foldersById).length
+    });
+  },2000);
+
+  console.log('[Guest Demo Content] Hydrated Zustand memory:', {
+    folders: Object.keys(foldersById).length,
+    playlists: Object.keys(playlistsById).length,
+    cards: Object.keys(cardsById).length,
+    selectedRootFolders: selectedRootFolderIds.length,
+  });
+}
+
+export async function bootstrapHydrateFromSQLite(
+  activeUserId: string = 'guest-user',
+  serverSwipes: number = 0,
+  serverScrolls: number = 0
+): Promise<void> {
+  console.log('bootstrapHydrateFromSQLite INVOCATION', { activeUserId, serverSwipes, serverScrolls });
+
+  if (activeUserId === 'guest-user') {
+    initializeGuestDemoContent();
+    
+    const { isSQLiteAvailable } = require('../utils/sqliteDatabase');
+    const { markAppReady } = require('../utils/appBootstrapGate');
+    if (isSQLiteAvailable()) {
+      try {
+        const { getDatabase } = require('../utils/sqliteDatabase');
+        const db = getDatabase();
+        db.runAsync('DELETE FROM reel_sessions WHERE userId = ?;', ['guest-user'])
+          .catch((err: any) => console.warn('[Guest DB Cleanup] Failed to clear guest sessions:', err.message));
+      } catch (e: any) {
+        console.warn('[Guest DB Cleanup] Database not initialized yet:', e.message);
+      }
+    }
+    
+    markAppReady();
+    return;
+  }
+
+  const storeState = usePlaylistStateStore.getState();
+
+  // Concurrency guard: avoid duplicate concurrent bootstrap pipelines
+  if (
+    storeState.bootstrapStatus === 'metadata_loading' ||
+    storeState.bootstrapStatus === 'cards_loading' ||
+    storeState.bootstrapStatus === 'completed'
+  ) {
+    console.log(`[Zustand SQLite Hydration] Hydration already in status: ${storeState.bootstrapStatus}. Skipping duplicate invocation.`);
+    return;
+  }
+
+  console.log(`[Zustand SQLite Hydration] Starting serialization phase for user: ${activeUserId}`);
+  usePlaylistStateStore.setState({ bootstrapStatus: 'metadata_loading' });
+
+  const authStore = require('./useAuthStore').useAuthStore;
+  const capturedGenId = authStore.getState().sessionGenerationId;
+
+  try {
+    const { isSQLiteAvailable } = require('../utils/sqliteDatabase');
+    const { whenDatabaseReady, markAppReady } = require('../utils/appBootstrapGate');
+    const { interactionScheduler } = require('../utils/interactionScheduler');
+
+    if (isSQLiteAvailable()) {
+      // Stage 1: Wait for appBootstrapGate database initialization (Phase 1)
+      console.log('[Zustand SQLite Hydration] Waiting for database readiness...');
+      await whenDatabaseReady();
+      console.log('[Zustand SQLite Hydration] Database ready. Proceeding with loading snapshot.');
+
+      // Stage 2: Load relational partitions from SQLite snapshot
+      const { loadStateFromSQLite } = require('../utils/sqliteSyncBridge');
+      const sqliteData = await loadStateFromSQLite(activeUserId);
+
+      // Cancel check: if user switched session mid-load, discard loaded state
+      if (capturedGenId !== authStore.getState().sessionGenerationId) {
+        console.log('[Zustand SQLite Hydration] Aborting hydration commit: session switched mid-load.');
+        return;
+      }
+
+      if (sqliteData) {
+        const { foldersById, playlistsById, offlineActionQueue } = sqliteData;
+        const cardsById = sqliteData.cardsMetaPromise ? await sqliteData.cardsMetaPromise : {};
+        const currentState = usePlaylistStateStore.getState();
+
+        // Construct playlistCardOrderMap from loaded playlistsById
+        const nextPlaylistCardOrderMap = { ...currentState.playlistCardOrderMap };
+        const nextHydratedPlaylists = { ...currentState.hydratedPlaylists };
+        Object.keys(playlistsById).forEach((id) => {
+          nextHydratedPlaylists[id] = true;
+          const p = playlistsById[id];
+          if (p && !['easy', 'medium', 'hard', 'skipped'].includes(id)) {
+            const cardIds = p.cardIds || p.orderedCardIds || [];
+            nextPlaylistCardOrderMap[id] = cardIds.map((cid: string) => cid.split('-loop-')[0]).filter(Boolean);
+          }
+        });
+
+        // Rebuild cardDifficultyMap from persisted card difficultyState values
+        const allCards = { ...currentState.cardsById, ...cardsById };
+        const nextDifficultyMap: Record<string, any> = { ...currentState.cardDifficultyMap };
+        Object.keys(allCards).forEach((cardId) => {
+          const card = allCards[cardId] as any;
+          if (card && card.difficultyState) {
+            if (!nextDifficultyMap[cardId]?.optimistic) {
+              nextDifficultyMap[cardId] = {
+                difficulty: card.difficultyState,
+                originalDifficulty: card.difficultyState,
+                updatedAt: new Date(card.updatedAt || 0).getTime(),
+                optimistic: false,
+              };
+            }
+          }
+        });
+
+        // Rotate Senior Quote index exactly once per app launch (Stage 3 rehydration bootstrap)
+        let nextQuoteIndex = sqliteData.currentQuoteIndex || 0;
+        const quotesCount = sqliteData.seniorQuotes ? sqliteData.seniorQuotes.length : 0;
+        if (quotesCount > 0) {
+          nextQuoteIndex = (nextQuoteIndex + 1) % quotesCount;
+        }
+
+        // Persist nextQuoteIndex durably inside SQLite
+        try {
+          const { getDatabase } = require('../utils/sqliteDatabase');
+          const db = getDatabase();
+          await db.runAsync(
+            'UPDATE reel_sessions SET currentQuoteIndex = ?, updatedAt = ? WHERE userId = ?;',
+            [nextQuoteIndex, new Date().toISOString(), activeUserId]
+          );
+          console.log(`[Zustand Bootstrap] Rotated quote index to: ${nextQuoteIndex}/${quotesCount} for user ${activeUserId}`);
+        } catch (dbErr: any) {
+          console.warn('[Zustand Bootstrap] Failed to persist advanced currentQuoteIndex to SQLite:', dbErr.message);
+        }
+
+        // Restore/Merge tracking metrics from SQLite before background sync
+        try {
+          const { loadUserMetricsFromSQLite, saveUserMetricsToSQLite } = require('../utils/sqliteSyncBridge');
+          const metrics = await loadUserMetricsFromSQLite(activeUserId);
+          if (metrics) {
+            const mergedSwipes = Math.max(metrics.totalSwipes || 0, serverSwipes);
+            const mergedScrolls = Math.max(metrics.totalScrolls || 0, serverScrolls);
+            const nextMetrics = {
+              totalSwipes: mergedSwipes,
+              totalScrolls: mergedScrolls,
+              unsyncedSwipes: metrics.unsyncedSwipes || 0,
+              unsyncedScrolls: metrics.unsyncedScrolls || 0,
+            };
+            await saveUserMetricsToSQLite(activeUserId, nextMetrics);
+            useTrackingStore.getState().setMetrics(nextMetrics);
+            console.log(`[Zustand Bootstrap] SQLite user metrics loaded & merged: Swipes=${mergedSwipes}, Scrolls=${mergedScrolls}`);
+          } else {
+            const defaultMetrics = {
+              totalSwipes: serverSwipes,
+              totalScrolls: serverScrolls,
+              unsyncedSwipes: 0,
+              unsyncedScrolls: 0,
+            };
+            await saveUserMetricsToSQLite(activeUserId, defaultMetrics);
+            useTrackingStore.getState().setMetrics(defaultMetrics);
+            console.log(`[Zustand Bootstrap] Fresh session. SQLite user metrics initialized from server for: ${activeUserId}`);
+          }
+        } catch (metricsErr: any) {
+          console.warn('[Zustand Bootstrap] Failed to restore tracking metrics:', metricsErr.message);
+        }
+
+        if (capturedGenId !== authStore.getState().sessionGenerationId) {
+          console.log('[Zustand SQLite Hydration] Aborting hydration commit: session switched mid-load.');
+          return;
+        }
+
+        usePlaylistStateStore.setState({
+          foldersById: { ...currentState.foldersById, ...foldersById },
+          playlistsById: { ...currentState.playlistsById, ...playlistsById },
+          cardsById: allCards,
+          playlistCardOrderMap: nextPlaylistCardOrderMap,
+          cardDifficultyMap: nextDifficultyMap,
+          hydratedPlaylists: nextHydratedPlaylists,
+          offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : currentState.offlineActionQueue,
+          lastSyncedRevision: sqliteData.lastSyncedRevision || 0,
+          lastSyncedAt: sqliteData.lastSyncedAt || null,
+          selectedRootFolderIds: sqliteData.selectedRootFolderIds && sqliteData.selectedRootFolderIds.length > 0
+            ? sqliteData.selectedRootFolderIds
+            : (currentState.selectedRootFolderIds || []),
+          seniorQuotes: sqliteData.seniorQuotes || [],
+          currentQuoteIndex: nextQuoteIndex,
+          ...(sqliteData.notificationSettings ? {
+            notificationsEnabled: sqliteData.notificationSettings.enabled,
+            notificationHour: sqliteData.notificationSettings.hour,
+            notificationMinute: sqliteData.notificationSettings.minute,
+            notificationFrequency: sqliteData.notificationSettings.frequency,
+            notificationCustomDays: sqliteData.notificationSettings.customDays,
+          } : {})
+        });
+        console.log(`[Zustand SQLite Hydration] Canonical relational tables loaded successfully.`);
+
+        const nextState = usePlaylistStateStore.getState();
+        try {
+          const { scheduleReminders, scheduleStreakWarning, cancelStreakWarning } = require('../services/notificationService');
+          if (nextState.notificationsEnabled) {
+            scheduleReminders(
+              true,
+              nextState.notificationHour,
+              nextState.notificationMinute,
+              nextState.notificationFrequency || 'daily',
+              nextState.notificationCustomDays || [1, 2, 3, 4, 5, 6, 7]
+            ).catch(() => {});
+            scheduleStreakWarning(21, 0).catch(() => {});
+          } else {
+            scheduleReminders(
+              false,
+              nextState.notificationHour,
+              nextState.notificationMinute,
+              nextState.notificationFrequency || 'daily',
+              nextState.notificationCustomDays || [1, 2, 3, 4, 5, 6, 7]
+            ).catch(() => {});
+            cancelStreakWarning().catch(() => {});
+          }
+        } catch (notiErr) {
+          console.warn('[Zustand Bootstrap] Failed to bootstrap scheduled reminders:', notiErr);
+        }
+      }
+
+      // Transition to cards loading phase (Phase 3)
+      if (capturedGenId !== authStore.getState().sessionGenerationId) return;
+      usePlaylistStateStore.setState({ bootstrapStatus: 'cards_loading' });
+
+      // Phase 3: Background card hydration
+      console.log('[Zustand SQLite Hydration] Asynchronously bulk-loading all card content into memory...');
+      const { bulkHydrateAllCardContent } = require('../utils/sqliteSyncBridge');
+      const contentMap = await bulkHydrateAllCardContent();
+      const contentCardCount = Object.keys(contentMap).length;
+
+      if (capturedGenId !== authStore.getState().sessionGenerationId) return;
+
+      if (contentCardCount > 0) {
+        const latestStoreState = usePlaylistStateStore.getState();
+        const cardsByIdCopy = { ...latestStoreState.cardsById };
+
+        Object.keys(cardsByIdCopy).forEach((cardId) => {
+          const content = contentMap[cardId];
+          if (content) {
+            cardsByIdCopy[cardId] = {
+              ...cardsByIdCopy[cardId],
+              ...content,
+              isContentFullyHydrated: true,
+            };
+          }
+        });
+
+        usePlaylistStateStore.setState({ cardsById: cardsByIdCopy });
+        console.log(`[Zustand SQLite Hydration] Fully hydrated ${contentCardCount} cards into memory in background.`);
+      }
+    }
+
+    if (capturedGenId !== authStore.getState().sessionGenerationId) return;
+    
+    // Transition to completed phase
+    usePlaylistStateStore.setState({ bootstrapStatus: 'completed' });
+    markAppReady();
+
+    // Phase 4: Silent sync after interaction settles
+    console.log('[Zustand SQLite Hydration] Queueing background sync handshake after startup settles...');
+    const finalState = usePlaylistStateStore.getState();
+    interactionScheduler.runWhenIdle(() => {
+      finalState.triggerSync();
+    });
+
+  } catch (sqlErr: any) {
+    console.error('[Zustand SQLite Hydration Error] Setup failed:', sqlErr.message);
+    usePlaylistStateStore.setState({ bootstrapStatus: 'failed' });
+  }
+}

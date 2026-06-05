@@ -2,15 +2,11 @@
   "expo": {
     "name": "ReeWise",
     "slug": "dsa-revision-app",
-    "version": "1.0.0",
+    "version": "1.0.5",
     "scheme": "dsareels",
     "orientation": "portrait",
     "icon": "./assets/icon213.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#FAF9F7"
-    },
     "ios": {
       "supportsTablet": true,
       "backgroundColor": "#FAF9F7"
@@ -46,7 +42,8 @@
       "expo-web-browser",
       "expo-secure-store",
       "@react-native-google-signin/google-signin",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-notifications"
     ],
     "extra": {
       "router": {},

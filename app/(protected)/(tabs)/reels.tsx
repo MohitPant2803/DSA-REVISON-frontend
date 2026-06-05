@@ -104,6 +104,7 @@ import { ConceptCardPreview, ConceptCardPreviewStatic, getSlidesForCard } from '
 import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
+import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 
 // Global slides cache to store pre-compiled and pre-sorted slide arrays by card ID
 const slidesCache = new Map<string, any[]>();
@@ -1676,7 +1677,7 @@ function interleaveCardsByFolder(
   return result;
 }
 
-export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer?: boolean }) {
+function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boolean }) {
   const router = useRouter();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -1770,19 +1771,22 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
     };
   }, [navigation, isCustomPlayer]);
 
+  const { user } = useAuthStore();
+
   useEffect(() => {
     const checkTutorialStatus = async () => {
       try {
-        const isComplete = await AsyncStorage.getItem('dsa-reels-tutorial-complete');
+        const isGuestUser = user?.id === 'guest-user';
+        const key = isGuestUser ? 'guest-dsa-reels-tutorial-complete' : 'dsa-reels-tutorial-complete';
+        const isComplete = await AsyncStorage.getItem(key);
         if (!isComplete) {
           setShowTutorial(true);
         }
       } catch (e) {}
     };
     checkTutorialStatus();
-  }, []);
+  }, [user]);
 
-  const { user } = useAuthStore();
   const { canManageContent, role } = useRole();
   
   // Custom hook for unified resume syncing and loop mutations
@@ -2098,6 +2102,37 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
   // Premium settings overlay state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const walkthroughStep = useWalkthroughStore((s) => s.step);
+  const setWalkthroughStep = useWalkthroughStore((s) => s.setStep);
+  const reelsTutorialStep = useWalkthroughStore((s) => s.reelsTutorialStep);
+
+  // Settings Cog Pulsing animation for Step 2 of the reels tutorial
+  const settingsPulse = useSharedValue(1);
+  const isTutorialActive = walkthroughStep === 'reels-tutorial' || showTutorial;
+  const shouldPulseSettings = isTutorialActive && reelsTutorialStep === 2 && !isSettingsOpen;
+
+  useEffect(() => {
+    if (shouldPulseSettings) {
+      settingsPulse.value = withRepeat(
+        withSequence(
+          withTiming(0.4, { duration: 1000 }),
+          withTiming(1.0, { duration: 1000 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      cancelAnimation(settingsPulse);
+      settingsPulse.value = 1;
+    }
+    return () => cancelAnimation(settingsPulse);
+  }, [shouldPulseSettings]);
+
+  const settingsPulseStyle = useAnimatedStyle(() => ({
+    opacity: settingsPulse.value,
+    transform: [{ scale: shouldPulseSettings ? interpolate(settingsPulse.value, [0.4, 1.0], [0.92, 1.0], 'clamp') : 1.0 }]
+  }));
 
   // Boundary prefetch overlay states
   const [showFetchingOverlay, setShowFetchingOverlay] = useState(false);
@@ -3214,7 +3249,16 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
 
       
       {showTutorial && (
-        <FirstFeedTutorial onDismiss={() => setShowTutorial(false)} />
+        <FirstFeedTutorial 
+          onDismiss={() => {
+            setShowTutorial(false);
+            if (walkthroughStep === 'reels-tutorial') {
+              setWalkthroughStep('point-myspace');
+            }
+          }}
+          isSettingsOpen={isSettingsOpen}
+          toggleSettings={toggleMenu}
+        />
       )}
       
       {/* Settings & Personalization Overlay */}
@@ -3274,18 +3318,20 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
         }}
       >
         {/* RIGHT SIDE: Transparent Settings Cog Icon - Visible in all sessions */}
-        <TouchableOpacity
-          onPress={toggleMenu}
-          activeOpacity={0.7}
-          style={{
-            padding: 8,
-            backgroundColor: 'transparent',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <Animated.View style={settingsPulseStyle}>
+          <TouchableOpacity
+            onPress={toggleMenu}
+            activeOpacity={0.7}
+            style={{
+              padding: 8,
+              backgroundColor: 'transparent',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <Settings2 color="#8B5CF6" size={20} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
         <TouchableOpacity
@@ -3805,3 +3851,34 @@ const styles = StyleSheet.create({
   },
 });
 
+// =============================================================================
+// Lightning-fast Shell: renders the ReeW mascot with lens on the VERY FIRST
+// FRAME when the user taps the Reels tab icon during tutorial or normal use.
+// The heavy 3800-line ReelsScreenContent only mounts AFTER the navigation
+// transition animation completes via InteractionManager.
+// =============================================================================
+export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer?: boolean }) {
+  const [mountContent, setMountContent] = React.useState(false);
+
+  React.useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setMountContent(true);
+    });
+    return () => task.cancel();
+  }, []);
+
+  if (!mountContent) {
+    return (
+      <View style={{
+        flex: 1,
+        backgroundColor: '#FAF9F7',
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}>
+        <ReeWCharacter state="loading" size={90} />
+      </View>
+    );
+  }
+
+  return <ReelsScreenContent isCustomPlayer={isCustomPlayer} />;
+}

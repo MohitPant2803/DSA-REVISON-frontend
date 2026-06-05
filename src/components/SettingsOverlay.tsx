@@ -12,10 +12,17 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  FlatList,
+  Share,
+  Linking,
 } from 'react-native';
+import Constants from 'expo-constants';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, LogOut, LogIn, Moon, Sun, CheckSquare, Square, Folder as FolderIcon } from 'lucide-react-native';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
+import { themePalettes } from '@/theme/themePalettes';
+import { useThemePalette } from '@/hooks/useThemePalette';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useGetFolders } from '@/hooks/useFolders';
@@ -54,6 +61,45 @@ const getCleanId = (id: any): string => {
   return id.toString();
 };
 
+const getThreeDaysCycle = (startDay: number): number[] => {
+  const day2 = ((startDay - 1 + 3) % 7) + 1;
+  const day3 = ((day2 - 1 + 3) % 7) + 1;
+  return [startDay, day2, day3].sort((a, b) => a - b);
+};
+
+const formatTime = (h: number, m: number) => {
+  const period = h >= 12 ? 'PM' : 'AM';
+  let displayHour = h % 12;
+  if (displayHour === 0) displayHour = 12;
+  return `${String(displayHour).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
+};
+
+const getRepeatSummary = (freq: string, days: number[]): string => {
+  if (freq === 'daily') return 'Repeats every day';
+  if (freq === 'three_days') {
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const activeNames = days.map(d => dayNames[d - 1]);
+    return `Repeats every 3 days (${activeNames.join(', ')})`;
+  }
+  
+  if (!days || days.length === 0) return 'No repeat days selected';
+  if (days.length === 7) return 'Repeats every day';
+  
+  const weekdays = [2, 3, 4, 5, 6];
+  const weekends = [1, 7];
+  
+  const hasAllWeekdays = weekdays.every(d => days.includes(d)) && weekdays.length === days.filter(d => weekdays.includes(d)).length;
+  const hasAllWeekends = weekends.every(d => days.includes(d)) && weekends.length === days.filter(d => weekends.includes(d)).length;
+  
+  if (hasAllWeekdays && days.length === 5) return 'Repeats on weekdays (Mon - Fri)';
+  if (hasAllWeekends && days.length === 2) return 'Repeats on weekends (Sat - Sun)';
+  if (hasAllWeekdays && hasAllWeekends) return 'Repeats every day';
+  
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const activeNames = days.map(d => dayNames[d - 1]);
+  return `Repeats weekly on ${activeNames.join(', ')}`;
+};
+
 // -------------------------------------------------------------
 // PREMIUM APPLE-STYLE SEGMENTED CONTROL
 // -------------------------------------------------------------
@@ -66,6 +112,7 @@ interface SegmentedControlProps {
 export function SegmentedControl({ options, activeId, onChange }: SegmentedControlProps) {
   const activeIndex = options.findIndex(o => o.id === activeId);
   const slideValue = useSharedValue(activeIndex >= 0 ? activeIndex : 0);
+  const palette = useThemePalette();
 
   useEffect(() => {
     if (activeIndex >= 0) {
@@ -82,8 +129,8 @@ export function SegmentedControl({ options, activeId, onChange }: SegmentedContr
   });
 
   return (
-    <View style={segmentedStyles.container}>
-      <Animated.View style={[segmentedStyles.pill, animatedStyle]} />
+    <View style={[segmentedStyles.container, { backgroundColor: palette.inputBg, borderColor: palette.border }]}>
+      <Animated.View style={[segmentedStyles.pill, animatedStyle, { backgroundColor: palette.surface }]} />
       {options.map((option) => {
         const isActive = option.id === activeId;
         return (
@@ -96,7 +143,11 @@ export function SegmentedControl({ options, activeId, onChange }: SegmentedContr
             }}
             style={segmentedStyles.segmentButton}
           >
-            <Text style={[segmentedStyles.segmentText, isActive && segmentedStyles.segmentTextActive]}>
+            <Text style={[
+              segmentedStyles.segmentText, 
+              { color: palette.textSecondary },
+              isActive && { color: palette.accent, fontWeight: '800' }
+            ]}>
               {option.label}
             </Text>
           </TouchableOpacity>
@@ -150,6 +201,370 @@ const segmentedStyles = StyleSheet.create({
 });
 
 // -------------------------------------------------------------
+// PREMIUM VERTICAL DRUM PICKER WHEEL
+// -------------------------------------------------------------
+interface ScrollDrumProps {
+  data: string[];
+  selectedValue: string;
+  onValueChange: (value: string) => void;
+}
+
+export function ScrollDrum({ data, selectedValue, onValueChange }: ScrollDrumProps) {
+  const flatListRef = React.useRef<FlatList<string>>(null);
+  const itemHeight = 44; // taller items for premium touch targets
+  const paddedData = ['', ...data, ''];
+
+  React.useEffect(() => {
+    const index = data.indexOf(selectedValue);
+    if (index !== -1 && flatListRef.current) {
+      // Small timeout to allow FlatList layout to settle
+      setTimeout(() => {
+        flatListRef.current?.scrollToOffset({
+          offset: index * itemHeight,
+          animated: false,
+        });
+      }, 50);
+    }
+  }, [selectedValue]);
+
+  const handleScrollEnd = (e: any) => {
+    const offset = e.nativeEvent.contentOffset.y;
+    const index = Math.round(offset / itemHeight);
+    const val = data[index];
+    if (val && val !== selectedValue) {
+      lightHaptic();
+      onValueChange(val);
+    }
+  };
+
+  return (
+    <View style={drumStyles.container}>
+      <FlatList<string>
+        ref={flatListRef}
+        data={paddedData}
+        keyExtractor={(_: string, i: number) => i.toString()}
+        renderItem={({ item }: { item: string }) => {
+          const isSelected = item === selectedValue;
+          return (
+            <View style={drumStyles.item}>
+              <Text style={[drumStyles.itemText, isSelected && drumStyles.itemTextActive]}>
+                {item}
+              </Text>
+            </View>
+          );
+        }}
+        getItemLayout={(_: any, index: number) => ({ length: itemHeight, offset: itemHeight * index, index })}
+        snapToInterval={itemHeight}
+        decelerationRate="fast"
+        showsVerticalScrollIndicator={false}
+        onMomentumScrollEnd={handleScrollEnd}
+        contentContainerStyle={{ paddingVertical: 0 }}
+      />
+    </View>
+  );
+}
+
+const drumStyles = StyleSheet.create({
+  container: {
+    height: 132, // Taller drum: exactly 3 items visible (44 * 3)
+    width: 65,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  item: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemText: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  itemTextActive: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#8B5CF6',
+  },
+});
+
+// -------------------------------------------------------------
+// NATIVE DRUM-STYLE TIME PICKER MODAL
+// -------------------------------------------------------------
+interface TactileTimePickerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  initialHour: number;
+  initialMinute: number;
+  onSave: (hour: number, minute: number) => void;
+}
+
+export function TactileTimePickerModal({ isOpen, onClose, initialHour, initialMinute, onSave }: TactileTimePickerModalProps) {
+  const isPM = initialHour >= 12;
+  const initialHour12 = initialHour % 12 || 12;
+
+  const [selectedHour, setSelectedHour] = useState(String(initialHour12).padStart(2, '0'));
+  const [selectedMinute, setSelectedMinute] = useState(String(initialMinute).padStart(2, '0'));
+  const [selectedPeriod, setSelectedPeriod] = useState(isPM ? 'PM' : 'AM');
+
+  const hoursData = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+  const minutesData = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+  const periodsData = ['AM', 'PM'];
+
+  const handleConfirm = () => {
+    lightHaptic();
+    let hour = parseInt(selectedHour, 10);
+    const minute = parseInt(selectedMinute, 10);
+    
+    if (selectedPeriod === 'PM' && hour !== 12) hour += 12;
+    if (selectedPeriod === 'AM' && hour === 12) hour = 0;
+
+    onSave(hour, minute);
+    onClose();
+  };
+
+  return (
+    <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={pickerModalStyles.fullscreen}>
+        <View style={pickerModalStyles.backdrop} onTouchStart={onClose} />
+        <View style={pickerModalStyles.card}>
+          <Text style={pickerModalStyles.title}>Set Reminder Time</Text>
+          
+          <View style={pickerModalStyles.drumContainer}>
+            {/* Highlights selected row in middle */}
+            <View style={pickerModalStyles.highlightOverlay} />
+            
+            <ScrollDrum 
+              data={hoursData} 
+              selectedValue={selectedHour} 
+              onValueChange={setSelectedHour} 
+            />
+            <Text style={pickerModalStyles.colon}>:</Text>
+            <ScrollDrum 
+              data={minutesData} 
+              selectedValue={selectedMinute} 
+              onValueChange={setSelectedMinute} 
+            />
+            <View style={{ width: 15 }} />
+            <ScrollDrum 
+              data={periodsData} 
+              selectedValue={selectedPeriod} 
+              onValueChange={setSelectedPeriod} 
+            />
+          </View>
+
+          <View style={pickerModalStyles.actions}>
+            <TouchableOpacity 
+              onPress={onClose} 
+              activeOpacity={0.8}
+              style={[pickerModalStyles.btn, pickerModalStyles.btnCancel]}
+            >
+              <Text style={pickerModalStyles.btnTextCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={handleConfirm} 
+              activeOpacity={0.8}
+              style={[pickerModalStyles.btn, pickerModalStyles.btnSave]}
+            >
+              <Text style={pickerModalStyles.btnTextSave}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const pickerModalStyles = StyleSheet.create({
+  fullscreen: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)', // beautiful premium blur backdrop
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 290,
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.1,
+    shadowRadius: 28,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.8)',
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 16,
+    letterSpacing: -0.2,
+  },
+  drumContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 132,
+    position: 'relative',
+    width: '100%',
+    backgroundColor: 'rgba(248, 250, 252, 0.8)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.6)',
+    paddingHorizontal: 16,
+  },
+  highlightOverlay: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    height: 40,
+    backgroundColor: 'rgba(139, 92, 246, 0.06)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.12)',
+  },
+  colon: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#8B5CF6',
+    marginHorizontal: 4,
+    paddingBottom: 2,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+    width: '100%',
+  },
+  btn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnCancel: {
+    backgroundColor: '#FAF9F7',
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.8)',
+  },
+  btnSave: {
+    backgroundColor: '#8B5CF6',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  btnTextCancel: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  btnTextSave: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+});
+
+// -------------------------------------------------------------
+// PREMIUM DYNAMIC THEME SELECTOR GRID
+// -------------------------------------------------------------
+interface ThemeSelectorProps {
+  activeThemeId: string;
+  onChange: (id: any) => void;
+}
+
+export function ThemeSelector({ activeThemeId, onChange }: ThemeSelectorProps) {
+  const themesList = Object.values(themePalettes);
+  
+  // Clean names to fit nicely in horizontal pills
+  const getShortName = (name: string) => {
+    switch (name) {
+      case 'Japanese Zen Garden': return 'Zen';
+      case 'Rainy Window': return 'Rainy';
+      case 'Sunny Mountain ⛰️': return 'Sunny';
+      case 'Matcha Calm': return 'Matcha';
+      case 'Crimson Sunset': return 'Sunset';
+      case 'Midnight Focus': return 'Midnight';
+      default: return name;
+    }
+  };
+
+  return (
+    <View style={{ 
+      flexDirection: 'row', 
+      flexWrap: 'wrap', 
+      gap: 6, 
+      justifyContent: 'space-between', 
+      marginVertical: 6,
+      paddingHorizontal: 2 
+    }}>
+      {themesList.map((item) => {
+        const isActive = item.id === activeThemeId;
+        
+        return (
+          <TouchableOpacity
+            key={item.id}
+            activeOpacity={0.8}
+            onPress={() => {
+              lightHaptic();
+              onChange(item.id);
+            }}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 6,
+              paddingHorizontal: 8,
+              borderRadius: 24,
+              borderWidth: 1.5,
+              borderColor: isActive ? item.accent : item.border,
+              backgroundColor: isActive ? item.accentBg : item.background,
+              width: '31.5%', // exactly 3 items fit in one row
+              height: 38,
+              justifyContent: 'center',
+              marginBottom: 6,
+              shadowColor: isActive ? item.accent : '#0F172A',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: isActive ? 0.06 : 0,
+              shadowRadius: 3,
+              elevation: isActive ? 1 : 0,
+            }}
+          >
+            <Text 
+              numberOfLines={1} 
+              ellipsizeMode="tail"
+              style={{
+                fontSize: 9.5,
+                fontWeight: '800',
+                color: isActive ? item.accent : item.textPrimary,
+                textAlign: 'center',
+                letterSpacing: -0.15,
+              }}
+            >
+              {getShortName(item.name)}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+// -------------------------------------------------------------
 // MY SPACE SETTINGS OVERLAY (Appearance & Auth Only)
 // -------------------------------------------------------------
 interface MySpaceSettingsOverlayProps {
@@ -159,10 +574,12 @@ interface MySpaceSettingsOverlayProps {
 
 export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
+  const palette = themePalettes[preferences.theme || 'zen'] || themePalettes.zen;
   const { user, login, logout } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const { triggerBackgroundSync } = useSyncEngine();
+  const { latestVersion, updateUrl, shareMessage } = usePlaylistStateStore();
 
   const [shouldRender, setShouldRender] = useState(isOpen);
   const backdropOpacity = useSharedValue(0);
@@ -195,6 +612,43 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   const handleClose = () => {
     lightHaptic();
     onClose();
+  };
+
+  const handleUpdateApp = async () => {
+    lightHaptic();
+    try {
+      const canOpen = await Linking.canOpenURL(updateUrl);
+      if (canOpen) {
+        await Linking.openURL(updateUrl);
+      } else {
+        Alert.alert("Error", "Unable to open update link.");
+      }
+    } catch (err: any) {
+      console.error('[SettingsOverlay] Update app linking error:', err.message);
+      Alert.alert("Error", "Failed to open update link.");
+    }
+  };
+
+  const handleShareApp = async () => {
+    lightHaptic();
+    try {
+      await Clipboard.setStringAsync(updateUrl);
+      Toast.show({
+        type: 'success',
+        text1: 'Link copied',
+        text2: 'Share URL copied to clipboard!',
+      });
+    } catch (e: any) {
+      console.warn('[SettingsOverlay] Failed to copy share URL to clipboard:', e.message);
+    }
+    const formattedShareMessage = `Here's the link of the cool app you were asking about 😉 \n\n${updateUrl}`;
+    try {
+      await Share.share({
+        message: formattedShareMessage,
+      });
+    } catch (err: any) {
+      console.error('[SettingsOverlay] Share failed:', err.message);
+    }
   };
 
   const handleAuthAction = async () => {
@@ -251,59 +705,79 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
       <View style={styles.fullscreen}>
         <Animated.View style={[styles.backdrop, animatedBackdropStyle]} onTouchStart={handleClose} />
         
-        <Animated.View style={[styles.mySpaceSheet, animatedSheetStyle]}>
+        <Animated.View style={[
+          styles.mySpaceSheet, 
+          animatedSheetStyle,
+          {
+            backgroundColor: palette.surface,
+            borderColor: palette.border,
+          }
+        ]}>
           <View style={styles.header}>
-            <Text style={styles.title}>Settings</Text>
-            <TouchableOpacity onPress={handleClose} style={styles.closeBtn} activeOpacity={0.8}>
-              <X color="#64748B" size={14} strokeWidth={2.5} />
+            <Text style={[styles.title, { color: palette.textPrimary }]}>Settings</Text>
+            <TouchableOpacity onPress={handleClose} style={[styles.closeBtn, { backgroundColor: palette.inputBg }]} activeOpacity={0.8}>
+              <X color={palette.textSecondary} size={14} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.body}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+            {...({ delaysContentTouches: false } as any)}
+          >
             {/* Appearance Section */}
             <View style={styles.settingGroup}>
-              <Text style={styles.groupLabel}>Appearance</Text>
-              <SegmentedControl
-                options={[
-                  { id: 'light', label: 'Light Mode' },
-                  { id: 'dark', label: 'Dark Mode' },
-                ]}
-                activeId={preferences.theme || 'light'}
-                onChange={(id) => updatePreference('theme', id as 'light' | 'dark')}
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Themes</Text>
+              <ThemeSelector
+                activeThemeId={preferences.theme || 'zen'}
+                onChange={(id) => updatePreference('theme', id)}
               />
             </View>
 
-            {/* Authentication Section */}
+
+            {/* App Actions Section */}
             <View style={styles.settingGroup}>
-              <Text style={styles.groupLabel}>Account</Text>
-              <TouchableOpacity
-                onPress={handleAuthAction}
-                activeOpacity={0.8}
-                disabled={isAuthenticating}
-                style={[
-                  styles.authButton,
-                  isGuest ? styles.authButtonSignIn : styles.authButtonSignOut
-                ]}
-              >
-                {isAuthenticating ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : isGuest ? (
-                  <>
-                    <LogIn color="#ffffff" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                    <Text style={styles.authButtonTextSignIn}>Sign In</Text>
-                  </>
-                ) : (
-                  <>
-                    <LogOut color="#EF4444" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                    <Text style={styles.authButtonTextSignOut}>Sign Out</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>App Actions</Text>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={handleUpdateApp}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.authButton,
+                    {
+                      backgroundColor: palette.inputBg,
+                      borderColor: palette.border,
+                      flex: 1,
+                    }
+                  ]}
+                >
+                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: palette.textSecondary }}>
+                    Update App
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleShareApp}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.authButton,
+                    { 
+                      flex: 1,
+                      backgroundColor: palette.accent,
+                      borderColor: palette.accent,
+                    }
+                  ]}
+                >
+                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#ffffff' }}>
+                    Share App
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Sync / Content Control Section */}
             <View style={styles.settingGroup}>
-              <Text style={styles.groupLabel}>Sync</Text>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Sync</Text>
               <TouchableOpacity
                 onPress={() => {
                   lightHaptic();
@@ -375,18 +849,51 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                 style={[
                   styles.authButton,
                   {
-                    backgroundColor: '#FAF9F7',
-                    borderColor: 'rgba(148, 163, 184, 0.1)',
+                    backgroundColor: palette.inputBg,
+                    borderColor: palette.border,
                     marginTop: 4,
                   }
                 ]}
               >
-                <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#64748B' }}>
+                <Text style={{ fontSize: 13.5, fontWeight: '700', color: palette.textSecondary }}>
                   Refresh Content
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
+
+            {/* Authentication Section - placed at bottom */}
+            <View style={styles.settingGroup}>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Account</Text>
+              <TouchableOpacity
+                onPress={handleAuthAction}
+                activeOpacity={0.8}
+                disabled={isAuthenticating}
+                style={[
+                  styles.authButton,
+                  isGuest 
+                    ? { backgroundColor: palette.accent, borderColor: palette.accent }
+                    : { 
+                        backgroundColor: palette.isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.05)', 
+                        borderColor: palette.isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.15)' 
+                      }
+                ]}
+              >
+                {isAuthenticating ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : isGuest ? (
+                  <>
+                    <LogIn color="#ffffff" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                    <Text style={styles.authButtonTextSignIn}>Sign In</Text>
+                  </>
+                ) : (
+                  <>
+                    <LogOut color="#EF4444" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                    <Text style={styles.authButtonTextSignOut}>Sign Out</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </Animated.View>
       </View>
     </Modal>
@@ -414,11 +921,13 @@ export const ReelsSettingsOverlay = React.memo(({
   showReelContentSelect = true,
 }: ReelsSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
+  const palette = themePalettes[preferences.theme || 'zen'] || themePalettes.zen;
   const { currentMode, setMode, totalSwipes, totalScrolls } = useTrackingStore();
   const { user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const queryClient = useQueryClient();
   const { triggerBackgroundSync } = useSyncEngine();
+
 
   const { data: foldersData } = useGetFolders({ limit: 100 });
   const rootFolders = React.useMemo(() => {
@@ -506,6 +1015,7 @@ export const ReelsSettingsOverlay = React.memo(({
     }
     return rootFolders.filter((f: any) => f && f._id).map((f: any) => getCleanId(f._id));
   });
+
 
   // Keep local Zustand & SQLite in sync when server preferences are fetched successfully
   useEffect(() => {
@@ -654,16 +1164,23 @@ export const ReelsSettingsOverlay = React.memo(({
       <View style={styles.fullscreen}>
         <Animated.View style={[styles.backdrop, animatedBackdropStyle]} onTouchStart={handleClose} />
 
-        <Animated.View style={[styles.reelsSheet, animatedSheetStyle]}>
+        <Animated.View style={[
+          styles.reelsSheet, 
+          animatedSheetStyle,
+          {
+            backgroundColor: palette.surface,
+            borderColor: palette.border,
+          }
+        ]}>
           {/* Header */}
           <View style={styles.header}>
             <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={styles.reelsHeaderTitle} numberOfLines={1}>
+              <Text style={[styles.reelsHeaderTitle, { color: palette.textPrimary }]} numberOfLines={1}>
                 {playlistName}
               </Text>
             </View>
             <TouchableOpacity onPress={handleClose} style={styles.closeBtn} activeOpacity={0.8}>
-              <X color="#64748B" size={14} strokeWidth={2.5} />
+              <X color={palette.textSecondary} size={14} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
 
@@ -673,21 +1190,23 @@ export const ReelsSettingsOverlay = React.memo(({
             {...({ delaysContentTouches: false } as any)}
           >
             {/* Session Stats Section */}
-            <View style={styles.statsPanel}>
+            <View style={[styles.statsPanel, { backgroundColor: palette.accentBg, borderColor: palette.border }]}>
               <View style={styles.statBox}>
                 <Text style={styles.statLabel}>This Session</Text>
-                <Text style={styles.statValue}>{questionsRevised}</Text>
+                <Text style={[styles.statValue, { color: palette.textPrimary }]}>{questionsRevised}</Text>
               </View>
-              <View style={styles.statDivider} />
+              <View style={[styles.statDivider, { backgroundColor: palette.border }]} />
               <View style={styles.statBox}>
                 <Text style={styles.statLabel}>Total Revised</Text>
-                <Text style={styles.statValue}>{totalSwipes + totalScrolls}</Text>
+                <Text style={[styles.statValue, { color: palette.textPrimary }]}>{totalSwipes + totalScrolls}</Text>
               </View>
             </View>
 
+
+
             {/* Content Mode */}
             <View style={styles.settingGroup}>
-              <Text style={styles.groupLabel}>Content Focus</Text>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Content Focus</Text>
               <SegmentedControl
                 options={[
                   { id: 'concept', label: 'Concept' },
@@ -706,7 +1225,7 @@ export const ReelsSettingsOverlay = React.memo(({
 
             {/* AI Assistant Mode */}
             <View style={styles.settingGroup}>
-              <Text style={styles.groupLabel}>AI Assistant Mode</Text>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>AI Assistant Mode</Text>
               <SegmentedControl
                 options={[
                   { id: 'explanation', label: 'Explain This' },
@@ -717,15 +1236,16 @@ export const ReelsSettingsOverlay = React.memo(({
               />
             </View>
 
+
             {/* Select Reel Content Folder Checklist */}
             {showReelContentSelect && (
               <View style={[styles.settingGroup, { marginTop: 18 }]}>
-                <Text style={styles.groupLabel}>Select Reel Content</Text>
-                <View style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(226, 232, 240, 0.6)', padding: 12, gap: 10 }}>
+                <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Select Reel Content</Text>
+                <View style={{ backgroundColor: palette.inputBg, borderRadius: 20, borderWidth: 1, borderColor: palette.border, padding: 12, gap: 10 }}>
                   {isGuest ? (
-                    <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginVertical: 8 }}>Sign in to filter reels by folder</Text>
+                    <Text style={{ fontSize: 13, color: palette.textSecondary, textAlign: 'center', marginVertical: 8 }}>Sign in to filter reels by folder</Text>
                   ) : rootFoldersWithCounts.length === 0 ? (
-                    <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginVertical: 8 }}>No folders created yet. Create folders to filter your reels.</Text>
+                    <Text style={{ fontSize: 13, color: palette.textSecondary, textAlign: 'center', marginVertical: 8 }}>No folders created yet. Create folders to filter your reels.</Text>
                   ) : (
                     <>
                       {rootFoldersWithCounts.map((folder: any) => {
@@ -738,18 +1258,18 @@ export const ReelsSettingsOverlay = React.memo(({
                             activeOpacity={0.7}
                             style={styles.folderRow}
                           >
-                            <FolderIcon size={16} color={folder.color || '#7c3aed'} style={{ marginRight: 10 }} />
+                            <FolderIcon size={16} color={folder.color || palette.accent} style={{ marginRight: 10 }} />
                             <Text 
-                              style={{ fontSize: 13, fontWeight: '600', color: '#0F172A', flex: 1, marginRight: 16 }}
+                              style={{ fontSize: 13, fontWeight: '600', color: palette.textPrimary, flex: 1, marginRight: 16 }}
                               numberOfLines={1}
                               ellipsizeMode="tail"
                             >
                               {folder.title} ({folder.cardCount ?? 0})
                             </Text>
                             {isChecked ? (
-                              <CheckSquare size={18} color="#8B5CF6" strokeWidth={2.5} />
+                              <CheckSquare size={18} color={palette.accent} strokeWidth={2.5} />
                             ) : (
-                              <Square size={18} color="#94A3B8" strokeWidth={2} />
+                              <Square size={18} color={palette.textMuted} strokeWidth={2} />
                             )}
                           </TouchableOpacity>
                         );
@@ -762,7 +1282,7 @@ export const ReelsSettingsOverlay = React.memo(({
                           disabled={prefSaving}
                           activeOpacity={0.8}
                           style={{
-                            backgroundColor: '#8B5CF6',
+                            backgroundColor: palette.accent,
                             borderRadius: 16,
                             height: 40,
                             alignItems: 'center',
@@ -770,7 +1290,7 @@ export const ReelsSettingsOverlay = React.memo(({
                             marginTop: 10,
                             flexDirection: 'row',
                             gap: 8,
-                            shadowColor: '#8B5CF6',
+                            shadowColor: palette.accent,
                             shadowOffset: { width: 0, height: 4 },
                             shadowOpacity: 0.15,
                             shadowRadius: 10,
@@ -814,23 +1334,23 @@ export const ReelsSettingsOverlay = React.memo(({
             <View style={{
               width: '100%',
               maxWidth: 290,
-              backgroundColor: '#ffffff',
+              backgroundColor: palette.surface,
               borderRadius: 24,
               padding: 20,
               alignItems: 'center',
-              shadowColor: '#0F172A',
+              shadowColor: palette.isDark ? '#000000' : palette.accent,
               shadowOffset: { width: 0, height: 12 },
-              shadowOpacity: 0.08,
+              shadowOpacity: 0.1,
               shadowRadius: 24,
               elevation: 6,
               borderWidth: 1,
-              borderColor: 'rgba(226, 232, 240, 0.8)',
+              borderColor: palette.border,
             }}>
               {/* Sleek Alert Title */}
               <Text style={{
                 fontSize: 15,
                 fontWeight: '800',
-                color: '#0F172A',
+                color: palette.textPrimary,
                 textAlign: 'center',
                 marginBottom: 8,
                 letterSpacing: -0.1,
@@ -841,7 +1361,7 @@ export const ReelsSettingsOverlay = React.memo(({
               {/* Message */}
               <Text style={{
                 fontSize: 12,
-                color: '#64748B',
+                color: palette.textSecondary,
                 textAlign: 'center',
                 lineHeight: 17,
                 marginBottom: 18,
@@ -856,13 +1376,13 @@ export const ReelsSettingsOverlay = React.memo(({
                 style={{
                   width: '100%',
                   height: 38,
-                  backgroundColor: '#8B5CF6',
+                  backgroundColor: palette.accent,
                   borderRadius: 14,
                   justifyContent: 'center',
                   alignItems: 'center',
-                  shadowColor: '#8B5CF6',
+                  shadowColor: palette.accent,
                   shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.12,
+                  shadowOpacity: 0.15,
                   shadowRadius: 8,
                   elevation: 1,
                 }}
@@ -908,6 +1428,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     width: '100%',
     maxWidth: 320,
+    maxHeight: height * 0.8,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.1,
@@ -916,7 +1437,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(226, 232, 240, 0.8)',
     overflow: 'hidden',
-    paddingBottom: 8,
   },
   reelsSheet: {
     backgroundColor: '#FFFFFF',
@@ -1040,5 +1560,269 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0F172A',
     letterSpacing: -0.1,
+  },
+  notificationHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  reminderToggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  reminderToggleBtnActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderColor: 'rgba(139, 92, 246, 0.2)',
+  },
+  reminderToggleBtnInactive: {
+    backgroundColor: '#FAF9F7',
+    borderColor: 'rgba(148, 163, 184, 0.12)',
+  },
+  reminderToggleTextActive: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8B5CF6',
+  },
+  reminderToggleTextInactive: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  notificationStatusSubtext: {
+    fontSize: 11.5,
+    fontWeight: '500',
+    color: '#64748B',
+    lineHeight: 16,
+    paddingLeft: 2,
+    paddingRight: 8,
+    marginTop: 2,
+  },
+  timeControlsContainer: {
+    backgroundColor: 'rgba(248, 250, 252, 0.6)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.6)',
+    padding: 12,
+    marginTop: 2,
+  },
+  frequencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(226, 232, 240, 0.4)',
+    paddingBottom: 10,
+  },
+  customDaysContainer: {
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(226, 232, 240, 0.4)',
+    paddingBottom: 10,
+  },
+  customDaysTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 8,
+    paddingLeft: 2,
+  },
+  daysRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dayBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  dayBadgeActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  dayBadgeInactive: {
+    backgroundColor: '#ffffff',
+    borderColor: 'rgba(226, 232, 240, 0.8)',
+  },
+  dayBadgeText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  dayBadgeTextActive: {
+    color: '#ffffff',
+  },
+  dayBadgeTextInactive: {
+    color: '#64748B',
+  },
+  timeControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  timeControlLabel: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  pickerWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.8)',
+    padding: 2,
+  },
+  pickerBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  pickerValText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    width: 36,
+    textAlign: 'center',
+  },
+  scrollSelectorGroup: {
+    marginVertical: 8,
+  },
+  scrollSelectorLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    paddingLeft: 2,
+  },
+  horizontalScrollContent: {
+    paddingRight: 16,
+    gap: 8,
+    paddingVertical: 4,
+  },
+  hourScrollBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  hourScrollBadgeActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  hourScrollBadgeInactive: {
+    backgroundColor: '#ffffff',
+    borderColor: 'rgba(226, 232, 240, 0.8)',
+  },
+  hourScrollText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  hourScrollTextActive: {
+    color: '#ffffff',
+  },
+  hourScrollTextInactive: {
+    color: '#475569',
+  },
+  minuteScrollBadge: {
+    paddingHorizontal: 12,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  minuteScrollBadgeActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  minuteScrollBadgeInactive: {
+    backgroundColor: '#ffffff',
+    borderColor: 'rgba(226, 232, 240, 0.8)',
+  },
+  minuteScrollText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  minuteScrollTextActive: {
+    color: '#ffffff',
+  },
+  minuteScrollTextInactive: {
+    color: '#475569',
+  },
+  customDaysSummary: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B5CF6',
+    marginTop: 6,
+    paddingLeft: 2,
+    fontStyle: 'italic',
+  },
+  digitalClockContainer: {
+    marginVertical: 12,
+    alignItems: 'center',
+  },
+  digitalClockLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  digitalClockCapsule: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 28,
+    paddingVertical: 10,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(139, 92, 246, 0.12)',
+    alignItems: 'center',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  digitalClockText: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#8B5CF6',
+    letterSpacing: 0.5,
+  },
+  digitalClockSubtext: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 2,
+    textTransform: 'uppercase',
   },
 });

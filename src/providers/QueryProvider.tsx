@@ -16,7 +16,7 @@ export const queryClient = new QueryClient({
       gcTime: 1000 * 60 * 60 * 24, // Keep unused data in cache for 24 hours (fast re-nav)
       refetchOnWindowFocus: false, // Disabled for React Native
       refetchOnMount: false, // OPTIMIZED: Don't auto-refetch on mount (prevents focus-triggered cascades)
-      refetchOnReconnect: 'stale', // Refetch only if data is stale and network reconnected
+      refetchOnReconnect: true, // Refetch only if data is stale and network reconnected
     },
   },
 });

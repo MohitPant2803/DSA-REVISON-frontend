@@ -4,6 +4,7 @@ import api from '@/services/api';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlaylistStateStore, OfflineAction } from '@/store/usePlaylistStateStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useOnboardingStore } from '@/store/useOnboardingStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 import { isNetworkConnected } from '@/utils/network';
@@ -253,6 +254,18 @@ export function useSyncEngine() {
       console.log('[DEBUG] Playlists in payload:', JSON.stringify(payload?.delta?.playlists ?? 'undefined'));
 
       if (payload) {
+        if (payload.appConfig) {
+          const ac = payload.appConfig;
+          const { saveAppConfigToSQLite } = require('../utils/sqliteSyncBridge');
+          saveAppConfigToSQLite(ac.latestVersion, ac.updateUrl, ac.shareMessage).catch((e: any) => {
+            console.error('[Sync Engine] Failed to save appConfig to SQLite:', e.message);
+          });
+          usePlaylistStateStore.setState({
+            latestVersion: ac.latestVersion || '1.0.5',
+            updateUrl: 'https://ree-wise-download-website.vercel.app/',
+            shareMessage: "Here's the link of the cool app you were asking about 😉 \n\nhttps://ree-wise-download-website.vercel.app/",
+          });
+        }
         const allowRemoteDestructiveSync = payload.allowRemoteDestructiveSync === true;
         const activeQueue = freshState.offlineActionQueue;
         const isDirty = (id: string) => activeQueue.some((a) =>
@@ -311,14 +324,40 @@ export function useSyncEngine() {
           });
         }
 
+        const cardIdTranslations = new Map<string, string>();
+
         payload.delta?.cards?.forEach((c: any) => {
           if (!c?._id) return;
           const cleanId = c._id.split('-loop-')[0];
           if (deletedCardIds.has(cleanId) || isDirty(cleanId) || shadowCards[cleanId]?.dirty) return;
+
+          // Reconcile temporary card with server real card (defensive match on folderId as well):
+          const getFolderIdStr = (fid: any) => {
+            if (typeof fid === 'object' && fid !== null) return fid._id;
+            return String(fid || '');
+          };
+          const localTempDuplicate = Object.values(freshState.cardsById).find(
+            (localC: any) =>
+              localC.title === c.title &&
+              localC.topic === c.topic &&
+              getFolderIdStr(localC.folderId) === getFolderIdStr(c.folderId) &&
+              String(localC._id).startsWith('temp-')
+          ) as any;
+
+          if (localTempDuplicate) {
+            const tempId = localTempDuplicate._id;
+            cardIdTranslations.set(tempId, cleanId);
+            delete shadowCards[tempId];
+            const { getDatabase } = require('../utils/sqliteDatabase');
+            const db = getDatabase();
+            db.runAsync('DELETE FROM cards_metadata WHERE id = ?;', [tempId]).catch(() => {});
+            db.runAsync('DELETE FROM cards_content WHERE cardId = ?;', [tempId]).catch(() => {});
+          }
+
           const localTime = new Date(shadowCards[cleanId]?.updatedAt || 0).getTime();
           const remoteTime = new Date(c.updatedAt || 0).getTime();
           if (!shadowCards[cleanId] || remoteTime > localTime) {
-            shadowCards[cleanId] = { ...shadowCards[cleanId], ...c };
+            shadowCards[cleanId] = { ...shadowCards[cleanId], ...c, isContentFullyHydrated: true };
           }
         });
 
@@ -470,12 +509,15 @@ export function useSyncEngine() {
             if (!p || !p.revisionCardId) return;
             const cardId = p.revisionCardId.toString();
             if (shadowCards[cardId]) {
+              const isDiffDirty = isDirty(cardId) || shadowCards[cardId].dirty || freshState.cardDifficultyMap[cardId]?.dirty;
+              const isFavDirty = activeQueue.some((a) => a.action === 'TOGGLE_FAVORITE' && a.payload?.cardId === cardId);
+
               const existingLoops = (shadowCards[cardId].currentUserQuestionProgress as any)?.completedLoops || 0;
               const serverLoops = p.completedLoops || 0;
               shadowCards[cardId] = {
                 ...shadowCards[cardId],
-                difficultyState: p.difficultyState ?? shadowCards[cardId].difficultyState,
-                isFavorite: p.favorite ?? shadowCards[cardId].isFavorite,
+                difficultyState: isDiffDirty ? shadowCards[cardId].difficultyState : (p.difficultyState ?? shadowCards[cardId].difficultyState),
+                isFavorite: isFavDirty ? shadowCards[cardId].isFavorite : (p.favorite ?? shadowCards[cardId].isFavorite),
                 currentUserQuestionProgress: {
                   attemptStatus: p.completed ? 'attempted' : 'skipped',
                   perceivedDifficultyByUser: null,
@@ -483,7 +525,7 @@ export function useSyncEngine() {
                 } as any,
               };
               // Keep shadowDifficultyMap consistent with progress data
-              if (p.difficultyState && !shadowDifficultyMap[cardId]?.optimistic) {
+              if (p.difficultyState && !shadowDifficultyMap[cardId]?.optimistic && !isDiffDirty) {
                 shadowDifficultyMap[cardId] = {
                   difficulty: p.difficultyState,
                   originalDifficulty: p.difficultyState,
@@ -495,6 +537,39 @@ export function useSyncEngine() {
           });
           console.log(`[Shadow Cache Swap] Merged ${deltaProgress.length} progress entries into cards.`);
         }
+
+        // Apply ID translations to shadowDifficultyMap, shadowOrderMap, and fullPlaylistCards
+        const nextFullPlaylistCards = { ...freshState.fullPlaylistCards };
+        const nextHydratedPlaylistCardCounts = { ...freshState.hydratedPlaylistCardCounts };
+        let fullPlaylistCardsChanged = false;
+
+        cardIdTranslations.forEach((cleanId, tempId) => {
+          if (shadowDifficultyMap[tempId]) {
+            shadowDifficultyMap[cleanId] = shadowDifficultyMap[tempId];
+            delete shadowDifficultyMap[tempId];
+          }
+
+          Object.keys(shadowOrderMap).forEach((pId) => {
+            shadowOrderMap[pId] = (shadowOrderMap[pId] || []).map((id) => id === tempId ? cleanId : id);
+          });
+
+          Object.keys(nextFullPlaylistCards).forEach((pId) => {
+            const cardsList = nextFullPlaylistCards[pId] || [];
+            let changed = false;
+            const mapped = cardsList.map((c) => {
+              if (c && c._id === tempId) {
+                changed = true;
+                return { ...c, _id: cleanId };
+              }
+              return c;
+            });
+            if (changed) {
+              nextFullPlaylistCards[pId] = mapped;
+              nextHydratedPlaylistCardCounts[pId] = mapped.length;
+              fullPlaylistCardsChanged = true;
+            }
+          });
+        });
 
         // FIX 1: Stamp difficultyState from shadowDifficultyMap onto card objects before SQLite save
         Object.entries(shadowDifficultyMap).forEach(([cardId, diffEntry]) => {
@@ -571,17 +646,28 @@ export function useSyncEngine() {
  
         const commitStateSwap = () => {
           setSyncProgress(100, 'Completed');
-          usePlaylistStateStore.setState({
+          const nextHydratedPlaylists: Record<string, boolean> = {};
+          Object.keys(shadowPlaylists).forEach((pId) => {
+            nextHydratedPlaylists[pId] = true;
+          });
+
+          const nextState: any = {
             cardsById: shadowCards,
             foldersById: shadowFolders,
             playlistsById: shadowPlaylists,
             playlistCardOrderMap: shadowOrderMap,
             cardDifficultyMap: shadowDifficultyMap,
+            hydratedPlaylists: nextHydratedPlaylists,
             lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
             lastSyncedAt: payload.timestamp || new Date().toISOString(),
             lastSuccessfulSyncAt: Date.now(),
             syncFailureCount: 0,
-          });
+          };
+          if (fullPlaylistCardsChanged) {
+            nextState.fullPlaylistCards = nextFullPlaylistCards;
+            nextState.hydratedPlaylistCardCounts = nextHydratedPlaylistCardCounts;
+          }
+          usePlaylistStateStore.setState(nextState);
         };
  
         if (interactionScheduler.isInteracting()) {
@@ -616,6 +702,8 @@ export function useSyncEngine() {
 
   // Exponential Backoff retry scheduler
   const scheduleRetry = useCallback(() => {
+    const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    if (isGuest) return;
     if (retryTimeoutRef.current) {
       clearTimeout(retryTimeoutRef.current);
     }
@@ -639,7 +727,8 @@ export function useSyncEngine() {
 
   const triggerBackgroundSync = useCallback(async (force?: boolean) => {
     const isGuest = useAuthStore.getState().user?.id === 'guest-user';
-    const hasAccess = isAuthenticated || isGuest;
+    const isOnboarding = !useOnboardingStore.getState().isOnboarded;
+    const hasAccess = isAuthenticated || isGuest || isOnboarding;
     if (!hasAccess || !isAuthReady) return;
 
     if (interactionScheduler.isInteracting()) {
@@ -968,8 +1057,11 @@ export function useSyncEngine() {
         }
         // Force flush regardless of write contention
         // This is the LAST chance to save data before process is killed
-        const { forceFlushOnClose } = require('../utils/syncManager');
-        forceFlushOnClose().catch((err: any) => console.error('[Sync Engine Close] Force flush failed:', err));
+        const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+        if (!isGuest) {
+          const { forceFlushOnClose } = require('../utils/syncManager');
+          forceFlushOnClose().catch((err: any) => console.error('[Sync Engine Close] Force flush failed:', err));
+        }
       }
       appStateRef.current = nextAppState;
     });
@@ -985,21 +1077,18 @@ export function useSyncEngine() {
   }, [isAuthenticated, userId]);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
     const activeUserId = userId || 'guest-user';
     const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+    const isOnboarding = !useOnboardingStore.getState().isOnboarded;
     const hasTriggered = !!globalStartupSyncTriggered.get(activeUserId);
-    const shouldSync = (isAuthenticated || isGuest) && isAuthReady && (!hasTriggered || bootstrapStatus === 'not_started');
+    const shouldSync = (isAuthenticated || isGuest || isOnboarding) && isAuthReady && (!hasTriggered || bootstrapStatus === 'not_started');
     
     if (shouldSync) {
       globalStartupSyncTriggered.set(activeUserId, true);
-      timer = setTimeout(() => {
-        triggerBackgroundSyncRef.current?.(false);
-      }, 500);
+      triggerBackgroundSyncRef.current?.(false);
     }
 
     return () => {
-      if (timer) clearTimeout(timer);
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;

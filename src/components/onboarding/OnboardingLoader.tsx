@@ -126,12 +126,12 @@ export function OnboardingLoader() {
 
     // 2. Multi-stage personalized visual sorting sequence
     const runPersonalizedCompilation = async () => {
-      // Stage 1: Load preferences (0ms - 800ms)
+      // Stage 1: Load preferences (0ms - 300ms)
       setTimeout(() => {
         setProgress(15);
         setLogMessage('Synchronizing customized learning path...');
         hapticFeedback.impactLight();
-      }, 600);
+      }, 300);
 
       // Stage 2: SDE, System Design, DBMS, CN
       setTimeout(() => {
@@ -143,14 +143,14 @@ export function OnboardingLoader() {
           withSpring(1.2, springPresets.stiff),
           withSpring(1.0, springPresets.bouncy)
         );
-      }, 1500);
+      }, 700);
 
       // Stage 3: Data & Quant
       setTimeout(() => {
         setProgress(65);
         setLogMessage('Calibrating Data & Quant mathematical models...');
         hapticFeedback.impactLight();
-      }, 2500);
+      }, 1100);
 
       // Stage 4: Product, Case Studies, Guesstimates
       setTimeout(() => {
@@ -162,14 +162,14 @@ export function OnboardingLoader() {
           withSpring(1.2, springPresets.stiff),
           withSpring(1.0, springPresets.bouncy)
         );
-      }, 3500);
+      }, 1500);
 
-      // Stage 5: Done (4500ms)
+      // Stage 5: Done (2000ms)
       setTimeout(() => {
         setProgress(100);
         setLogMessage('Revision ecosystem fully compiled.');
         hapticFeedback.success();
-      }, 4500);
+      }, 2000);
     };
 
     runPersonalizedCompilation();
@@ -212,25 +212,6 @@ export function OnboardingLoader() {
             total={TOPICS.length}
           />
         ))}
-      </View>
-
-
-      {/* Dynamic Logger & Progress Bar */}
-      <View style={styles.loggerBlock}>
-        <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
-        </View>
-
-        <View style={styles.logRow}>
-          {progress === 100 ? (
-            <CheckCircle color="#10B981" size={16} style={styles.checkIcon} />
-          ) : (
-            <ActivityIndicator color="#8B5CF6" size="small" style={styles.checkIcon} />
-          )}
-          <Text style={[styles.logText, progress === 100 && styles.logTextSuccess]}>
-            {logMessage}
-          </Text>
-        </View>
       </View>
     </View>
   );

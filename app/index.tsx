@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Platform } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import Animated, {
   useSharedValue,
@@ -12,8 +13,10 @@ import Animated, {
   FadeInDown,
 } from 'react-native-reanimated';
 import { Sparkles } from 'lucide-react-native';
+import Svg, { Path, Defs, RadialGradient, Stop, Circle, G } from 'react-native-svg';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useOnboardingStore } from '@/store/useOnboardingStore';
+import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { springPresets, easings } from '@/theme/motion';
 import { preloadStaticAssets, preheatNetwork, startOptimisticDataPreload } from '@/utils/preload';
 import { hapticFeedback } from '@/utils/haptics';
@@ -22,9 +25,13 @@ const { width } = Dimensions.get('window');
 
 export default function StartupCoordinator() {
   const router = useRouter();
-  const { restoreSession, isLoading: isAuthLoading, isAuthenticated, user } = useAuthStore();
+  const { isLoading: isAuthLoading, isAuthenticated, user } = useAuthStore();
   const { isOnboarded, resetOnboarding } = useOnboardingStore();
   const [isPreloadComplete, setIsPreloadComplete] = useState(false);
+
+  const bootstrapStatus = usePlaylistStateStore((s) => s.bootstrapStatus);
+  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
+  const isStoreReady = hasHydrated && (bootstrapStatus === 'completed' || bootstrapStatus === 'failed');
 
   // Animation Shared Values
   const logoScale = useSharedValue(0.7);
@@ -34,7 +41,8 @@ export default function StartupCoordinator() {
   const textTranslateY = useSharedValue(20);
   const textOpacity = useSharedValue(0);
 
-  const glowScale = useSharedValue(0.6);
+  // Already zoomed out background: starts at 1.0 immediately
+  const glowScale = useSharedValue(1.0);
   const glowOpacity = useSharedValue(0);
   const glowTranslateX = useSharedValue(0);
   const glowTranslateY = useSharedValue(0);
@@ -44,9 +52,9 @@ export default function StartupCoordinator() {
 
   useEffect(() => {
     // 1. PHASE 1: Cinematic soft entry sequence
-    // background glow drifts in
+    // background glow drifts in (already zoomed out scale=1.0)
     glowScale.value = withSpring(1.0, { damping: 20, stiffness: 60 });
-    glowOpacity.value = withTiming(0.25, { duration: 1000 });
+    glowOpacity.value = withTiming(0.9, { duration: 1000 });
 
     // branding tile fades and springs up
     logoScale.value = withSpring(1.0, { damping: 14, stiffness: 90 });
@@ -60,45 +68,42 @@ export default function StartupCoordinator() {
     // Tactile micro impact when splash launches
     hapticFeedback.impactLight();
 
-    // 2. PHASE 2: Ambient breathing pulse (continuous)
+    // 2. PHASE 2: Ambient breathing pulse (continuous, extremely slow & gentle)
     glowScale.value = withRepeat(
       withSequence(
-        withTiming(1.2, { duration: 3000, easing: easings.cubicBezier }),
-        withTiming(0.9, { duration: 3000, easing: easings.cubicBezier })
+        withTiming(1.03, { duration: 12000, easing: easings.cubicBezier }),
+        withTiming(0.97, { duration: 12000, easing: easings.cubicBezier })
       ),
       -1,
       true
     );
     
-    // Slow drifting float for background orb
+    // Slow, almost imperceptible drifting float for background canvas
     glowTranslateX.value = withRepeat(
       withSequence(
-        withTiming(20, { duration: 4000, easing: easings.cubicBezier }),
-        withTiming(-20, { duration: 4000, easing: easings.cubicBezier })
+        withTiming(8, { duration: 14000, easing: easings.cubicBezier }),
+        withTiming(-8, { duration: 14000, easing: easings.cubicBezier })
       ),
       -1,
       true
     );
     glowTranslateY.value = withRepeat(
       withSequence(
-        withTiming(-15, { duration: 3500, easing: easings.cubicBezier }),
-        withTiming(15, { duration: 3500, easing: easings.cubicBezier })
+        withTiming(-6, { duration: 12000, easing: easings.cubicBezier }),
+        withTiming(6, { duration: 12000, easing: easings.cubicBezier })
       ),
       -1,
       true
     );
 
-    // 3. EXECUTE STARTUP PIPELINE (Asset load + session hydrations in parallel)
+    // 3. EXECUTE STARTUP PIPELINE (Asset preloading ONLY — _layout.tsx handles restoreSession)
     const executePipeline = async () => {
       const startTime = Date.now();
       try {
         await Promise.all([
           preloadStaticAssets(),
           preheatNetwork(),
-          restoreSession(),
         ]);
-
-
       } catch (e) {
         console.warn('Startup pipeline warning:', e);
       } finally {
@@ -116,7 +121,9 @@ export default function StartupCoordinator() {
 
   // 4. PHASE 3 & 4: Exit sequence and Routing handoff
   useEffect(() => {
+    const needsStoreReady = isAuthenticated || user?.id === 'guest-user';
     if (!isPreloadComplete || isAuthLoading) return;
+    if (needsStoreReady && !isStoreReady) return;
 
     const performCinematicExit = () => {
       // Set exit state
@@ -145,8 +152,7 @@ export default function StartupCoordinator() {
     };
 
     const handleNavigation = () => {
-      const isGuest = user?.id === 'guest-user';
-      const hasAccess = !!isAuthenticated || isGuest;
+      const hasAccess = !!isAuthenticated || user?.id === 'guest-user';
 
       // Optimistically preload reels feeds for returning users
       if (hasAccess && isOnboarded) {
@@ -155,15 +161,17 @@ export default function StartupCoordinator() {
 
       if (hasAccess) {
         router.replace('/(protected)/(tabs)/learn');
-      } else if (!isOnboarded) {
-        router.replace('/(auth)/onboarding');
       } else {
-        router.replace('/(auth)/login');
+        if (!isOnboarded) {
+          router.replace('/(auth)/onboarding');
+        } else {
+          router.replace('/(auth)/login');
+        }
       }
     };
 
     performCinematicExit();
-  }, [isPreloadComplete, isAuthLoading]);
+  }, [isPreloadComplete, isAuthLoading, isStoreReady, isAuthenticated, user?.id, isOnboarded]);
 
   // Animated styles driven on the UI thread
   const glowAnimatedStyle = useAnimatedStyle(() => ({
@@ -190,63 +198,253 @@ export default function StartupCoordinator() {
 
   return (
     <View style={styles.container}>
-      {/* Iridescent Glowing Portal Canvas */}
-      <Animated.View style={[styles.glowOrb, glowAnimatedStyle]} />
+      {/* Dynamic Living Watercolor Background Canvas */}
+      <Animated.View style={[StyleSheet.absoluteFill, glowAnimatedStyle]}>
+        <Svg width="100%" height="100%" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice">
+          <Defs>
+            {/* Midnight Focus Gradient */}
+            <RadialGradient id="midnightWash" cx="340" cy="120" rx="200" ry="200" fx="340" fy="120" gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor="#0B132B" stopOpacity={0.45} />
+              <Stop offset="50%" stopColor="#1C2541" stopOpacity={0.2} />
+              <Stop offset="100%" stopColor="#FAF6F0" stopOpacity={0} />
+            </RadialGradient>
+
+            {/* Matcha Calm Gradient */}
+            <RadialGradient id="matchaWash" cx="60" cy="300" rx="180" ry="180" fx="60" fy="300" gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor="#A3BCA9" stopOpacity={0.45} />
+              <Stop offset="60%" stopColor="#C2D3C6" stopOpacity={0.2} />
+              <Stop offset="100%" stopColor="#FAF6F0" stopOpacity={0} />
+            </RadialGradient>
+
+            {/* Sunny Mountain Gradient */}
+            <RadialGradient id="sunnyMountainWash" cx="200" cy="520" rx="220" ry="220" fx="200" fy="520" gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor="#90E0EF" stopOpacity={0.4} />
+              <Stop offset="50%" stopColor="#A7F3D0" stopOpacity={0.16} />
+              <Stop offset="100%" stopColor="#FAF6F0" stopOpacity={0} />
+            </RadialGradient>
+
+            {/* Crimson Sunset Gradient */}
+            <RadialGradient id="sunsetWash" cx="340" cy="460" rx="180" ry="180" fx="340" fy="460" gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor="#F5A89A" stopOpacity={0.45} />
+              <Stop offset="60%" stopColor="#FAD2CB" stopOpacity={0.2} />
+              <Stop offset="100%" stopColor="#FAF6F0" stopOpacity={0} />
+            </RadialGradient>
+
+            {/* Japanese Zen Garden Gradient */}
+            <RadialGradient id="zenWash" cx="80" cy="720" rx="200" ry="200" fx="80" fy="720" gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor="#E8D6C5" stopOpacity={0.45} />
+              <Stop offset="60%" stopColor="#FAF6F0" stopOpacity={0.2} />
+              <Stop offset="100%" stopColor="#FAF6F0" stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+
+          {/* Color Washes (Wet-on-wet Watercolor Bleeds) */}
+          <Circle cx="340" cy="120" r="200" fill="url(#midnightWash)" />
+          <Circle cx="60" cy="300" r="180" fill="url(#matchaWash)" />
+          <Circle cx="200" cy="520" r="220" fill="url(#sunnyMountainWash)" />
+          <Circle cx="340" cy="460" r="180" fill="url(#sunsetWash)" />
+          <Circle cx="80" cy="720" r="200" fill="url(#zenWash)" />
+
+          {/* 1. Midnight Focus Indicators (Moon & Constellation) */}
+          <G opacity={0.8}>
+            {/* Elegant Crescent Moon */}
+            <Path 
+              d="M 320 50 A 15 15 0 0 0 338 72 A 18 18 0 1 1 320 50 Z" 
+              fill="rgba(254, 240, 138, 0.22)" 
+              stroke="rgba(234, 179, 8, 0.5)" 
+              strokeWidth={1.2} 
+              strokeLinecap="round" 
+            />
+            {/* Star Constellation Lines */}
+            <Path 
+              d="M 270 60 L 295 80 L 330 115" 
+              fill="none" 
+              stroke="rgba(255, 255, 255, 0.35)" 
+              strokeWidth={1} 
+              strokeDasharray="3 3"
+            />
+            {/* Twinkling Stars */}
+            <Circle cx="270" cy="60" r="2" fill="rgba(255, 255, 255, 0.6)" />
+            <Circle cx="295" cy="80" r="2.5" fill="rgba(255, 255, 255, 0.6)" />
+            <Circle cx="330" cy="115" r="2" fill="rgba(255, 255, 255, 0.6)" />
+          </G>
+
+          {/* 2. Matcha Calm Steaming Tea Cup & Leaves */}
+          <G opacity={0.75}>
+            {/* Tea Cup */}
+            <Path 
+              d="M 40 310 Q 70 310 100 310 L 92 335 Q 70 342 48 335 Z" 
+              fill="rgba(255, 255, 255, 0.24)" 
+              stroke="rgba(74, 112, 76, 0.45)" 
+              strokeWidth={1.2} 
+              strokeLinecap="round"
+            />
+            {/* Matcha Tea Level inside Bowl */}
+            <Path 
+              d="M 42 314 Q 70 314 98 314 L 95 320 Q 70 325 45 320 Z" 
+              fill="rgba(139, 161, 141, 0.28)" 
+            />
+            {/* Steam Swirls */}
+            <Path 
+              d="M 55 295 Q 50 280 60 270" 
+              fill="none" 
+              stroke="rgba(163, 188, 169, 0.45)" 
+              strokeWidth={1.2} 
+              strokeLinecap="round"
+            />
+            <Path 
+              d="M 72 298 Q 78 283 70 272" 
+              fill="none" 
+              stroke="rgba(163, 188, 169, 0.45)" 
+              strokeWidth={1.2} 
+              strokeLinecap="round"
+            />
+            <Path 
+              d="M 85 295 Q 80 280 90 270" 
+              fill="none" 
+              stroke="rgba(163, 188, 169, 0.45)" 
+              strokeWidth={1.2} 
+              strokeLinecap="round"
+            />
+          </G>
+
+          {/* 3. Sunny Mountain Sketched Peaks, Sun & Cloud */}
+          <G opacity={0.75}>
+            {/* Sunny Mountain Sun */}
+            <Circle cx="240" cy="480" r="15" fill="rgba(251, 191, 36, 0.28)" stroke="rgba(217, 119, 6, 0.4)" strokeWidth={1.2} />
+            {/* Sun Rays */}
+            <Path d="M 240 460 L 240 455 M 240 500 L 240 505 M 220 480 L 215 480 M 260 480 L 265 480" stroke="rgba(217, 119, 6, 0.35)" strokeWidth={1.2} strokeLinecap="round" />
+            <Path d="M 226 466 L 222 462 M 254 494 L 258 498 M 226 494 L 222 498 M 254 466 L 258 462" stroke="rgba(217, 119, 6, 0.35)" strokeWidth={1.2} strokeLinecap="round" />
+
+            {/* Back Peak */}
+            <Path 
+              d="M 100 580 L 150 505 L 200 580 Z" 
+              fill="rgba(12, 74, 110, 0.05)" 
+              stroke="rgba(2, 132, 199, 0.3)" 
+              strokeWidth={1.2} 
+              strokeLinejoin="round"
+            />
+            <Path 
+              d="M 137 525 L 150 505 L 163 525 Q 150 535 137 525 Z" 
+              fill="rgba(255, 255, 255, 0.55)" 
+            />
+
+            {/* Front Peak */}
+            <Path 
+              d="M 160 610 L 215 520 L 270 610 Z" 
+              fill="rgba(74, 112, 76, 0.06)" 
+              stroke="rgba(74, 112, 76, 0.3)" 
+              strokeWidth={1.2} 
+              strokeLinejoin="round"
+            />
+            <Path 
+              d="M 200 545 L 215 520 L 230 545 Q 215 555 200 545 Z" 
+              fill="rgba(255, 255, 255, 0.55)" 
+            />
+
+            {/* Cute Cartoon Cloud */}
+            <Path 
+              d="M 125 490 C 120 480 135 470 145 478 C 150 465 170 468 172 480 C 182 480 185 492 178 496 C 178 496 125 496 125 490 Z" 
+              fill="rgba(255, 255, 255, 0.85)" 
+            />
+          </G>
+
+          {/* 4. Crimson Sunset Floating Autumn Maple Leaf */}
+          <G opacity={0.75}>
+            {/* Stem */}
+            <Path 
+              d="M 320 455 L 312 468" 
+              fill="none" 
+              stroke="rgba(77, 42, 32, 0.42)" 
+              strokeWidth={1.2} 
+            />
+            {/* Maple Leaf contour */}
+            <Path 
+              d="M 320 455 Q 330 425 342 432 C 348 420 362 432 358 442 C 368 448 358 462 344 458 Q 328 472 320 455 Z" 
+              fill="rgba(224, 90, 71, 0.22)" 
+              stroke="rgba(77, 42, 32, 0.42)"
+              strokeWidth={1.2}
+              strokeLinejoin="round"
+            />
+          </G>
+
+          {/* 5. Japanese Zen Garden Bamboo Stalk & Stone Ripples */}
+          <G opacity={0.75}>
+            {/* Sand Ripple circles */}
+            <Circle 
+              cx="85" 
+              cy="735" 
+              r="22" 
+              fill="none" 
+              stroke="rgba(140, 106, 92, 0.28)" 
+              strokeWidth={1.2} 
+            />
+            <Circle 
+              cx="85" 
+              cy="735" 
+              r="42" 
+              fill="none" 
+              stroke="rgba(140, 106, 92, 0.24)" 
+              strokeWidth={1.2} 
+              strokeDasharray="4 2"
+            />
+            <Circle 
+              cx="85" 
+              cy="735" 
+              r="62" 
+              fill="none" 
+              stroke="rgba(140, 106, 92, 0.2)" 
+              strokeWidth={1} 
+              strokeDasharray="3 3"
+            />
+            {/* Zen Garden Pebble */}
+            <Path 
+              d="M 75 735 Q 85 725 95 735 Q 95 745 85 745 Q 75 745 75 735 Z" 
+              fill="rgba(140, 106, 92, 0.24)" 
+              stroke="rgba(62, 52, 49, 0.4)"
+              strokeWidth={1.2}
+            />
+
+            {/* Bamboo Stalk Segment 1 */}
+            <Path 
+              d="M 30 760 L 30 680" 
+              fill="none" 
+              stroke="rgba(74, 112, 76, 0.48)" 
+              strokeWidth={3} 
+              strokeLinecap="round"
+            />
+            {/* Node line */}
+            <Path d="M 27 680 L 33 680" fill="none" stroke="rgba(45, 59, 46, 0.48)" strokeWidth={1.5} />
+            {/* Bamboo Stalk Segment 2 */}
+            <Path 
+              d="M 30 677 L 30 597" 
+              fill="none" 
+              stroke="rgba(74, 112, 76, 0.45)" 
+              strokeWidth={2.8} 
+              strokeLinecap="round"
+            />
+            {/* Bamboo Leaf 1 */}
+            <Path 
+              d="M 30 630 Q 55 615 75 625 M 30 630 Q 55 635 75 625" 
+              fill="rgba(90, 110, 92, 0.2)" 
+            />
+            {/* Bamboo Leaf 2 */}
+            <Path 
+              d="M 30 670 Q 5 655 -15 660 M 30 670 Q 5 675 -15 660" 
+              fill="rgba(90, 110, 92, 0.2)" 
+            />
+          </G>
+        </Svg>
+      </Animated.View>
 
       <View style={styles.content}>
         {/* Glowing Branding Tile */}
         <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
-          <View style={{ width: 50, height: 50, alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-            <Text 
-              style={{ 
-                fontSize: 44, 
-                fontWeight: '900', 
-                color: '#8B5CF6', 
-                fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-condensed',
-                lineHeight: 52,
-              }}
-            >
-              R
-            </Text>
-            
-            {/* Star Sparkle (Top Right) */}
-            <View style={{ position: 'absolute', top: -6, right: -10 }}>
-              <Sparkles color="#8B5CF6" size={16} strokeWidth={1.5} />
-            </View>
-
-            {/* Star Sparkle (Bottom Left) */}
-            <View style={{ position: 'absolute', bottom: -4, left: -10 }}>
-              <Sparkles color="#A78BFA" size={12} strokeWidth={1.2} />
-            </View>
-
-            {/* Glowing Purple Dot (Top Left) */}
-            <View 
-              style={{ 
-                position: 'absolute', 
-                top: 2, 
-                left: -4, 
-                width: 5, 
-                height: 5, 
-                borderRadius: 2.5, 
-                backgroundColor: '#8B5CF6', 
-                opacity: 0.8 
-              }} 
-            />
-
-            {/* Glowing Purple Dot (Bottom Right) */}
-            <View 
-              style={{ 
-                position: 'absolute', 
-                bottom: 4, 
-                right: -4, 
-                width: 6, 
-                height: 6, 
-                borderRadius: 3, 
-                backgroundColor: '#C084FC', 
-                opacity: 0.7 
-              }} 
-            />
-          </View>
+          <Image
+            source={require('../assets/icon213.png')}
+            style={{ width: '100%', height: '100%', borderRadius: 24 }}
+            contentFit="cover"
+          />
         </Animated.View>
 
         {/* Cinematic Typographic Sequence */}
@@ -262,16 +460,9 @@ export default function StartupCoordinator() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F7', // Warm off-white canvas
+    backgroundColor: '#FAF6F0', // Serene warm sand-cream paper canvas
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  glowOrb: {
-    position: 'absolute',
-    width: width * 0.85,
-    height: width * 0.85,
-    borderRadius: (width * 0.85) / 2,
-    backgroundColor: 'transparent',
   },
   content: {
     alignItems: 'center',

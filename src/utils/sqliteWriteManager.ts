@@ -76,6 +76,13 @@ export class SQLiteWriteManager {
       return;
     }
 
+    if (op.userId === 'guest-user') {
+      if (__DEV__) {
+        console.log(`[Write Manager] Guest session write operation discarded: ${op.type}`);
+      }
+      return;
+    }
+
     const startTime = performance.now();
 
     // Dedupe coalescing: if same key exists, replace it (last write wins)
