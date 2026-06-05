@@ -201,33 +201,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
     }
   }, [isSettingsOpen, localStep]);
 
-  // Finger slide animation for Step 0 gesture helper
-  const fingerX = useSharedValue(0);
-  const fingerOpacity = useSharedValue(0.7);
 
-  useEffect(() => {
-    if (localStep === 0 && runAnimationFinished) {
-      fingerX.value = 0;
-      fingerOpacity.value = 0.7;
-      fingerX.value = withRepeat(
-        withSequence(
-          withTiming(-120, { duration: 1600 }),
-          withTiming(0, { duration: 0 })
-        ),
-        -1,
-        false
-      );
-    } else {
-      cancelAnimation(fingerX);
-      fingerX.value = 0;
-      fingerOpacity.value = 0;
-    }
-  }, [localStep, runAnimationFinished]);
-
-  const fingerAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: fingerX.value }],
-    opacity: fingerOpacity.value,
-  }));
 
   const completeTyping = () => {
     if (!typingDone) {
@@ -346,20 +320,8 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       case 0:
         return (
           <View style={styles.contentWrapper}>
-            <View style={styles.header}>
-              <ArrowLeftRight color="#8B5CF6" size={20} />
-              <Text style={styles.title}>EXPLANATION SLIDES</Text>
-            </View>
             <Text style={styles.desc}>{typedText}</Text>
             
-            {/* Gesture visual teaching hand */}
-            <View style={styles.gestureBox}>
-              <Animated.View style={[styles.fingerIcon, fingerAnimatedStyle]}>
-                <Text style={styles.fingerEmoji}>👈</Text>
-              </Animated.View>
-              <View style={styles.dragTrackHorizontal} />
-            </View>
-
             {runAnimationFinished && typingDone && (
               <TouchableOpacity onPress={handleNextStep} style={styles.actionBtn}>
                 <Text style={styles.actionBtnText}>Understand Gesture</Text>
