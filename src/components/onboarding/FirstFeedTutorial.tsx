@@ -133,7 +133,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
     }
   }, [localStep, localGptShot]);
 
-  // Typewriter effect trigger
+  // Instant text reveal once animation finishes
   useEffect(() => {
     let targetText = '';
     if (localStep === 0) {
@@ -164,34 +164,8 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       targetText = "I create custom learning playlists so I can tune in and study my selected topics anytime!";
     }
     targetTextRef.current = targetText;
-
-    if (!targetText) {
-      setTypedText('');
-      setTypingDone(true);
-      return;
-    }
-
-    let index = 0;
-    setTypedText('');
-    setTypingDone(false);
-
-    const interval = setInterval(() => {
-      setTypedText((prev) => {
-        const next = targetText.slice(0, index + 1);
-        index++;
-        if (index >= targetText.length) {
-          clearInterval(interval);
-          setTypingDone(true);
-        }
-        return next;
-      });
-    }, 25);
-    typingIntervalRef.current = interval;
-
-    return () => {
-      clearInterval(interval);
-      typingIntervalRef.current = null;
-    };
+    setTypedText(targetText);
+    setTypingDone(true);
   }, [localStep, localGptShot, runAnimationFinished]);
 
   // Settings Cog observer to advance Step 2
@@ -584,7 +558,8 @@ const styles = StyleSheet.create({
   },
   contentWrapper: {
     flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 8,
   },
   header: {
     flexDirection: 'row',
@@ -600,10 +575,9 @@ const styles = StyleSheet.create({
   },
   desc: {
     color: '#3E3431', // Zen textPrimary
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-    marginBottom: 10,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 24,
   },
   gestureBox: {
     height: 60,
