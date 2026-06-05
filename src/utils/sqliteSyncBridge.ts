@@ -1276,7 +1276,9 @@ export async function loadStateFromSQLite(userId: string) {
         deletedEntitiesRows,
         syncCursorRow,
         quotesRows,
-        sessionRow
+        sessionRow,
+        notificationSettingsRow,
+        appConfigRows
       ] = await Promise.all([
         db.getAllAsync<any>('SELECT * FROM folders WHERE userId = ? AND isDeleted = 0;', [userId]),
         db.getAllAsync<any>('SELECT * FROM playlists WHERE userId = ? AND isDeleted = 0;', [userId]),
@@ -1288,7 +1290,9 @@ export async function loadStateFromSQLite(userId: string) {
         db.getAllAsync<LocalDeletedEntity>('SELECT userId, entityId, entityType, deletedAt, revision FROM deleted_entities WHERE userId = ?;', [userId]),
         db.getFirstAsync<any>('SELECT lastPulledRevision, updatedAt FROM sync_cursors WHERE userId = ?;', [userId]),
         db.getAllAsync<any>('SELECT * FROM senior_quotes WHERE userId = ?;', [userId]),
-        db.getFirstAsync<any>('SELECT selectedRootFolderIds, currentQuoteIndex FROM reel_sessions WHERE userId = ?;', [userId])
+        db.getFirstAsync<any>('SELECT selectedRootFolderIds, currentQuoteIndex FROM reel_sessions WHERE userId = ?;', [userId]),
+        db.getFirstAsync<any>('SELECT * FROM notification_settings WHERE userId = ?;', [userId]),
+        db.getAllAsync<any>('SELECT key, value FROM app_config;')
       ]);
 
       // Process Folders
@@ -1514,6 +1518,24 @@ export async function loadStateFromSQLite(userId: string) {
         }
       });
 
+      let notificationSettings: any = null;
+      if (notificationSettingsRow) {
+        notificationSettings = {
+          enabled: notificationSettingsRow.enabled === 1,
+          hour: notificationSettingsRow.hour,
+          minute: notificationSettingsRow.minute,
+          frequency: notificationSettingsRow.frequency || 'daily',
+          customDays: notificationSettingsRow.customDays ? JSON.parse(notificationSettingsRow.customDays) : [],
+        };
+      }
+
+      const appConfigObj: Record<string, string> = {};
+      if (appConfigRows) {
+        appConfigRows.forEach((r: any) => {
+          appConfigObj[r.key] = r.value;
+        });
+      }
+
       // Return critical data immediately, will be followed by card metadata
       return {
         foldersById,
@@ -1529,6 +1551,8 @@ export async function loadStateFromSQLite(userId: string) {
         selectedRootFolderIds: [],
         seniorQuotes: [],
         currentQuoteIndex: 0,
+        notificationSettings,
+        appConfig: Object.keys(appConfigObj).length > 0 ? appConfigObj : null,
       };
     } catch (err: any) {
       console.error('[SQLite Bridge Error] loadStateFromSQLite failed:', err.message);
@@ -2066,6 +2090,71 @@ export async function saveCardProgressToSQLite(
     ]);
   } catch (err: any) {
     console.error('[SQLite Bridge Error] saveCardProgressToSQLite failed:', err.message);
+  }
+}
+
+/**
+ * Saves notification preferences to SQLite.
+ */
+export async function saveNotificationPreferencesToSQLite(
+  userId: string,
+  enabled: boolean,
+  hour: number,
+  minute: number,
+  frequency: string,
+  customDays: number[]
+): Promise<void> {
+  if (!isSQLiteAvailable()) return;
+  const db = getDatabase();
+  try {
+    const updatedAtIso = new Date().toISOString();
+    const enabledInt = enabled ? 1 : 0;
+    const customDaysStr = JSON.stringify(customDays || []);
+    
+    await db.runAsync(
+      `INSERT INTO notification_settings (userId, enabled, hour, minute, frequency, customDays, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(userId) DO UPDATE SET
+         enabled=excluded.enabled,
+         hour=excluded.hour,
+         minute=excluded.minute,
+         frequency=excluded.frequency,
+         customDays=excluded.customDays,
+         updatedAt=excluded.updatedAt;`,
+      [userId, enabledInt, hour, minute, frequency, customDaysStr, updatedAtIso]
+    );
+  } catch (err: any) {
+    console.error('[SQLite Bridge Error] saveNotificationPreferencesToSQLite failed:', err.message);
+  }
+}
+
+/**
+ * Saves app config payload to SQLite.
+ */
+export async function saveAppConfigToSQLite(
+  latestVersion: string,
+  updateUrl: string,
+  shareMessage: string
+): Promise<void> {
+  if (!isSQLiteAvailable()) return;
+  const db = getDatabase();
+  try {
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
+        ['latestVersion', latestVersion || '1.0.5']
+      );
+      await db.runAsync(
+        `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
+        ['updateUrl', updateUrl || 'https://ree-wise-download-website.vercel.app/']
+      );
+      await db.runAsync(
+        `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
+        ['shareMessage', shareMessage || '']
+      );
+    });
+  } catch (err: any) {
+    console.error('[SQLite Bridge Error] saveAppConfigToSQLite failed:', err.message);
   }
 }
 
