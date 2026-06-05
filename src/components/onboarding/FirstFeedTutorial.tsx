@@ -433,7 +433,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
               top: insets.top + 8,
               height: 48,
               left: 0,
-              right: 56,
+              right: 104,
               backgroundColor: 'rgba(0, 0, 0, 0.01)',
               zIndex: 9990,
             }}
@@ -446,7 +446,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
               top: insets.top + 8,
               height: 48,
               right: 0,
-              width: 8,
+              width: 56,
               backgroundColor: 'rgba(0, 0, 0, 0.01)',
               zIndex: 9990,
             }}
@@ -465,7 +465,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
           }}
           style={{
             position: 'absolute',
-            right: 16,
+            right: 56,
             top: insets.top + 12,
             width: 48,
             height: 48,
