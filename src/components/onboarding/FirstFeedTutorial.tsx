@@ -340,14 +340,10 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       case 2:
         return (
           <View style={styles.contentWrapper}>
-            <View style={styles.header}>
-              <Sparkles color="#8B5CF6" size={20} />
-              <Text style={styles.title}>CUSTOMIZE THEMES</Text>
-            </View>
             <Text style={styles.desc}>{typedText}</Text>
             
             <View style={styles.pointerBadge}>
-              <Text style={styles.pointerText}>Tap settings cog at the top right</Text>
+              <Text style={styles.pointerText}>tap settings button</Text>
             </View>
           </View>
         );
