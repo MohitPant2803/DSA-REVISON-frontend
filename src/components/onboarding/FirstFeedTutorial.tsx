@@ -66,6 +66,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
   const [typingDone, setTypingDone] = useState(false);
   const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const targetTextRef = useRef('');
+  const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync sub-step state to walkthrough store
   useEffect(() => {
@@ -85,7 +86,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       reewSwipeX.value = 180; // Start on the right side of the card
 
       // Start timing translation after a short delay (300ms) to ensure tutorial_walk renders
-      const timer = setTimeout(() => {
+      animationTimerRef.current = setTimeout(() => {
         reewSwipeX.value = withTiming(0, {
           duration: 1500,
           easing: Easing.bezier(0.25, 1, 0.5, 1),
@@ -97,14 +98,18 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
         });
       }, 300);
 
-      return () => clearTimeout(timer);
+      return () => {
+        if (animationTimerRef.current) {
+          clearTimeout(animationTimerRef.current);
+        }
+      };
     } else if (localStep === 1) {
       setRunAnimationFinished(false);
       setReewState('superman_fly');
       reewFlyY.value = 180; // Start at the bottom
 
       // Start flying up after 300ms delay
-      const timer = setTimeout(() => {
+      animationTimerRef.current = setTimeout(() => {
         reewFlyY.value = withTiming(-30, {
           duration: 1000,
           easing: Easing.bezier(0.25, 1, 0.5, 1),
@@ -116,7 +121,11 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
         });
       }, 300);
 
-      return () => clearTimeout(timer);
+      return () => {
+        if (animationTimerRef.current) {
+          clearTimeout(animationTimerRef.current);
+        }
+      };
     } else if (localStep === 2) {
       setReewState('engineer_reew');
       setRunAnimationFinished(true);
@@ -213,7 +222,24 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
 
   const handleBackdropPress = () => {
     if (localStep === 0 || localStep === 1) {
-      if (!runAnimationFinished) return;
+      if (!runAnimationFinished) {
+        // End the animation immediately on tap
+        if (animationTimerRef.current) {
+          clearTimeout(animationTimerRef.current);
+          animationTimerRef.current = null;
+        }
+        if (localStep === 0) {
+          cancelAnimation(reewSwipeX);
+          reewSwipeX.value = 0;
+          setReewState('tutorial_tired');
+        } else {
+          cancelAnimation(reewFlyY);
+          reewFlyY.value = -30;
+          setReewState('superman_stand');
+        }
+        setRunAnimationFinished(true);
+        return;
+      }
       if (completeTyping()) return;
       handleNextStep();
     } else if (localStep === 2) {
