@@ -651,7 +651,7 @@ export default function PersonalScreen() {
   const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false);
   const [isAnalyticsOverlayOpen, setIsAnalyticsOverlayOpen] = useState(false);
 
-  const { step, setStep } = useWalkthroughStore();
+  const { step, setStep, isComplete } = useWalkthroughStore();
   const prevSettingsOpen = React.useRef(isSettingsOpen);
 
   useEffect(() => {
@@ -1070,10 +1070,21 @@ export default function PersonalScreen() {
                   playlist={pl}
                   shouldGlow={pl.id === 'hard' && step === 'myspace-hard-focus'}
                   onPress={() => {
-                      router.push({
-                        pathname: '/(protected)/playlist/[playlistId]',
-                        params: { playlistId: pl.id }
-                      });
+                    if (!isComplete) {
+                      if (pl.id === 'hard' && step === 'myspace-hard-focus') {
+                        lightHaptic();
+                        setStep('playlist-reorder');
+                        router.push({
+                          pathname: '/(protected)/playlist/[playlistId]',
+                          params: { playlistId: 'hard' }
+                        });
+                      }
+                      return;
+                    }
+                    router.push({
+                      pathname: '/(protected)/playlist/[playlistId]',
+                      params: { playlistId: pl.id }
+                    });
                   }}
                 />
               ))}

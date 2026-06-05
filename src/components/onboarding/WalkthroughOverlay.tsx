@@ -176,12 +176,7 @@ export function WalkthroughOverlay() {
     } else if (step === 'myspace-settings-arrow') {
       // Tapping the card/backdrop does nothing. User must tap the Settings Cog.
     } else if (step === 'myspace-hard-focus') {
-      lightHaptic();
-      setStep('playlist-reorder');
-      router.push({
-        pathname: '/(protected)/playlist/[playlistId]',
-        params: { playlistId: 'hard' }
-      });
+      // Tapping the card/backdrop does nothing. User must tap the Hard Focus card.
     }
   };
 
