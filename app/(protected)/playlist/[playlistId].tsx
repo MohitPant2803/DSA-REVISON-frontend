@@ -997,22 +997,7 @@ export default function PlaylistCardsScreen() {
       )}
 
       {/* Tutorial backdrop overlays blocking invalid clicks and forwarding to handleBackdropPress */}
-      {['playlist-reorder', 'playlist-remove'].includes(localStep) && (
-        <Pressable
-          onPress={handleBackdropPress}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: insets.top + 140, // blocks header and study buttons row
-            backgroundColor: 'rgba(0, 0, 0, 0.01)',
-            zIndex: 9990,
-          }}
-        />
-      )}
-
-      {['playlist-reminder', 'playlist-happy'].includes(localStep) && (
+      {['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(localStep) && (
         <Pressable
           onPress={handleBackdropPress}
           style={{
@@ -1064,40 +1049,46 @@ export default function PlaylistCardsScreen() {
                     size={72}
                   />
                 </View>
-                <View style={{ flex: 1, alignItems: 'flex-start' }}>
+                <View style={{ flex: 1, justifyContent: 'center', gap: 6 }}>
                   {localStep === 'playlist-reorder' && (
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#3E3431', lineHeight: 22, textAlign: 'left' }}>
-                      {"I long press the card and then reorder it to customize my revision sequence!"}
-                    </Text>
+                    <>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3E3431', lineHeight: 24, textAlign: 'left' }}>
+                        {"I long press the card and then reorder it to customize my revision sequence!"}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                        Tap anywhere to continue
+                      </Text>
+                    </>
                   )}
                   {localStep === 'playlist-remove' && (
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#3E3431', lineHeight: 22, textAlign: 'left' }}>
-                      {"I swipe left on the card I no longer want in the playlist to remove it."}
-                    </Text>
+                    <>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3E3431', lineHeight: 24, textAlign: 'left' }}>
+                        {"I swipe left on the card I no longer want in the playlist to remove it."}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                        Tap anywhere to continue
+                      </Text>
+                    </>
                   )}
                   {localStep === 'playlist-reminder' && (
                     <>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#3E3431', lineHeight: 22, textAlign: 'left', marginBottom: 8 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3E3431', lineHeight: 24, textAlign: 'left' }}>
                         {"I use the revision reminder for revision. Open the revision reminder!"}
                       </Text>
-                      <View style={{
-                        backgroundColor: '#F1ECE6',
-                        borderRadius: 14,
-                        paddingVertical: 8,
-                        paddingHorizontal: 16,
-                        borderWidth: 1,
-                        borderColor: '#EADEC9',
-                      }}>
-                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#8C6A5C', textAlign: 'center' }}>
-                          tap the revision reminder
-                        </Text>
-                      </View>
+                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                        tap the revision reminder
+                      </Text>
                     </>
                   )}
                   {localStep === 'playlist-happy' && (
-                    <Text style={{ fontSize: 20, fontWeight: '900', color: '#8C6A5C', textAlign: 'left' }}>
-                      {"Happy ReeWising!!"}
-                    </Text>
+                    <>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#8C6A5C', textAlign: 'left' }}>
+                        {"Happy ReeWising!!"}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                        Tap anywhere to continue
+                      </Text>
+                    </>
                   )}
                 </View>
               </View>
