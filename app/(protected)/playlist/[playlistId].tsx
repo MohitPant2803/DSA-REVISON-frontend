@@ -33,7 +33,7 @@ import { SyncPauseGate } from '@/components/SyncPauseGate';
 import { usePlaylistCards as useStorePlaylistCards } from '@/hooks/usePlaylistStoreSelectors';
 import { resolveCardState } from '@/utils/resolveCardState';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
-import Animated, { useAnimatedStyle, withSpring, FadeInUp, FadeOut, useSharedValue, withTiming, runOnJS, cancelAnimation, withRepeat, withSequence } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withSpring, FadeInUp, FadeOut, useSharedValue, withTiming, runOnJS, cancelAnimation, withRepeat, withSequence, SharedValue } from 'react-native-reanimated';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -131,6 +131,54 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
 
 const { width: screenWidth } = Dimensions.get('window');
 
+const ConfettiParticle = ({ p, progress }: { p: any; progress: SharedValue<number> }) => {
+  const animatedStyle = useAnimatedStyle(() => {
+    const x = Math.cos(p.angleRad) * p.distance * progress.value;
+    const y = Math.sin(p.angleRad) * p.distance * progress.value - (50 * progress.value);
+    
+    let opacity = 1;
+    if (progress.value < 0.7) {
+      opacity = 1 - 0.2 * (progress.value / 0.7);
+    } else {
+      opacity = 0.8 - 0.8 * ((progress.value - 0.7) / 0.3);
+    }
+    if (opacity < 0) opacity = 0;
+    if (opacity > 1) opacity = 1;
+
+    let scale = 0;
+    if (progress.value < 0.2) {
+      scale = 1.2 * (progress.value / 0.2);
+    } else {
+      scale = 1.2 - 1.2 * ((progress.value - 0.2) / 0.8);
+    }
+    if (scale < 0) scale = 0;
+
+    const rotate = `${p.rotateStart + progress.value * (p.rotateEnd - p.rotateStart)}deg`;
+
+    return {
+      transform: [{ translateX: x }, { translateY: y }, { scale }, { rotate }],
+      opacity,
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        animatedStyle,
+        {
+          position: 'absolute',
+          left: '20%',
+          top: '50%',
+          width: p.size,
+          height: p.size,
+          borderRadius: p.isCircle ? p.size / 2 : 2,
+          backgroundColor: p.color,
+        },
+      ]}
+    />
+  );
+};
+
 const ConfettiBlast = () => {
   const progress = useSharedValue(0);
 
@@ -164,54 +212,9 @@ const ConfettiBlast = () => {
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-      {particles.map((p, i) => {
-        const animatedStyle = useAnimatedStyle(() => {
-          const x = Math.cos(p.angleRad) * p.distance * progress.value;
-          const y = Math.sin(p.angleRad) * p.distance * progress.value - (50 * progress.value);
-          
-          let opacity = 1;
-          if (progress.value < 0.7) {
-            opacity = 1 - 0.2 * (progress.value / 0.7);
-          } else {
-            opacity = 0.8 - 0.8 * ((progress.value - 0.7) / 0.3);
-          }
-          if (opacity < 0) opacity = 0;
-          if (opacity > 1) opacity = 1;
-
-          let scale = 0;
-          if (progress.value < 0.2) {
-            scale = 1.2 * (progress.value / 0.2);
-          } else {
-            scale = 1.2 - 1.2 * ((progress.value - 0.2) / 0.8);
-          }
-          if (scale < 0) scale = 0;
-
-          const rotate = `${p.rotateStart + progress.value * (p.rotateEnd - p.rotateStart)}deg`;
-
-          return {
-            transform: [{ translateX: x }, { translateY: y }, { scale }, { rotate }],
-            opacity,
-          };
-        });
-
-        return (
-          <Animated.View
-            key={i}
-            style={[
-              animatedStyle,
-              {
-                position: 'absolute',
-                left: '20%',
-                top: '50%',
-                width: p.size,
-                height: p.size,
-                borderRadius: p.isCircle ? p.size / 2 : 2,
-                backgroundColor: p.color,
-              },
-            ]}
-          />
-        );
-      })}
+      {particles.map((p, i) => (
+        <ConfettiParticle key={i} p={p} progress={progress} />
+      ))}
     </View>
   );
 };
@@ -348,6 +351,10 @@ export default function PlaylistCardsScreen() {
       elevation: isReminderStep ? 4 : 0,
     };
   });
+
+  const reminderGlowStyle = useAnimatedStyle(() => ({
+    opacity: reminderGlow.value,
+  }));
 
   useEffect(() => {
     if (playlistId === 'hard' && step === 'myspace-hard-focus') {
@@ -780,9 +787,7 @@ export default function PlaylistCardsScreen() {
                     borderWidth: 2.5,
                     borderColor: palette.accent,
                   },
-                  useAnimatedStyle(() => ({
-                    opacity: reminderGlow.value,
-                  }))
+                  reminderGlowStyle
                 ]}
               />
             )}
