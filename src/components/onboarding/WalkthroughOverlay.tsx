@@ -176,8 +176,7 @@ export function WalkthroughOverlay() {
       lightHaptic();
       setStep('myspace-settings-arrow');
     } else if (step === 'myspace-settings-arrow') {
-      lightHaptic();
-      setStep('myspace-hard-focus');
+      // Tapping the card/backdrop does nothing. User must tap the Settings Cog.
     } else if (step === 'myspace-hard-focus') {
       lightHaptic();
       setStep('playlist-reorder');
