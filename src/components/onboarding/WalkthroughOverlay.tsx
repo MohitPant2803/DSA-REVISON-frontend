@@ -169,9 +169,7 @@ export function WalkthroughOverlay() {
       }
       // If reelsShot is 2, only the reels icon button should be clickable, backdrop press does nothing!
     } else if (step === 'point-myspace') {
-      lightHaptic();
-      setStep('myspace-theme');
-      router.replace('/(protected)/(tabs)/personal');
+      // Tapping the card/backdrop does nothing. User must tap the My Space tab button.
     } else if (step === 'myspace-theme') {
       lightHaptic();
       setStep('myspace-settings-arrow');
