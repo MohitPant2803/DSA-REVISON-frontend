@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { GlassPanel } from '../motion/GlassPanel';
 import { hapticFeedback } from '@/utils/haptics';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
-import { Sparkles, CheckCircle2 } from 'lucide-react-native';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
@@ -350,28 +350,18 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       case 3:
         return (
           <View style={styles.contentWrapper}>
-            <View style={styles.header}>
-              <Sparkles color="#8B5CF6" size={20} />
-              <Text style={styles.title}>ASK GPT</Text>
-            </View>
             <Text style={styles.desc}>{typedText}</Text>
             {typingDone && (
-              <Text style={styles.tapHelperText}>
-                {localGptShot < 3 ? "Tap card to continue" : "Tap card to proceed"}
-              </Text>
+              <Text style={styles.tapHelperText}>Tap anywhere to continue</Text>
             )}
           </View>
         );
       case 4:
         return (
           <View style={styles.contentWrapper}>
-            <View style={styles.header}>
-              <CheckCircle2 color="#8B5CF6" size={20} />
-              <Text style={styles.title}>REVISION PLAYLISTS</Text>
-            </View>
             <Text style={styles.desc}>{typedText}</Text>
             {typingDone && (
-              <Text style={styles.tapHelperText}>Tap anywhere to finish</Text>
+              <Text style={styles.tapHelperText}>Tap anywhere to continue</Text>
             )}
           </View>
         );
