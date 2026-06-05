@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { GlassPanel } from '../motion/GlassPanel';
 import { hapticFeedback } from '@/utils/haptics';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
-import { ArrowLeftRight, ArrowUp, Sparkles, CheckCircle2 } from 'lucide-react-native';
+import { Sparkles, CheckCircle2 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
@@ -142,7 +142,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
         setTypingDone(false);
         return;
       }
-      targetText = "Swipe left or right on a revision card to open code walkthroughs, trace dry runs, and active recall summaries.";
+      targetText = "you can scroll these slides to understand the explanations;";
     } else if (localStep === 1) {
       if (!runAnimationFinished) {
         setTypedText('');
@@ -322,26 +322,18 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
           <View style={styles.contentWrapper}>
             <Text style={styles.desc}>{typedText}</Text>
             
-            {runAnimationFinished && typingDone && (
-              <TouchableOpacity onPress={handleNextStep} style={styles.actionBtn}>
-                <Text style={styles.actionBtnText}>Understand Gesture</Text>
-              </TouchableOpacity>
+            {typingDone && (
+              <Text style={styles.tapHelperText}>Tap anywhere to continue</Text>
             )}
           </View>
         );
       case 1:
         return (
           <View style={styles.contentWrapper}>
-            <View style={styles.header}>
-              <ArrowUp color="#8B5CF6" size={20} />
-              <Text style={styles.title}>SWIPE NEXT ALGORITHM</Text>
-            </View>
             <Text style={styles.desc}>{typedText}</Text>
 
-            {runAnimationFinished && typingDone && (
-              <TouchableOpacity onPress={handleNextStep} style={styles.actionBtn}>
-                <Text style={styles.actionBtnText}>Begin active recall</Text>
-              </TouchableOpacity>
+            {typingDone && (
+              <Text style={styles.tapHelperText}>Tap anywhere to continue</Text>
             )}
           </View>
         );
