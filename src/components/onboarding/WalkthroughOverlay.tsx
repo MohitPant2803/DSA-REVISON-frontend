@@ -85,34 +85,8 @@ export function WalkthroughOverlay() {
       targetText = "Finally, tap the Hard Focus card below to view, study, and reorder all the cards you classified as Hard.";
     }
     targetTextRef.current = targetText;
-
-    if (!targetText) {
-      setTypedText('');
-      setTypingDone(true);
-      return;
-    }
-
-    let index = 0;
-    setTypedText('');
-    setTypingDone(false);
-
-    const interval = setInterval(() => {
-      setTypedText((prev) => {
-        const next = targetText.slice(0, index + 1);
-        index++;
-        if (index >= targetText.length) {
-          clearInterval(interval);
-          setTypingDone(true);
-        }
-        return next;
-      });
-    }, 25);
-    typingIntervalRef.current = interval;
-
-    return () => {
-      clearInterval(interval);
-      typingIntervalRef.current = null;
-    };
+    setTypedText(targetText);
+    setTypingDone(true);
   }, [localStep, localReelsShot]);
 
   const panelAnimatedStyle = useAnimatedStyle(() => ({
@@ -349,23 +323,14 @@ export function WalkthroughOverlay() {
                   <View style={{ marginRight: 16 }}>
                     <ReeWCharacter state={localReelsShot === 1 ? "idle" : "v_fingers"} size={72} disableIdleCycle={true} />
                   </View>
-                  <View style={{ flex: 1, alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, justifyContent: 'center' }}>
                     <Text style={[styles.body, { textAlign: 'left', marginBottom: 0 }]}>
                       {typedText}
                     </Text>
                   </View>
                 </View>
                 {typingDone && (
-                  <Text style={{ 
-                    fontSize: 10, 
-                    color: '#8C6A5C', 
-                    fontWeight: '700', 
-                    textAlign: 'center', 
-                    width: '100%', 
-                    marginTop: 12, 
-                    opacity: 0.6,
-                    letterSpacing: 0.5 
-                  }}>
+                  <Text style={[styles.tapHelperText, { textAlign: 'center', marginTop: 12 }]}>
                     {localReelsShot === 1 ? "Tap anywhere to continue" : "tap on the reel icons"}
                   </Text>
                 )}
@@ -377,13 +342,11 @@ export function WalkthroughOverlay() {
                 <View style={{ marginRight: 16 }}>
                   <ReeWCharacter state="v_fingers" size={72} disableIdleCycle={true} />
                 </View>
-                <View style={{ flex: 1, alignItems: 'flex-start' }}>
-                  <Text style={[styles.body, { textAlign: 'left', fontSize: 15, marginBottom: 8 }]}>
+                <View style={{ flex: 1, justifyContent: 'center', gap: 6 }}>
+                  <Text style={[styles.body, { textAlign: 'left', marginBottom: 0 }]}>
                     {typedText}
                   </Text>
-                  <View style={styles.pointerBadge}>
-                    <Text style={styles.pointerText}>Tap the My Space button</Text>
-                  </View>
+                  <Text style={styles.tapHelperText}>Tap the My Space button</Text>
                 </View>
               </View>
             )}
@@ -393,8 +356,8 @@ export function WalkthroughOverlay() {
                 <View style={{ marginRight: 16 }}>
                   <ReeWCharacter state="cute_sad" size={72} disableIdleCycle={true} />
                 </View>
-                <View style={{ flex: 1, alignItems: 'flex-start' }}>
-                  <Text style={[styles.body, { textAlign: 'left', fontSize: 16, marginBottom: 0 }]}>
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <Text style={[styles.body, { textAlign: 'left', marginBottom: 0 }]}>
                     {typedText}
                   </Text>
                 </View>
@@ -406,13 +369,11 @@ export function WalkthroughOverlay() {
                 <View style={{ marginRight: 16 }}>
                   <ReeWCharacter state="happy" size={72} disableIdleCycle={true} />
                 </View>
-                <View style={{ flex: 1, alignItems: 'flex-start' }}>
-                  <Text style={[styles.body, { textAlign: 'left', fontSize: 15, marginBottom: 8 }]}>
+                <View style={{ flex: 1, justifyContent: 'center', gap: 6 }}>
+                  <Text style={[styles.body, { textAlign: 'left', marginBottom: 0 }]}>
                     {typedText}
                   </Text>
-                  <View style={styles.pointerBadge}>
-                    <Text style={styles.pointerText}>tap the settings</Text>
-                  </View>
+                  <Text style={styles.tapHelperText}>tap the settings</Text>
                 </View>
               </View>
             )}
@@ -422,8 +383,8 @@ export function WalkthroughOverlay() {
                 <View style={{ marginRight: 16 }}>
                   <ReeWCharacter state="idle" size={72} disableIdleCycle={true} />
                 </View>
-                <View style={{ flex: 1, alignItems: 'flex-start' }}>
-                  <Text style={[styles.body, { textAlign: 'left', fontSize: 15, marginBottom: 0 }]}>
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <Text style={[styles.body, { textAlign: 'left', marginBottom: 0 }]}>
                     {typedText}
                   </Text>
                 </View>
@@ -595,26 +556,18 @@ const styles = StyleSheet.create({
   },
   body: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#3E3431',
     lineHeight: 24,
     textAlign: 'center',
-    marginBottom: 16,
   },
-  pointerBadge: {
-    backgroundColor: '#F1ECE6',
-    borderRadius: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    alignSelf: 'center',
-    borderWidth: 1,
-    borderColor: '#EADEC9',
-  },
-  pointerText: {
-    fontSize: 12,
-    fontWeight: '800',
+  tapHelperText: {
+    fontSize: 10,
     color: '#8C6A5C',
-    textAlign: 'center',
+    fontWeight: '700',
+    opacity: 0.6,
+    letterSpacing: 0.5,
+    marginTop: 4,
   },
   arrowContainer: {
     position: 'absolute',
