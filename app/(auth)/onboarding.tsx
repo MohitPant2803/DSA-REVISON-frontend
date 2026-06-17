@@ -279,18 +279,18 @@ export default function OnboardingCoordinator() {
   const exitOpacity = useSharedValue(0);
   const exitScale = useSharedValue(1);
 
-  // Dynamic Background Shared Values (transitions Zen -> Matcha -> Sunset -> Midnight -> Zen ...)
-  const zenOpacity = useSharedValue(1);
+  // Dynamic Background Shared Values (transitions Midnight -> Sunset -> Matcha -> Zen -> Midnight ...)
+  const zenOpacity = useSharedValue(0);
   const matchaOpacity = useSharedValue(0);
   const sunsetOpacity = useSharedValue(0);
-  const midnightOpacity = useSharedValue(0);
+  const midnightOpacity = useSharedValue(1);
 
   const backgroundIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     exitOpacity.value = withTiming(1, { duration: 800 });
 
-    const opacities = [zenOpacity, matchaOpacity, sunsetOpacity, midnightOpacity];
+    const opacities = [midnightOpacity, sunsetOpacity, matchaOpacity, zenOpacity];
     let currentIdx = 0;
     backgroundIntervalRef.current = setInterval(() => {
       const prevIdx = currentIdx;
