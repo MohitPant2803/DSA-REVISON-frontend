@@ -103,7 +103,7 @@ export async function initializeDatabase(): Promise<void> {
     // Step 2: Schema version check — skip heavy DDL if already up to date
     const SecureStore = require('expo-secure-store');
     const SCHEMA_VERSION_KEY = 'sqlite_schema_version';
-    const CURRENT_SCHEMA_VERSION = 'v8';
+    const CURRENT_SCHEMA_VERSION = 'v9';
     const storedVersion = await SecureStore.getItemAsync(SCHEMA_VERSION_KEY);
 
     if (storedVersion !== CURRENT_SCHEMA_VERSION) {
