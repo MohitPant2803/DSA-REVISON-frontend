@@ -183,20 +183,7 @@ export default function LoginScreen() {
           (global as any).dumpInstrumentState('2. Google token exchange succeeds');
         }
 
-        // Reset walkthrough state to make sure tutorial starts fresh for new Google sign-in accounts
-        const createdAt = new Date(rawUser.createdAt).getTime();
-        const updatedAt = new Date(rawUser.updatedAt).getTime();
-        const isNewUser = Math.abs(createdAt - updatedAt) < 10000;
-        if (isNewUser) {
-          const { useWalkthroughStore } = require('@/store/useWalkthroughStore');
-          useWalkthroughStore.getState().setStep('point-reels');
-          
-          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-          await AsyncStorage.removeItem('dsa-reels-walkthrough-complete');
-          await AsyncStorage.removeItem('dsa-reels-tutorial-complete');
-          await AsyncStorage.removeItem('guest-dsa-reels-walkthrough-complete');
-          await AsyncStorage.removeItem('guest-dsa-reels-tutorial-complete');
-        }
+
 
         const user = {
           id: rawUser._id,

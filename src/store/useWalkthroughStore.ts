@@ -35,7 +35,14 @@ export const useWalkthroughStore = create<WalkthroughState>((set) => ({
   reelsShot: 1,
   reelsTutorialStep: 0,
   reelsLoadingState: 'idle',
-  setStep: (step) => set({ step, reelsShot: 1 }),
+  setStep: (step) => {
+    try {
+      const { useAuthStore } = require('./useAuthStore');
+      const isGuest = useAuthStore.getState().user?.id === 'guest-user';
+      if (!isGuest && step !== 'none') return;
+    } catch {}
+    set({ step, reelsShot: 1 });
+  },
   setReelsShot: (reelsShot) => set({ reelsShot }),
   setReelsTutorialStep: (reelsTutorialStep) => set({ reelsTutorialStep }),
   setReelsLoadingState: (reelsLoadingState) => set({ reelsLoadingState }),
@@ -43,7 +50,11 @@ export const useWalkthroughStore = create<WalkthroughState>((set) => ({
     try {
       const { useAuthStore } = require('./useAuthStore');
       const isGuest = useAuthStore.getState().user?.id === 'guest-user';
-      const key = isGuest ? 'guest-dsa-reels-walkthrough-complete' : 'dsa-reels-walkthrough-complete';
+      if (!isGuest) {
+        set({ isComplete: true, step: 'none', reelsTutorialStep: 0 });
+        return;
+      }
+      const key = 'guest-dsa-reels-walkthrough-complete';
       const complete = await AsyncStorage.getItem(key);
       if (complete === 'true') {
         set({ isComplete: true, step: 'none', reelsTutorialStep: 0 });
@@ -58,7 +69,11 @@ export const useWalkthroughStore = create<WalkthroughState>((set) => ({
     try {
       const { useAuthStore } = require('./useAuthStore');
       const isGuest = useAuthStore.getState().user?.id === 'guest-user';
-      const key = isGuest ? 'guest-dsa-reels-walkthrough-complete' : 'dsa-reels-walkthrough-complete';
+      if (!isGuest) {
+        set({ isComplete: true, step: 'none', reelsTutorialStep: 0 });
+        return;
+      }
+      const key = 'guest-dsa-reels-walkthrough-complete';
       await AsyncStorage.setItem(key, 'true');
       set({ isComplete: true, step: 'none', reelsTutorialStep: 0 });
     } catch {}
