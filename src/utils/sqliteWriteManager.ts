@@ -178,13 +178,13 @@ export class SQLiteWriteManager {
   /**
    * Process queue one operation at a time.
    * Guarantees: one active transaction at any moment.
+   * Lock is acquired per-operation and released between ops to allow reads to interleave.
    */
   private async processQueue(): Promise<void> {
     if (this.executing || this.queue.length === 0) return;
 
     this.executing = true;
     let db = getDatabase();
-    const release = await sqliteLock.acquire();
 
     try {
       while (this.queue.length > 0) {
@@ -195,7 +195,7 @@ export class SQLiteWriteManager {
           interactionScheduler.runWhenIdle(() => {
             this.processQueue().catch(console.error);
           });
-          break; // Break the while loop to release the SQLite lock and yield thread control to the UI!
+          break; // Break the while loop to yield thread control to the UI!
         }
 
         const op = this.queue.shift()!;
@@ -207,6 +207,8 @@ export class SQLiteWriteManager {
         const resolvers = this.pendingResolvers.get(key) || [];
         this.pendingResolvers.delete(key);
 
+        // Acquire lock per-operation so reads (e.g., card content hydration) can interleave between writes
+        const release = await sqliteLock.acquire();
         try {
           await db.withTransactionAsync(async () => {
             await this.executeOperation(db, op);
@@ -244,11 +246,17 @@ export class SQLiteWriteManager {
               console.error('[Write Manager] Connection recovery failed:', recoveryErr.message);
             }
           }
+        } finally {
+          release();
+        }
+
+        // Yield microtask between operations so pending read queries can acquire the lock
+        if (this.queue.length > 0) {
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
         }
       }
     } finally {
       this.executing = false;
-      release();
     }
   }
 

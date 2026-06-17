@@ -1703,7 +1703,8 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     hasTrackingHydrated &&
     reelsSessionId &&
     reelsSourceType === targetSourceType &&
-    reelsSourceId === targetSourceId
+    reelsSourceId === targetSourceId &&
+    !startCardIdParam
   );
 
   // Smart and robust session ID management
@@ -2168,13 +2169,18 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   const visibleCardsList = useMemo(() => {
     const state = usePlaylistStateStore.getState();
+    const cardDifficultyMap = state.cardDifficultyMap || {};
     let list = cardOrderIds
       .map(id => state.cardsById[id.split('-loop-')[0]])
       .filter(Boolean);
 
     // Apply playlist filters
-    if (['easy','medium','hard','skipped'].includes(activePlaylistId || '')) {
-      list = list.filter(c => c.difficultyState === activePlaylistId);
+    if (['easy','medium','hard','skipped'].includes(activePlaylistId || '') && !isGuest) {
+      list = list.filter(c => {
+        const localDiff = cardDifficultyMap[c._id]?.difficulty;
+        const diff = localDiff !== undefined ? localDiff : c.difficultyState;
+        return diff === activePlaylistId;
+      });
     }
 
     // Apply mode filters
@@ -2348,7 +2354,9 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     if (isReusedSession) return;
     if (activePlaylistId && activePlaylistId !== prevPlaylistId.current) {
       setNavState({ activeIndex: 0, prevIdx: -1 });
-      setAllCards([]);
+      if (prevPlaylistId.current !== null) {
+        setAllCards([]);
+      }
       prevPlaylistId.current = activePlaylistId;
     }
   }, [activePlaylistId, isReusedSession]);

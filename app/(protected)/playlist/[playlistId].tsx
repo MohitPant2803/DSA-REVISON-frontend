@@ -228,16 +228,7 @@ export default function PlaylistCardsScreen() {
   const playlistId = normalizeParam(params.playlistId) ?? '';
   const isLikes = playlistId === 'likes';
 
-  useFocusEffect(
-    useCallback(() => {
-      console.log(`[Playlist Screen Focus] playlistId="${playlistId}"`);
-      if (playlistId && playlistId !== 'all') {
-        usePlaylistStateStore.getState().hydratePlaylistCardsOnDemand(playlistId).catch((err) => {
-          console.error(`[Playlist Screen Focus] hydratePlaylistCardsOnDemand failed:`, err);
-        });
-      }
-    }, [playlistId])
-  );
+
   
   const { user, logout } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
@@ -312,7 +303,9 @@ export default function PlaylistCardsScreen() {
   const hydratePlaylistCards = usePlaylistStateStore((state) => state.hydratePlaylistCards);
   const setPlaylistCardOrder = usePlaylistStateStore((state) => state.setPlaylistCardOrder);
   const storeCards = useStorePlaylistCards(playlistId);
-  console.log(`[Playlist Screen Render] playlistId="${playlistId}", storeCards.length=${storeCards?.length}, isLikes=${isLikes}`);
+  const bootstrapStatus = usePlaylistStateStore((state) => state.bootstrapStatus);
+  const isBootstrapReady = bootstrapStatus === 'completed';
+  console.log(`[Playlist Screen Render] playlistId="${playlistId}", storeCards.length=${storeCards?.length}, isLikes=${isLikes}, bootstrapStatus=${bootstrapStatus}`);
 
   const favoritesKey = isLikes
     ? (libraryData?.favorites ?? []).map(f => f.card?._id).filter(Boolean).join(',')
@@ -351,6 +344,38 @@ export default function PlaylistCardsScreen() {
       loadCards();
     }
   }, [isGuest, playlistId, GUEST_PLAYLIST_CARDS]);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log(`[Playlist Screen Focus] playlistId="${playlistId}", storeCards.length=${storeCards?.length}, localCards.length=${localCards.length}`);
+      if (playlistId && playlistId !== 'all') {
+        usePlaylistStateStore.getState().hydratePlaylistCardsOnDemand(playlistId).catch((err) => {
+          console.error(`[Playlist Screen Focus] hydratePlaylistCardsOnDemand failed:`, err);
+        });
+      }
+
+      // Safety check: if focus screen contains empty localCards but storeCards has items, sync immediately
+      if (storeCards && storeCards.length > 0 && localCards.length === 0) {
+        console.log(`[Playlist Screen Focus] Syncing empty localCards with storeCards (${storeCards.length} items)`);
+        setLocalCards(storeCards);
+      }
+
+      // Scroll to last tapped card when returning from reels-player
+      if (lastTappedCardIdRef.current && localCards.length > 0 && listRef.current) {
+        const idx = localCards.findIndex(c => c._id?.split('-loop-')[0] === lastTappedCardIdRef.current);
+        if (idx > 0) {
+          InteractionManager.runAfterInteractions(() => {
+            try {
+              listRef.current?.scrollToIndex({ index: idx, animated: false, viewPosition: 0.3 });
+            } catch (e) {
+              // Fallback: scroll to offset
+              listRef.current?.scrollToOffset?.({ offset: idx * 104, animated: false });
+            }
+          });
+        }
+      }
+    }, [playlistId, localCards, storeCards])
+  );
 
   const [undoVisible, setUndoVisible] = useState(false);
 
@@ -452,6 +477,8 @@ export default function PlaylistCardsScreen() {
   } | null>(null);
 
   const swipeableRefs = useRef<Map<string, any>>(new Map());
+  const listRef = useRef<any>(null);
+  const lastTappedCardIdRef = useRef<string | null>(null);
   const isLoadingMoreRef = useRef(false);
   const isOptimisticUpdateRef = useRef(false);
 
@@ -756,6 +783,7 @@ export default function PlaylistCardsScreen() {
       return;
     }
     setActivePlaylistId(playlistId);
+    lastTappedCardIdRef.current = startCardId?.split('-loop-')[0] || null;
     router.push({
       pathname: '/(protected)/reels-player',
       params: {
@@ -918,7 +946,7 @@ export default function PlaylistCardsScreen() {
           </AnimatedTouchableOpacity>
         </View>
 
-      {isLoading && localCards.length === 0 ? (
+      {(isLoading && localCards.length === 0) || (!isGuest && !isBootstrapReady && localCards.length === 0) || (!isGuest && localCards.length === 0 && storeCards && storeCards.length > 0) ? (
         <ActivityIndicator size="large" color={palette.accent} className="mt-12" />
       ) : isError && localCards.length === 0 ? (
         <View className="rounded-2xl p-6 mb-6 mx-4 border" style={{ backgroundColor: palette.surface, borderColor: palette.border }}>
@@ -936,6 +964,7 @@ export default function PlaylistCardsScreen() {
         </View>
       ) : (
         <DraggableFlatList
+          ref={listRef}
           data={localCards}
           extraData={localCards}
           onDragEnd={handleDragEnd}

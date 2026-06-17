@@ -581,7 +581,7 @@ export async function bulkHydrateAllCardContent(): Promise<Record<string, any>> 
   return profiler.profileAsync('Bulk Hydrate All Card Content', async () => {
     let retries = 0;
     const maxRetries = 2;
-    const BATCH_SIZE = 100; // Process 100 cards per batch to stay under frame budget
+    const BATCH_SIZE = 300; // Process 300 cards per batch — fewer round-trips for 547 cards (2 batches vs 6)
     
     while (retries < maxRetries) {
       try {
@@ -1680,9 +1680,9 @@ export async function saveUserMetricsToSQLite(
         metrics.totalScrolls,
         metrics.unsyncedSwipes,
         metrics.unsyncedScrolls,
-        metrics.streakCount !== undefined && metrics.streakCount !== null ? metrics.streakCount : null,
-        metrics.maxStreakCount !== undefined && metrics.maxStreakCount !== null ? metrics.maxStreakCount : null,
-        metrics.lastCompletedDate !== undefined && metrics.lastCompletedDate !== null ? metrics.lastCompletedDate : null,
+        metrics.streakCount ?? 0,
+        metrics.maxStreakCount ?? 0,
+        metrics.lastCompletedDate ?? null,
         Date.now(),
       ]
     );
