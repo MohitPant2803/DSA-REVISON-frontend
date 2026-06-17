@@ -618,18 +618,9 @@ export default function PersonalScreen() {
   const [isTransitionReady, setIsTransitionReady] = useState(true);
   const [isStreakOverlayOpen, setIsStreakOverlayOpen] = useState(false);
 
-  const scaleGlow = useSharedValue(1);
   const scaleFlame = useSharedValue(1);
 
   useEffect(() => {
-    scaleGlow.value = withRepeat(
-      withSequence(
-        withTiming(1.18, { duration: 1200 }),
-        withTiming(1.0, { duration: 1200 })
-      ),
-      -1,
-      true
-    );
     scaleFlame.value = withRepeat(
       withSequence(
         withTiming(1.06, { duration: 600 }),
@@ -639,10 +630,6 @@ export default function PersonalScreen() {
       true
     );
   }, []);
-
-  const flameGlowAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scaleGlow.value }],
-  }));
 
   const flamePulseAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scaleFlame.value }],
@@ -1024,15 +1011,12 @@ export default function PersonalScreen() {
             <TouchableOpacity
               onPress={() => setIsStreakOverlayOpen(true)}
               activeOpacity={0.8}
-              className="relative w-24 h-24 items-center justify-center"
+              className="relative w-24 h-24 items-center justify-center mr-8"
             >
-              {/* Pulsing circular glow */}
-              <Animated.View 
+              {/* Static circular glow */}
+              <View 
                 className="absolute w-20 h-20 rounded-full" 
-                style={[
-                  { backgroundColor: '#EA580C', opacity: 0.08 },
-                  flameGlowAnimatedStyle
-                ]} 
+                style={{ backgroundColor: '#EA580C', opacity: 0.08 }} 
               />
               
               {/* Pulsing Flame icon */}
