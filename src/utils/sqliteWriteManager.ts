@@ -15,9 +15,20 @@ import { getDatabase, sqliteLock, isSQLiteAvailable } from './sqliteDatabase';
 import { profiler } from './profiler';
 import { interactionScheduler } from './interactionScheduler';
 
+const mapDifficultyToSQLite = (diff: string | undefined | null): string => {
+  if (!diff) return 'Easy';
+  const lower = diff.toLowerCase().trim();
+  if (lower === 'easy') return 'Easy';
+  if (lower === 'medium') return 'Medium';
+  if (lower === 'hard') return 'Hard';
+  const cap = diff.charAt(0).toUpperCase() + diff.slice(1);
+  if (cap === 'Easy' || cap === 'Medium' || cap === 'Hard') return cap;
+  return 'Easy'; // Fallback to satisfy CHECK constraint
+};
+
 export interface WriteOperation {
   id: string;
-  type: 'cards' | 'folders' | 'playlists' | 'difficulty' | 'quotes' | 'deleted' | 'custom';
+  type: 'cards' | 'folders' | 'playlists' | 'difficulty' | 'quotes' | 'deleted' | 'custom' | 'bulk_resync';
   userId: string;
   data: any;
   timestamp: number;
@@ -45,6 +56,7 @@ export class SQLiteWriteManager {
   private abortSignal: AbortController | null = null;
   private coalesceMap: Map<string, WriteOperation> = new Map();
   private coalesceTimer: NodeJS.Timeout | null = null;
+  private pendingResolvers: Map<string, { resolve: () => void; reject: (err: any) => void }[]> = new Map();
   private metrics: WriteMetrics = {
     totalOps: 0,
     coalescedOps: 0,
@@ -73,53 +85,64 @@ export class SQLiteWriteManager {
   async enqueue(op: WriteOperation): Promise<void> {
     if (!isSQLiteAvailable()) {
       if (__DEV__) console.warn('[Write Manager] SQLite not available, skipping operation:', op.type);
-      return;
+      return Promise.resolve();
     }
 
     if (op.userId === 'guest-user') {
       if (__DEV__) {
         console.log(`[Write Manager] Guest session write operation discarded: ${op.type}`);
       }
-      return;
+      return Promise.resolve();
     }
 
-    const startTime = performance.now();
+    return new Promise<void>((resolve, reject) => {
+      const actualOp = { ...op };
+      const key = actualOp.dedupeKey || actualOp.id;
 
-    // Dedupe coalescing: if same key exists, replace it (last write wins)
-    if (op.dedupeKey) {
-      if (this.coalesceMap.has(op.dedupeKey)) {
-        this.metrics.coalescedOps++;
+      if (!this.pendingResolvers.has(key)) {
+        this.pendingResolvers.set(key, []);
       }
-      this.coalesceMap.set(op.dedupeKey, op);
+      this.pendingResolvers.get(key)!.push({ resolve, reject });
 
-      // Debounce actual queue insertion
-      if (!this.coalesceTimer) {
-        this.coalesceTimer = setTimeout(() => {
-          this.flushCoalesced();
-        }, this.COALESCE_WINDOW_MS);
+      // Dedupe coalescing: if same key exists, replace it (last write wins)
+      if (actualOp.dedupeKey) {
+        if (this.coalesceMap.has(actualOp.dedupeKey)) {
+          this.metrics.coalescedOps++;
+        }
+        this.coalesceMap.set(actualOp.dedupeKey, actualOp);
+
+        // Debounce actual queue insertion
+        if (!this.coalesceTimer) {
+          this.coalesceTimer = setTimeout(() => {
+            this.flushCoalesced();
+          }, this.COALESCE_WINDOW_MS);
+        }
+        return;
       }
-      return;
-    }
 
-    // No coalescing: add directly to queue
-    if (this.queue.length >= this.MAX_QUEUE_SIZE) {
-      console.warn('[Write Manager] Queue overflow detected. Dropping low-priority operation.');
-      if (op.priority === 'low') return;
-    }
-
-    this.queue.push(op);
-    this.metrics.totalOps++;
-
-    if (interactionScheduler.isInteracting()) {
-      if (__DEV__) {
-        console.log(`[Write Manager] Deferring write queue processing: ${op.type} (user is interacting)`);
+      // No coalescing: add directly to queue
+      if (this.queue.length >= this.MAX_QUEUE_SIZE) {
+        console.warn('[Write Manager] Queue overflow detected. Dropping low-priority operation.');
+        if (op.priority === 'low') {
+          resolve();
+          return;
+        }
       }
-      interactionScheduler.runWhenIdle(() => {
-        this.processQueue().catch(console.error);
-      });
-    } else {
-      await this.processQueue();
-    }
+
+      this.queue.push(actualOp);
+      this.metrics.totalOps++;
+
+      if (interactionScheduler.isInteracting()) {
+        if (__DEV__) {
+          console.log(`[Write Manager] Deferring write queue processing: ${actualOp.type} (user is interacting)`);
+        }
+        interactionScheduler.runWhenIdle(() => {
+          this.processQueue().catch(reject);
+        });
+      } else {
+        this.processQueue().catch(reject);
+      }
+    });
   }
 
   /**
@@ -160,7 +183,7 @@ export class SQLiteWriteManager {
     if (this.executing || this.queue.length === 0) return;
 
     this.executing = true;
-    const db = getDatabase();
+    let db = getDatabase();
     const release = await sqliteLock.acquire();
 
     try {
@@ -180,10 +203,13 @@ export class SQLiteWriteManager {
         this.metrics.queueWaitMs = Math.max(this.metrics.queueWaitMs, waitMs);
 
         const startTx = performance.now();
+        const key = op.dedupeKey || op.id;
+        const resolvers = this.pendingResolvers.get(key) || [];
+        this.pendingResolvers.delete(key);
 
         try {
           await db.withTransactionAsync(async () => {
-            await this.executeOperation(op);
+            await this.executeOperation(db, op);
           });
 
           const txMs = performance.now() - startTx;
@@ -193,10 +219,31 @@ export class SQLiteWriteManager {
           if (__DEV__ && txMs > 100) {
             console.log(`[Write Manager] Slow transaction detected: ${op.type} took ${txMs.toFixed(1)}ms`);
           }
+
+          resolvers.forEach(r => r.resolve());
         } catch (err: any) {
           this.metrics.errorCount++;
           console.error(`[Write Manager] Operation failed: ${op.type}`, err?.message);
-          // Don't re-throw; continue processing remaining ops
+          resolvers.forEach(r => r.reject(err));
+          
+          // Self-healing recovery: if database is locked or connection was released
+          const isReleasedOrLockError = err?.message && (
+            err.message.includes('released') ||
+            err.message.includes('NativeDatabase') ||
+            err.message.includes('NativeStatement') ||
+            err.message.includes('locked')
+          );
+          if (isReleasedOrLockError) {
+            console.warn('[Write Manager] Attempting SQLite connection recovery...');
+            try {
+              const { resetDatabaseInstance, initializeDatabaseAsync } = require('./sqliteDatabase');
+              await resetDatabaseInstance();
+              db = await initializeDatabaseAsync();
+              console.warn('[Write Manager] SQLite connection recovered successfully.');
+            } catch (recoveryErr: any) {
+              console.error('[Write Manager] Connection recovery failed:', recoveryErr.message);
+            }
+          }
         }
       }
     } finally {
@@ -208,8 +255,7 @@ export class SQLiteWriteManager {
   /**
    * Execute a single operation within transaction context.
    */
-  private async executeOperation(op: WriteOperation): Promise<void> {
-    const db = getDatabase();
+  private async executeOperation(db: any, op: WriteOperation): Promise<void> {
     const { type, data, userId } = op;
 
     switch (type) {
@@ -234,6 +280,68 @@ export class SQLiteWriteManager {
       case 'custom':
         if (typeof data.executor === 'function') {
           await data.executor(db);
+        }
+        break;
+      case 'bulk_resync':
+        this.executeCardsWrite(db, data.cards || [], userId);
+        this.executeFoldersWrite(db, data.folders || [], userId);
+        this.executePlaylistsWrite(db, data.playlists || [], userId);
+        
+        if (data.deletions && data.deletions.length > 0) {
+          const deleteFolderStmt = db.prepareSync('DELETE FROM folders WHERE id = ?;');
+          const deletePlaylistStmt = db.prepareSync('DELETE FROM playlists WHERE id = ?;');
+          const deleteCardMetaStmt = db.prepareSync('DELETE FROM cards_metadata WHERE id = ?;');
+          const deleteCardContStmt = db.prepareSync('DELETE FROM cards_content WHERE cardId = ?;');
+          const deleteCardProgStmt = db.prepareSync('DELETE FROM card_progress WHERE cardId = ? AND userId = ?;');
+          try {
+            for (const del of data.deletions) {
+              const cleanId = String(del.entityId).split('-loop-')[0];
+              if (del.entityType === 'folder') {
+                deleteFolderStmt.executeSync([cleanId]);
+              } else if (del.entityType === 'playlist') {
+                deletePlaylistStmt.executeSync([cleanId]);
+              } else if (del.entityType === 'card') {
+                deleteCardMetaStmt.executeSync([cleanId]);
+                deleteCardContStmt.executeSync([cleanId]);
+                deleteCardProgStmt.executeSync([cleanId, userId]);
+              }
+            }
+          } finally {
+            deleteFolderStmt.finalizeSync();
+            deletePlaylistStmt.finalizeSync();
+            deleteCardMetaStmt.finalizeSync();
+            deleteCardContStmt.finalizeSync();
+            deleteCardProgStmt.finalizeSync();
+          }
+        }
+
+        if (data.deletedEntities && data.deletedEntities.length > 0) {
+          const stmt = db.prepareSync(`
+            INSERT INTO deleted_entities (userId, entityId, entityType, deletedAt, revision)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(userId, entityId, entityType) DO UPDATE SET
+              deletedAt=excluded.deletedAt,
+              revision=max(deleted_entities.revision, excluded.revision);
+          `);
+          try {
+            for (const del of data.deletedEntities) {
+              const cleanId = String(del.entityId).split('-loop-')[0];
+              const deletedAtStr = del.deletedAt instanceof Date
+                ? del.deletedAt.toISOString()
+                : new Date(del.deletedAt || 0).toISOString();
+              stmt.executeSync([userId, cleanId, del.entityType, deletedAtStr, del.revision || 0]);
+            }
+          } finally {
+            stmt.finalizeSync();
+          }
+        }
+
+        if (data.cursor) {
+          await db.runAsync(
+            `INSERT INTO sync_cursors (userId, lastPulledRevision, updatedAt) VALUES (?, ?, ?)
+             ON CONFLICT(userId) DO UPDATE SET lastPulledRevision=excluded.lastPulledRevision, updatedAt=excluded.updatedAt;`,
+            [userId, data.cursor.revision, data.cursor.updatedAt]
+          );
         }
         break;
       default:
@@ -312,7 +420,7 @@ export class SQLiteWriteManager {
           c.title || '',
           c.topic || '',
           Array.isArray(c.tags) ? JSON.stringify(c.tags) : '[]',
-          c.difficulty || 'Easy',
+          mapDifficultyToSQLite(c.difficulty),
           c.folderId ? (typeof c.folderId === 'object' ? c.folderId._id || c.folderId.id : c.folderId) : '',
           c.createdBy ? (typeof c.createdBy === 'object' ? c.createdBy._id || c.createdBy.id : c.createdBy) : 'unknown',
           c.visibility || 'public',

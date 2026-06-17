@@ -37,17 +37,18 @@ interface FirstFeedTutorialProps {
   onDismiss: () => void;
   isSettingsOpen?: boolean;
   toggleSettings?: () => void;
+  onSavePress?: () => void;
 }
 
-export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSettings }: FirstFeedTutorialProps) {
+export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSettings, onSavePress }: FirstFeedTutorialProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, isAuthenticated } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   
-  const { setReelsTutorialStep, step: walkthroughStep, setStep: setWalkthroughStep } = useWalkthroughStore();
-  const [step, setStep] = useState(0); // 0: Swipe Slides, 1: Swipe Up, 2: Settings Cog, 3: GPT, 4: Reminders/Playlists
-  const [localStep, setLocalStep] = useState(0);
+  const { reelsTutorialStep, setReelsTutorialStep, step: walkthroughStep, setStep: setWalkthroughStep } = useWalkthroughStore();
+  const [step, setStep] = useState(0); // 0: Swipe Slides, 1: Swipe Up, 2: Settings Cog, 3: GPT, 4: Reminders/Playlists, 5: Difficulty buttons
+  const [localStep, setLocalStep] = useState(step);
   const [gptShot, setGptShot] = useState<1 | 2 | 3>(1);
   const [localGptShot, setLocalGptShot] = useState<1 | 2 | 3>(1);
 
@@ -68,14 +69,21 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
   const targetTextRef = useRef('');
   const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync sub-step state to walkthrough store
+  const panelOpacity = useSharedValue(1);
+  const panelAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: panelOpacity.value,
+  }));
+
+  // Sync sub-step state to walkthrough store instantly
   useEffect(() => {
     setLocalStep(step);
     setReelsTutorialStep(step);
+    panelOpacity.value = 1;
   }, [step]);
 
   useEffect(() => {
     setLocalGptShot(gptShot);
+    panelOpacity.value = 1;
   }, [gptShot]);
 
   // Mascot entrance control for Step 0 and 1
@@ -132,7 +140,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
     } else if (localStep === 3) {
       setReewState(localGptShot === 1 ? 'grad_reew' : (localGptShot === 2 ? 'grad_sweat' : 'grad_reew'));
       setRunAnimationFinished(true);
-    } else if (localStep === 4) {
+    } else if (localStep === 4 || localStep === 5) {
       setReewState('dj_reew');
       setRunAnimationFinished(true);
     } else {
@@ -171,18 +179,67 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       }
     } else if (localStep === 4) {
       targetText = "I create custom learning playlists so I can tune in and study my selected topics anytime!";
+    } else if (localStep === 5) {
+      targetText = "On the right, I have the Easy, Medium, Hard, and Skipped buttons, with the 'Save to Playlist' button at the bottom.";
     }
     targetTextRef.current = targetText;
     setTypedText(targetText);
     setTypingDone(true);
   }, [localStep, localGptShot, runAnimationFinished]);
 
-  // Settings Cog observer to advance Step 2
+  // Synchronize store's reelsTutorialStep to local step (e.g. when settings menu is closed)
   useEffect(() => {
-    if (localStep === 2 && isSettingsOpen) {
+    if (reelsTutorialStep !== step) {
+      setStep(reelsTutorialStep);
+    }
+  }, [reelsTutorialStep]);
+
+  const prevSettingsOpen = useRef(isSettingsOpen);
+
+  useEffect(() => {
+    if (step === 2 && prevSettingsOpen.current && !isSettingsOpen) {
       setStep(3);
     }
-  }, [isSettingsOpen, localStep]);
+    prevSettingsOpen.current = isSettingsOpen;
+  }, [isSettingsOpen, step]);
+
+
+  const handleGPTClick = async () => {
+    lightHaptic();
+    hapticFeedback.selection();
+
+    try {
+      const prompt = `Explain this concept to me. Assume I am a smart student revising this topic for upcoming interviews. Keep the explanation content-heavy and focus on preparing me for potential interview questions. Choose the most optimal way to explain this specific topic clearly. Do not structure the output into slides, JSON schemas, or break it into numerous section headings—just provide a cohesive, deep, and direct technical explanation of the intuition, core concepts, potential traps, and details.
+
+Here is the concept metadata:
+Title: Reverse Linked List
+Topic: LINKED LISTS
+Difficulty: Easy
+Complexity: O(N) Time • O(1) Space
+Explanation/Intuition: Iterate through the list shifting adjacent node links backwards using a temporary pointer.
+Details/Code:
+ListNode* prev = nullptr;
+while (curr) {
+  ListNode* next = curr->next;
+  curr->next = prev;
+  prev = curr;
+  curr = next;
+}`;
+
+      const Clipboard = require('expo-clipboard');
+      await Clipboard.setStringAsync(prompt).catch((err: any) => console.warn('Clipboard failed:', err));
+
+      const Linking = require('react-native').Linking;
+      const appLinkUrl = 'https://chatgpt.com/?q=' + encodeURIComponent(prompt);
+      await Linking.openURL(appLinkUrl).catch((e: any) => {
+        Linking.openURL('https://chatgpt.com/').catch((err: any) => console.error(err));
+      });
+    } catch (e) {
+      console.warn('GPT trigger failed:', e);
+    }
+
+    setStep(4);
+  };
 
 
 
@@ -201,7 +258,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
 
   const handleNextStep = async () => {
     hapticFeedback.selection();
-    if (step < 4) {
+    if (step < 5) {
       setStep(step + 1);
     } else {
       // Save tutorial complete state locally
@@ -254,7 +311,8 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       } else {
         handleNextStep();
       }
-    } else if (localStep === 4) {
+    } else if (localStep === 4 || localStep === 5) {
+      if (completeTyping()) return;
       handleNextStep();
     }
   };
@@ -365,6 +423,15 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
             )}
           </View>
         );
+      case 5:
+        return (
+          <View style={styles.contentWrapper}>
+            <Text style={styles.desc}>{typedText}</Text>
+            {typingDone && (
+              <Text style={styles.tapHelperText}>Tap anywhere to continue</Text>
+            )}
+          </View>
+        );
       default:
         return null;
     }
@@ -387,7 +454,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       )}
 
       {/* 3. Custom touch block panels for Step 2 Settings Cog to isolate the settings icon touch */}
-      {localStep === 2 && (
+      {localStep === 2 && !isSettingsOpen && (
         <>
           {/* Top Panel */}
           <Pressable
@@ -445,7 +512,7 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       )}
 
       {/* 4. Settings Cog pressable overlay target for Step 2 */}
-      {localStep === 2 && (
+      {localStep === 2 && !isSettingsOpen && (
         <Pressable
           onPress={() => {
             lightHaptic();
@@ -467,43 +534,46 @@ export function FirstFeedTutorial({ onDismiss, isSettingsOpen = false, toggleSet
       )}
 
       {/* 5. Main Dialogue Card Container */}
-      <Pressable 
-        onPress={handleBackdropPress}
+      <Animated.View
+        pointerEvents={isSettingsOpen ? "none" : "auto"}
         style={[
           styles.cardPortal,
           localStep === 2
             ? { top: insets.top + 116, position: 'absolute' } 
-            : localStep === 4 
+            : (localStep === 4 || localStep === 5)
               ? { bottom: insets.bottom + 145, left: 16, position: 'absolute', width: width - 105 } 
-              : {}
+              : {},
+          panelAnimatedStyle
         ]}
       >
-        <GlassPanel style={styles.glassCard} intensity={30} tint="light" borderColor="#EADEC9" borderRadius={32}>
-          <View style={styles.cardContentRow}>
-            {/* Left Column: Mascot Container */}
-            <View style={styles.mascotContainer}>
-              {localStep === 0 && (
-                <Animated.View style={reewSwipeStyle}>
+        <Pressable onPress={handleBackdropPress} style={{ width: '100%' }}>
+          <GlassPanel style={styles.glassCard} intensity={30} tint="light" borderColor="#EADEC9" borderRadius={32}>
+            <View style={styles.cardContentRow}>
+              {/* Left Column: Mascot Container */}
+              <View style={styles.mascotContainer}>
+                {localStep === 0 && (
+                  <Animated.View style={reewSwipeStyle}>
+                    <ReeWCharacter state={reewState} size={72} disableIdleCycle={true} />
+                  </Animated.View>
+                )}
+                {localStep === 1 && (
+                  <Animated.View style={[reewFlyStyle, { position: 'absolute', bottom: 0 }]}>
+                    <ReeWCharacter state={reewState} size={72} disableIdleCycle={true} />
+                  </Animated.View>
+                )}
+                {localStep >= 2 && (
                   <ReeWCharacter state={reewState} size={72} disableIdleCycle={true} />
-                </Animated.View>
-              )}
-              {localStep === 1 && (
-                <Animated.View style={[reewFlyStyle, { position: 'absolute', bottom: 0 }]}>
-                  <ReeWCharacter state={reewState} size={72} disableIdleCycle={true} />
-                </Animated.View>
-              )}
-              {localStep >= 2 && (
-                <ReeWCharacter state={reewState} size={72} disableIdleCycle={true} />
-              )}
-            </View>
+                )}
+              </View>
 
-            {/* Right Column: Dialogue and Instructions */}
-            <View style={{ flex: 1 }}>
-              {renderStepContent()}
+              {/* Right Column: Dialogue and Instructions */}
+              <View style={{ flex: 1 }}>
+                {renderStepContent()}
+              </View>
             </View>
-          </View>
-        </GlassPanel>
-      </Pressable>
+          </GlassPanel>
+        </Pressable>
+      </Animated.View>
 
       {/* 6. Dynamic Skip Tutorial / Sign In Button for Feed Overlay */}
       {isAuthenticated && (

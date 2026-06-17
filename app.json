@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.mohit.dsareels",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon213.png",
         "backgroundColor": "#FAF9F7"

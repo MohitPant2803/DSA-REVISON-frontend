@@ -84,6 +84,8 @@ const isTokenExpired = (token: string | null) => {
 
 // Removed speculative HTTP ping checkApiOnline and replaced with NetInfo cache checks
 
+import { useThemePalette } from "@/hooks/useThemePalette";
+
 function SyncEngineMount() {
   useSyncEngine();
   return null;
@@ -97,11 +99,14 @@ function ToastWrapper() {
   } catch (e) {
     return <Toast />;
   }
-}export default function RootLayout() {
+}
+
+export default function RootLayout() {
   const { isAuthenticated, isLoading, restoreSession, user, token, logout, isLoggingOut } = useAuthStore();
   const { isOnboarded, isGeneratingSystem } = useOnboardingStore();
   const segments = useSegments();
   const router = useRouter();
+  const palette = useThemePalette();
 
   // Retrieve Hydration Gate, Bootstrap status, and Sync indicators
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
@@ -110,10 +115,11 @@ function ToastWrapper() {
   const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
   const syncProgressPercentage = usePlaylistStateStore((s) => s.syncProgressPercentage);
   const syncProgressStatus = usePlaylistStateStore((s) => s.syncProgressStatus);
+  const isFirstTimeSyncInProgress = usePlaylistStateStore((s) => s.isFirstTimeSyncInProgress);
   const isGuest = user?.id === 'guest-user';
 
   // Strict store ready check: ensure local SQLite databases are fully loaded into Zustand memory partitions before allowing access
-  const isStoreReady = hasHydrated && (bootstrapStatus === 'completed' || bootstrapStatus === 'failed');
+  const isStoreReady = isGuest || (hasHydrated && (bootstrapStatus === 'completed' || bootstrapStatus === 'failed'));
 
   // Strict initial sync check: disabled to allow instant zero-delay boots
   const isSyncGated = false;
@@ -124,6 +130,12 @@ function ToastWrapper() {
 
     (async () => {
       try {
+        // Skip entire SQLite pipeline for guest users
+        const authState = useAuthStore.getState();
+        if (authState.user?.id === 'guest-user') {
+          console.log('[RootLayout] Guest mode: Skipping SQLite bootstrap pipeline.');
+          return;
+        }
         const { initializeDatabase } = require('@/utils/appBootstrapGate');
         const { bootstrapHydrateFromSQLite } = require('@/store/usePlaylistStateStore');
 
@@ -132,32 +144,31 @@ function ToastWrapper() {
 
         console.log('[RootLayout] Phase 2: Restoring user session credentials...');
         await restoreSession();
+
+        // Explicit Phase 3 hydration safety guard to resolve boot race conditions
+        const latestAuthState = useAuthStore.getState();
+        if (latestAuthState.isAuthenticated && latestAuthState.user) {
+          const storeState = usePlaylistStateStore.getState();
+          if (storeState.bootstrapStatus === 'not_started') {
+            console.log('[RootLayout] Phase 3: Explicitly hydrating Zustand store from SQLite...');
+            await bootstrapHydrateFromSQLite(latestAuthState.user.id);
+          }
+        }
       } catch (err: any) {
         console.error('[RootLayout] Critical: Serialized startup pipeline failed:', err.message);
         usePlaylistStateStore.setState({ bootstrapStatus: 'failed' });
+        useAuthStore.setState({ isLoading: false, isAuthReady: true });
       }
     })();
   }, []);
 
   const isOnboardingHydrated = useOnboardingStore((s) => s.hasHydrated);
 
-  // 1a. Core Startup Synchronization progress gatekeeper (Trigger background silent sync on startup)
+  // 1a. Core Startup Reels Queue pre-warming gatekeeper
   useEffect(() => {
-    if (isLoading || !isStoreReady || isGeneratingSystem) return;
+    if (isLoading || !isStoreReady || isGeneratingSystem || isGuest) return;
 
     InteractionManager.runAfterInteractions(async () => {
-      const isConnected = await isNetworkConnected();
-      const needsSync = isAuthenticated && !isGuest && token;
-
-      if (isConnected && needsSync) {
-        if (__DEV__) console.log('[Startup Sync] Triggering silent background sync after interactions...');
-        try {
-          await syncManager.sync();
-        } catch (err: any) {
-          console.log('[Startup Sync Error] Silent sync failed:', err.message);
-        }
-      }
-
       // Task 4: Pre-warm reels feed queue silently
       try {
         const reelsFeedService = require('@/services/reelsFeedService');
@@ -166,8 +177,6 @@ function ToastWrapper() {
             if (slice && slice.cardsSlice) {
               const store = usePlaylistStateStore.getState();
               store.hydratePlaylistCards('all', slice.cardsSlice);
-              
-
             }
           })
           .catch(() => {});
@@ -175,7 +184,7 @@ function ToastWrapper() {
         if (__DEV__) console.log('[Startup Queue Pre-warm Error]', err);
       }
     });
-  }, [isLoading, isStoreReady, isGeneratingSystem, isAuthenticated, isGuest, token, lastSyncedRevision]);
+  }, [isLoading, isStoreReady, isGeneratingSystem]);
 
   // 1b. Intercept Deep Links on startup and store in targetDeepLink if not authenticated
   const incomingUrl = Linking.useURL();
@@ -194,7 +203,7 @@ function ToastWrapper() {
     const subscription = AppState.addEventListener("change", async (nextAppState) => {
       if (nextAppState === "background" || nextAppState === "inactive") {
         const userId = usePlaylistStateStore.getState().userId || "guest-user";
-        if (userId) {
+        if (userId && userId !== 'guest-user') {
           if (__DEV__) {
             console.log("[Root AppState] App suspending/backgrounded. Flushing all Zustand states to SQLite...");
           }
@@ -283,12 +292,12 @@ function ToastWrapper() {
     }
 
     // 2. If logged in and on an auth screen, redirect to protected tabs
-    if (hasAccess && inAuthGroup) {
+    if (hasAccess && inAuthGroup && !isFirstTimeSyncInProgress) {
       if (!inOnboarding) {
         router.replace("/(protected)/(tabs)/learn");
       }
     }
-  }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, isGeneratingSystem, segments, user?.id, isOnboarded]);
+  }, [isAuthenticated, isLoading, isStoreReady, isSyncGated, isGeneratingSystem, segments, user?.id, isOnboarded, isFirstTimeSyncInProgress]);
 
   // 4. Silent Background token expiration checking
   useEffect(() => {
@@ -347,31 +356,31 @@ function ToastWrapper() {
   // Show logout overlay first — before any other gates
   if (isLoggingOut) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#FAF9F7', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={{ marginTop: 20, color: '#0B1327', fontSize: 18, fontWeight: '900', letterSpacing: -0.5 }}>
+      <View style={{ flex: 1, backgroundColor: palette.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={palette.accent} />
+        <Text style={{ marginTop: 20, color: palette.textPrimary, fontSize: 18, fontWeight: '600', letterSpacing: -0.5 }}>
           Clearing local data...
         </Text>
-        <Text style={{ marginTop: 8, color: '#7F8A9E', fontSize: 13, fontWeight: '600' }}>
+        <Text style={{ marginTop: 8, color: palette.textSecondary, fontSize: 13, fontWeight: '500' }}>
           Securing your revision desk
         </Text>
       </View>
     );
   }
 
-  if (!isStoreReady && (isLoading || isAuthenticated || isGuest)) {
+  if (!isStoreReady && (isLoading || isAuthenticated)) {
     return <AppSkeleton />;
   }
   // Initial sync gate overlay removed for instant, zero-delay booting
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FAF6F0' }}>
-      <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{ flex: 1, backgroundColor: '#FAF6F0' }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.background }}>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{ flex: 1, backgroundColor: palette.background }}>
         <QueryProvider>
           <SyncEngineMount />
-          <StatusBar style="dark" />
-          <View style={{ flex: 1, position: 'relative', backgroundColor: '#FAF6F0' }}>
-            <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#FAF6F0' } }}>
+          <StatusBar style={palette.isDark ? "light" : "dark"} />
+          <View style={{ flex: 1, position: 'relative', backgroundColor: palette.background }}>
+            <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: palette.background } }}>
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(protected)" options={{ animation: 'fade' }} />
             </Stack>

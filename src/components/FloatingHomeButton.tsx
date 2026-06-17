@@ -3,11 +3,14 @@ import { StyleSheet, Pressable, View, Platform } from 'react-native';
 import { Home } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 export function FloatingHomeButton() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const palette = useThemePalette();
 
   // Show button only on folder detail screens
   const isVisible =
@@ -36,17 +39,18 @@ export function FloatingHomeButton() {
         },
       ]}
     >
-      <View style={styles.outerRing}>
+      <View style={[styles.outerRing, { backgroundColor: addAlpha(palette.accent, 0.12), borderColor: palette.accent }]}>
         <Pressable
           onPress={handlePress}
           style={({ pressed }) => [
             styles.button,
-            pressed && styles.buttonPressed,
-            Platform.OS === 'ios' && styles.iosShadow,
+            { backgroundColor: palette.surface },
+            pressed && { backgroundColor: palette.inputBg },
+            Platform.OS === 'ios' && [styles.iosShadow, { shadowColor: palette.shadow }],
             Platform.OS === 'android' && styles.androidShadow,
           ]}
         >
-          <Home color="#0066FF" size={20} strokeWidth={2.3} />
+          <Home color={palette.accent} size={20} strokeWidth={2.3} />
         </Pressable>
       </View>
     </View>
@@ -66,9 +70,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#DBEAFE',   // light blue fill
     borderWidth: 2.5,
-    borderColor: '#1E3A8A',       // dark blue boundary
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -76,16 +78,10 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#EFF6FF',   // slightly lighter inner circle
     justifyContent: 'center',
     alignItems: 'center',
   },
-  buttonPressed: {
-    backgroundColor: '#BFDBFE',
-    opacity: 0.95,
-  },
   iosShadow: {
-    shadowColor: '#1E3A8A',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.25,
     shadowRadius: 10,

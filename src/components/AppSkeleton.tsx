@@ -1,15 +1,8 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
+import { useThemePalette } from '@/hooks/useThemePalette';
 
 export function AppSkeleton() {
-  // Clean white screen — no skeleton shapes or pulsing animations.
-  // Matches the splash screen and app background for a seamless startup.
-  return <View style={styles.container} />;
+  const palette = useThemePalette();
+  return <View style={{ flex: 1, backgroundColor: palette.background }} />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAF6F0',
-  },
-});

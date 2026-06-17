@@ -30,6 +30,7 @@ import { FlashList } from '@shopify/flash-list';
 import { useShallow } from 'zustand/react/shallow';
 import { ThemeBackground } from '@/components/ThemeBackground';
 import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 const FlashListElement = FlashList as any;
 
@@ -47,15 +48,27 @@ const FolderCardListItem = React.memo(({ card, canEdit, startRevising, handleCar
   const difficultyState = useCardDifficulty(card._id);
   const palette = useThemePalette();
 
+  const handlePress = useCallback(() => {
+    startRevising(card._id);
+  }, [startRevising, card._id]);
+
+  const handleLongPress = useCallback(() => {
+    handleCardActions(card);
+  }, [handleCardActions, card]);
+
+  const handleEdit = useCallback(() => {
+    handleCardActions(card);
+  }, [handleCardActions, card]);
+
   return (
     <SpringPressable
-      onPress={() => startRevising(card._id)}
-      onLongPress={() => handleCardActions(card)}
+      onPress={handlePress}
+      onLongPress={handleLongPress}
       className="rounded-[30px] p-5 mb-3.5 border"
       style={{
         backgroundColor: palette.surface,
         borderColor: palette.border,
-        shadowColor: '#0F172A',
+        shadowColor: palette.shadow,
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: palette.isDark ? 0.2 : 0.03,
         shadowRadius: 18,
@@ -73,10 +86,10 @@ const FolderCardListItem = React.memo(({ card, canEdit, startRevising, handleCar
               className="text-xs font-semibold"
               style={{
                 color: card.difficulty === 'Easy'
-                  ? '#10B981'
+                  ? palette.success
                   : card.difficulty === 'Medium'
-                  ? '#D97706'
-                  : '#EF4444'
+                  ? palette.warning
+                  : palette.error
               }}
             >
               {card.difficulty}
@@ -85,7 +98,7 @@ const FolderCardListItem = React.memo(({ card, canEdit, startRevising, handleCar
               <Text className="text-xs font-mono" style={{ color: palette.textSecondary }}>{card.complexity}</Text>
             )}
             {isFavorite && (
-              <Text className="text-rose-500 text-xs font-bold">★ Favorite</Text>
+              <Text className="text-xs font-bold" style={{ color: palette.error }}>★ Favorite</Text>
             )}
             {difficultyState && (
               <Text className="text-xs font-semibold capitalize" style={{ color: palette.textSecondary }}>• {difficultyState}</Text>
@@ -94,7 +107,7 @@ const FolderCardListItem = React.memo(({ card, canEdit, startRevising, handleCar
         </View>
         {canEdit && (
           <TouchableOpacity 
-            onPress={() => handleCardActions(card)} 
+            onPress={handleEdit} 
             className="p-2 rounded-full border"
             style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
           >
@@ -105,6 +118,7 @@ const FolderCardListItem = React.memo(({ card, canEdit, startRevising, handleCar
     </SpringPressable>
   );
 }, (prevProps, nextProps) => {
+  // Return true if props are equal (SKIP render), false to re-render
   return (
     prevProps.canEdit === nextProps.canEdit &&
     prevProps.card._id === nextProps.card._id &&
@@ -128,21 +142,25 @@ export default function FolderCardsScreen() {
   const { canManageContent, role } = useRole();
   const { setActiveFolderId } = useBookmarkStore();
 
-  const localFolder = useMemo(() => {
-    const state = usePlaylistStateStore.getState();
-    return state.foldersById[folderId];
-  }, [folderId]);
+  useFocusEffect(
+    useCallback(() => {
+      if (folderId) {
+        usePlaylistStateStore.getState().hydrateFolderCardsOnDemand(folderId).catch(() => {});
+      }
+    }, [folderId])
+  );
+
+  const localFolder = usePlaylistStateStore(
+    useCallback((state) => state.foldersById[folderId], [folderId])
+  );
 
   const displayFolder = localFolder;
 
   const handleBack = useCallback(() => {
-    // Fast path: use router.back() which just pops the stack
-    // This is 2-3x faster than router.replace() which triggers a full mount
     if (router.canGoBack()) {
       router.back();
       return true;
     }
-    // Fallback: if somehow at root, navigate to learn tab
     router.replace('/(protected)/(tabs)/learn');
     return true;
   }, [router]);
@@ -151,7 +169,6 @@ export default function FolderCardsScreen() {
 
   useFocusEffect(useCallback(() => {
     interactionScheduler.registerInteraction();
-    // No React Query fetch - cards already in memory from Zustand startup hydration
   }, []));
 
   const deleteCard = useDeleteRevisionCard();
@@ -176,11 +193,9 @@ export default function FolderCardsScreen() {
   const isStoreLoading = bootstrapStatus === 'not_started' || bootstrapStatus === 'metadata_loading';
 
   const hasCardsToRevise = subfolders.length === 0 && cards.length > 0;
-  // No more React Query refetching - removed isAnyRefetching
 
   const handleRefresh = async () => {
     try {
-      // Silent background sync via transition scheduler - non-blocking
       transitionScheduler.schedule({
         name: 'folder-sync',
         fn: () => usePlaylistStateStore.getState().triggerSync(),
@@ -190,8 +205,10 @@ export default function FolderCardsScreen() {
   };
 
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const resetFiltersToAll = () => setActiveFilters([]);
-  const toggleFilter = (filter: string) => {
+  
+  const resetFiltersToAll = useCallback(() => setActiveFilters([]), []);
+  
+  const toggleFilter = useCallback((filter: string) => {
     setActiveFilters((prev) => {
       if (prev.includes(filter)) {
         return prev.filter((f) => f !== filter);
@@ -199,7 +216,7 @@ export default function FolderCardsScreen() {
         return [...prev, filter];
       }
     });
-  };
+  }, []);
 
   const filteredCards = useMemo(() => {
     if (activeFilters.length === 0) return cards;
@@ -218,7 +235,7 @@ export default function FolderCardsScreen() {
     });
   }, [cards, activeFilters]);
 
-  const startRevising = (startCardId?: string) => {
+  const startRevising = useCallback((startCardId?: string) => {
     if (!folderId) return;
     setActiveFolderId(folderId);
     router.push({
@@ -229,9 +246,9 @@ export default function FolderCardsScreen() {
         userDifficultyStates: activeFilters.join(','),
       },
     });
-  };
+  }, [folderId, setActiveFolderId, router, activeFilters]);
 
-  const handleCardActions = (card: IPopulatedRevisionCard) => {
+  const handleCardActions = useCallback((card: IPopulatedRevisionCard) => {
     if (!user?.id || !canModifyItem(role, user.id, card.createdBy)) return;
     Alert.alert(card.title, undefined, [
       {
@@ -254,7 +271,7 @@ export default function FolderCardsScreen() {
       },
       { text: 'Cancel', style: 'cancel' },
     ]);
-  };
+  }, [user?.id, role, folderId, router, deleteCard]);
 
   if (!folderId) {
     return (
@@ -272,7 +289,7 @@ export default function FolderCardsScreen() {
             className="px-6 py-3 rounded-full"
             style={{ backgroundColor: palette.accent }}
           >
-            <Text className="text-white font-bold">Go back</Text>
+            <Text style={{ color: palette.isDark ? palette.textPrimary : palette.surface, fontWeight: 'bold' }}>Go back</Text>
           </TouchableOpacity>
         </SafeAreaView>
       </ThemeBackground>
@@ -302,8 +319,8 @@ export default function FolderCardsScreen() {
               className="flex-row items-center px-4 py-2.5 rounded-full"
               style={{ backgroundColor: palette.accent }}
             >
-              <PlayCircle color="#fff" size={18} />
-              <Text className="text-white font-semibold text-sm ml-1.5">Revise</Text>
+              <PlayCircle color={palette.isDark ? palette.textPrimary : palette.surface} size={18} />
+              <Text className="font-semibold text-sm ml-1.5" style={{ color: palette.isDark ? palette.textPrimary : palette.surface }}>Revise</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -389,13 +406,13 @@ export default function FolderCardsScreen() {
                         activeOpacity={0.75}
                         className="flex-1 py-3.5 rounded-2xl items-center border"
                         style={{
-                          backgroundColor: activeFilters.includes('easy') ? (palette.isDark ? 'rgba(16, 185, 129, 0.15)' : '#ECFDF5') : palette.inputBg,
-                          borderColor: activeFilters.includes('easy') ? '#A7F3D0' : palette.border,
+                          backgroundColor: activeFilters.includes('easy') ? addAlpha(palette.success, 0.08) : palette.inputBg,
+                          borderColor: activeFilters.includes('easy') ? addAlpha(palette.success, 0.2) : palette.border,
                         }}
                       >
                         <Text 
                           className="text-xs font-bold" 
-                          style={{ color: activeFilters.includes('easy') ? '#10B981' : palette.textSecondary }}
+                          style={{ color: activeFilters.includes('easy') ? palette.success : palette.textSecondary }}
                         >
                           Easy ({easyCount})
                         </Text>
@@ -406,13 +423,13 @@ export default function FolderCardsScreen() {
                         activeOpacity={0.75}
                         className="flex-1 py-3.5 rounded-2xl items-center border"
                         style={{
-                          backgroundColor: activeFilters.includes('medium') ? (palette.isDark ? 'rgba(245, 158, 11, 0.15)' : '#FFFBEB') : palette.inputBg,
-                          borderColor: activeFilters.includes('medium') ? '#FDE68A' : palette.border,
+                          backgroundColor: activeFilters.includes('medium') ? addAlpha(palette.warning, 0.08) : palette.inputBg,
+                          borderColor: activeFilters.includes('medium') ? addAlpha(palette.warning, 0.2) : palette.border,
                         }}
                       >
                         <Text 
                           className="text-xs font-bold" 
-                          style={{ color: activeFilters.includes('medium') ? '#D97706' : palette.textSecondary }}
+                          style={{ color: activeFilters.includes('medium') ? palette.warning : palette.textSecondary }}
                         >
                           Medium ({mediumCount})
                         </Text>
@@ -423,13 +440,13 @@ export default function FolderCardsScreen() {
                         activeOpacity={0.75}
                         className="flex-1 py-3.5 rounded-2xl items-center border"
                         style={{
-                          backgroundColor: activeFilters.includes('hard') ? (palette.isDark ? 'rgba(239, 68, 68, 0.15)' : '#FFF5F5') : palette.inputBg,
-                          borderColor: activeFilters.includes('hard') ? '#FED7D7' : palette.border,
+                          backgroundColor: activeFilters.includes('hard') ? addAlpha(palette.error, 0.08) : palette.inputBg,
+                          borderColor: activeFilters.includes('hard') ? addAlpha(palette.error, 0.2) : palette.border,
                         }}
                       >
                         <Text 
                           className="text-xs font-bold" 
-                          style={{ color: activeFilters.includes('hard') ? '#EF4444' : palette.textSecondary }}
+                          style={{ color: activeFilters.includes('hard') ? palette.error : palette.textSecondary }}
                         >
                           Hard ({hardCount})
                         </Text>
@@ -514,7 +531,7 @@ export default function FolderCardsScreen() {
                       className="px-6 py-2.5 rounded-full"
                       style={{ backgroundColor: palette.accent }}
                     >
-                      <Text className="text-white font-semibold text-xs">Show All Cards</Text>
+                      <Text style={{ color: palette.isDark ? palette.textPrimary : palette.surface, fontWeight: '600', fontSize: 12 }}>Show All Cards</Text>
                     </TouchableOpacity>
                   </View>
                 )

@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Crypto from 'expo-crypto';
 import { syncTelemetry } from './syncTelemetry';
 import { profiler } from './profiler';
 
@@ -60,6 +61,15 @@ export async function initializeDatabaseAsync(): Promise<SQLite.SQLiteDatabase> 
       await instance.execAsync('PRAGMA journal_mode = WAL;');
       await instance.execAsync('PRAGMA synchronous = NORMAL;');
       await instance.execAsync('PRAGMA foreign_keys = ON;');
+      await instance.execAsync('PRAGMA busy_timeout = 5000;');
+
+      // 3. Abort any dangling transaction from a previous JS context reload/session
+      try {
+        await instance.execAsync('ROLLBACK;');
+        console.log('[SQLite Database] Aborted a dangling transaction from previous session.');
+      } catch (e) {
+        // No active transaction, normal case
+      }
 
       dbInstance = instance;
       console.log('[SQLite Database] Async relational connection established successfully in WAL + NORMAL Sync mode.');
@@ -293,6 +303,14 @@ export async function setupDatabaseTables(): Promise<void> {
         try { await db.execAsync('ALTER TABLE folders ADD COLUMN isDeleted INTEGER DEFAULT 0;'); } catch {}
         try { await db.execAsync('ALTER TABLE folders ADD COLUMN deletedAt TEXT;'); } catch {}
 
+        // Pinned Folders local-only table
+        await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS pinned_folders (
+            folderId TEXT PRIMARY KEY NOT NULL,
+            userId TEXT NOT NULL DEFAULT ''
+          );
+        `);
+
         // E: Playlists Table
         await db.execAsync(`
           CREATE TABLE IF NOT EXISTS playlists (
@@ -413,7 +431,7 @@ export async function setupDatabaseTables(): Promise<void> {
         // Self-healing migrations for offline_queue
         try { await db.execAsync('ALTER TABLE offline_queue ADD COLUMN userId TEXT NOT NULL DEFAULT "";'); } catch {}
 
-        // G2: User Metrics Table (for swipes and scrolls)
+        // G2: User Metrics Table (for swipes and scrolls, streak and personal best)
         await db.execAsync(`
           CREATE TABLE IF NOT EXISTS user_metrics (
             userId TEXT PRIMARY KEY NOT NULL,
@@ -421,9 +439,17 @@ export async function setupDatabaseTables(): Promise<void> {
             totalScrolls INTEGER NOT NULL DEFAULT 0,
             unsyncedSwipes INTEGER NOT NULL DEFAULT 0,
             unsyncedScrolls INTEGER NOT NULL DEFAULT 0,
+            streakCount INTEGER NOT NULL DEFAULT 0,
+            maxStreakCount INTEGER NOT NULL DEFAULT 0,
+            lastCompletedDate TEXT,
             updatedAt INTEGER NOT NULL
           );
         `);
+
+        // Self-healing migrations for user_metrics
+        try { await db.execAsync('ALTER TABLE user_metrics ADD COLUMN streakCount INTEGER NOT NULL DEFAULT 0;'); } catch {}
+        try { await db.execAsync('ALTER TABLE user_metrics ADD COLUMN maxStreakCount INTEGER NOT NULL DEFAULT 0;'); } catch {}
+        try { await db.execAsync('ALTER TABLE user_metrics ADD COLUMN lastCompletedDate TEXT;'); } catch {}
 
         // H: Sync Transactions Table
         await db.execAsync(`
@@ -600,6 +626,7 @@ export async function setupDatabaseTables(): Promise<void> {
 
       console.log('[SQLite Database] Schema DDL, tables, and high-performance indexes created successfully asynchronously.');
       await runStartupRecoveryJournal();
+      await migrateLegacyTempIds();
     } catch (err: any) {
       console.error('[SQLite Database Setup Error] Tables DDL transaction failed:', err.message);
       syncTelemetry.log('failure', `Database boot tables setup crashed: ${err.message}`);
@@ -652,3 +679,433 @@ export async function runStartupRecoveryJournal(): Promise<void> {
     console.error('[SQLite Recovery Journal Error] Startup recovery run crashed:', err.message);
   }
 }
+
+const MIGRATION_NAMESPACE = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+
+function parseUUID(uuidStr: string): Uint8Array {
+  const hex = uuidStr.replace(/-/g, '');
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+function stringToUtf8Bytes(str: string): Uint8Array {
+  const utf8 = [];
+  for (let i = 0; i < str.length; i++) {
+    let charcode = str.charCodeAt(i);
+    if (charcode < 0x80) utf8.push(charcode);
+    else if (charcode < 0x800) {
+      utf8.push(0xc0 | (charcode >> 6), 0x80 | (charcode & 0x3f));
+    } else if (charcode < 0xd800 || charcode >= 0xe000) {
+      utf8.push(0xe0 | (charcode >> 12), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
+    } else {
+      i++;
+      charcode = 0x10000 + (((charcode & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
+      utf8.push(0xf0 | (charcode >> 18), 0x80 | ((charcode >> 12) & 0x3f), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
+    }
+  }
+  return new Uint8Array(utf8);
+}
+
+function sha1(bytes: Uint8Array): Uint8Array {
+  const len = bytes.length;
+  const wordCount = ((len + 8) >> 6) + 1;
+  const words = new Int32Array(wordCount * 16);
+  for (let i = 0; i < len; i++) {
+    words[i >> 2] |= bytes[i] << (24 - (i & 3) * 8);
+  }
+  words[len >> 2] |= 0x80 << (24 - (len & 3) * 8);
+  const bitLen = len * 8;
+  words[words.length - 1] = bitLen & 0xffffffff;
+  words[words.length - 2] = (bitLen / 0x100000000) & 0xffffffff;
+  
+  let h0 = 1732584193;
+  let h1 = -271733879;
+  let h2 = -1732584194;
+  let h3 = 271733878;
+  let h4 = -1009589776;
+  
+  const w = new Int32Array(80);
+  for (let i = 0; i < words.length; i += 16) {
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    for (let j = 0; j < 80; j++) {
+      if (j < 16) {
+        w[j] = words[i + j];
+      } else {
+        const num = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16];
+        w[j] = (num << 1) | (num >>> 31);
+      }
+      let f = 0;
+      let k = 0;
+      if (j < 20) {
+        f = (b & c) | (~b & d);
+        k = 1518500249;
+      } else if (j < 40) {
+        f = b ^ c ^ d;
+        k = 1859775393;
+      } else if (j < 60) {
+        f = (b & c) | (b & d) | (c & d);
+        k = -1894007588;
+      } else {
+        f = b ^ c ^ d;
+        k = -899497514;
+      }
+      const temp = (((a << 5) | (a >>> 27)) + f + e + k + w[j]) | 0;
+      e = d;
+      d = c;
+      c = (b << 30) | (b >>> 2);
+      b = a;
+      a = temp;
+    }
+    h0 = (h0 + a) | 0;
+    h1 = (h1 + b) | 0;
+    h2 = (h2 + c) | 0;
+    h3 = (h3 + d) | 0;
+    h4 = (h4 + e) | 0;
+  }
+  const result = new Uint8Array(20);
+  for (let i = 0; i < 5; i++) {
+    const h = i === 0 ? h0 : i === 1 ? h1 : i === 2 ? h2 : i === 3 ? h3 : h4;
+    result[i * 4] = (h >>> 24) & 0xff;
+    result[i * 4 + 1] = (h >>> 16) & 0xff;
+    result[i * 4 + 2] = (h >>> 8) & 0xff;
+    result[i * 4 + 3] = h & 0xff;
+  }
+  return result;
+}
+
+export function getDeterministicUUID(id: string): string {
+  if (typeof id !== 'string') return id;
+  if (!id.startsWith('temp-')) return id;
+  
+  const nsBytes = parseUUID(MIGRATION_NAMESPACE);
+  const nameBytes = stringToUtf8Bytes(id);
+  const totalBytes = new Uint8Array(nsBytes.length + nameBytes.length);
+  totalBytes.set(nsBytes);
+  totalBytes.set(nameBytes, nsBytes.length);
+  
+  const hash = sha1(totalBytes);
+  
+  // Set version to 5
+  hash[6] = (hash[6] & 0x0f) | 0x50;
+  // Set variant to RFC4122
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+  
+  const hex = Array.from(hash).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.substr(0, 8)}-${hex.substr(8, 4)}-${hex.substr(12, 4)}-${hex.substr(16, 4)}-${hex.substr(20, 12)}`;
+}
+
+export async function migrateLegacyTempIds(): Promise<void> {
+  if (!isSQLiteAvailable()) return;
+  const db = getDatabase();
+  console.log('[SQLite Migration] Starting legacy temp-ID migration to deterministic UUIDv5...');
+  
+  const start = Date.now();
+  
+  try {
+    // 1. Temporarily disable foreign keys to allow primary/foreign key mutations
+    await db.execAsync('PRAGMA foreign_keys = OFF;');
+    
+    await db.withTransactionAsync(async () => {
+      // Helper function to map values recursively
+      function mapValuesRecursively(obj: any): any {
+        if (obj === null || obj === undefined) return obj;
+        if (typeof obj === 'string') {
+          return getDeterministicUUID(obj);
+        }
+        if (Array.isArray(obj)) {
+          return obj.map(mapValuesRecursively);
+        }
+        if (typeof obj === 'object') {
+          const newObj: any = {};
+          for (const key of Object.keys(obj)) {
+            const newKey = getDeterministicUUID(key);
+            newObj[newKey] = mapValuesRecursively(obj[key]);
+          }
+          return newObj;
+        }
+        return obj;
+      }
+
+      // A. folders
+      const folders = await db.getAllAsync<any>('SELECT id, parentFolderId, cardIds FROM folders;');
+      for (const f of folders) {
+        const oldId = f.id;
+        const newId = getDeterministicUUID(oldId);
+        const oldParentId = f.parentFolderId;
+        const newParentId = oldParentId ? getDeterministicUUID(oldParentId) : oldParentId;
+        let newCardIdsStr = f.cardIds;
+        if (f.cardIds) {
+          try {
+            const arr = JSON.parse(f.cardIds);
+            if (Array.isArray(arr)) {
+              newCardIdsStr = JSON.stringify(arr.map(getDeterministicUUID));
+            }
+          } catch {}
+        }
+        
+        if (newId !== oldId || newParentId !== oldParentId || newCardIdsStr !== f.cardIds) {
+          if (newId !== oldId) {
+            const exists = await db.getFirstAsync('SELECT id FROM folders WHERE id = ?;', [newId]);
+            if (exists) {
+              await db.runAsync('DELETE FROM folders WHERE id = ?;', [oldId]);
+              continue;
+            }
+          }
+          await db.runAsync(
+            'UPDATE folders SET id = ?, parentFolderId = ?, cardIds = ? WHERE id = ?;',
+            [newId, newParentId, newCardIdsStr, oldId]
+          );
+        }
+      }
+
+      // B. playlists
+      const playlists = await db.getAllAsync<any>('SELECT id, cardIds FROM playlists;');
+      for (const p of playlists) {
+        const oldId = p.id;
+        const newId = getDeterministicUUID(oldId);
+        let newCardIdsStr = p.cardIds;
+        if (p.cardIds) {
+          try {
+            const arr = JSON.parse(p.cardIds);
+            if (Array.isArray(arr)) {
+              newCardIdsStr = JSON.stringify(arr.map(getDeterministicUUID));
+            }
+          } catch {}
+        }
+        
+        if (newId !== oldId || newCardIdsStr !== p.cardIds) {
+          if (newId !== oldId) {
+            const exists = await db.getFirstAsync('SELECT id FROM playlists WHERE id = ?;', [newId]);
+            if (exists) {
+              await db.runAsync('DELETE FROM playlists WHERE id = ?;', [oldId]);
+              continue;
+            }
+          }
+          await db.runAsync(
+            'UPDATE playlists SET id = ?, cardIds = ? WHERE id = ?;',
+            [newId, newCardIdsStr, oldId]
+          );
+        }
+      }
+
+      // C. cards_metadata
+      const cards = await db.getAllAsync<any>('SELECT id, folderId FROM cards_metadata;');
+      for (const c of cards) {
+        const oldId = c.id;
+        const newId = getDeterministicUUID(oldId);
+        const oldFolderId = c.folderId;
+        const newFolderId = oldFolderId ? getDeterministicUUID(oldFolderId) : oldFolderId;
+        
+        if (newId !== oldId || newFolderId !== oldFolderId) {
+          if (newId !== oldId) {
+            const exists = await db.getFirstAsync('SELECT id FROM cards_metadata WHERE id = ?;', [newId]);
+            if (exists) {
+              await db.runAsync('DELETE FROM cards_metadata WHERE id = ?;', [oldId]);
+              continue;
+            }
+          }
+          await db.runAsync(
+            'UPDATE cards_metadata SET id = ?, folderId = ? WHERE id = ?;',
+            [newId, newFolderId, oldId]
+          );
+        }
+      }
+
+      // D. cards_content
+      const content = await db.getAllAsync<any>('SELECT cardId FROM cards_content;');
+      for (const cc of content) {
+        const oldId = cc.cardId;
+        const newId = getDeterministicUUID(oldId);
+        if (newId !== oldId) {
+          const exists = await db.getFirstAsync('SELECT cardId FROM cards_content WHERE cardId = ?;', [newId]);
+          if (exists) {
+            await db.runAsync('DELETE FROM cards_content WHERE cardId = ?;', [oldId]);
+            continue;
+          }
+          await db.runAsync(
+            'UPDATE cards_content SET cardId = ? WHERE cardId = ?;',
+            [newId, oldId]
+          );
+        }
+      }
+
+      // E. card_progress
+      const progress = await db.getAllAsync<any>('SELECT cardId, userId FROM card_progress;');
+      for (const cp of progress) {
+        const oldId = cp.cardId;
+        const newId = getDeterministicUUID(oldId);
+        if (newId !== oldId) {
+          const exists = await db.getFirstAsync(
+            'SELECT cardId FROM card_progress WHERE cardId = ? AND userId = ?;',
+            [newId, cp.userId]
+          );
+          if (exists) {
+            await db.runAsync('DELETE FROM card_progress WHERE cardId = ? AND userId = ?;', [oldId, cp.userId]);
+            continue;
+          }
+          await db.runAsync(
+            'UPDATE card_progress SET cardId = ? WHERE cardId = ? AND userId = ?;',
+            [newId, oldId, cp.userId]
+          );
+        }
+      }
+
+      // F. deleted_entities
+      const deleted = await db.getAllAsync<any>('SELECT userId, entityId, entityType FROM deleted_entities;');
+      for (const d of deleted) {
+        const oldId = d.entityId;
+        const newId = getDeterministicUUID(oldId);
+        if (newId !== oldId) {
+          const exists = await db.getFirstAsync(
+            'SELECT entityId FROM deleted_entities WHERE userId = ? AND entityId = ? AND entityType = ?;',
+            [d.userId, newId, d.entityType]
+          );
+          if (exists) {
+            await db.runAsync('DELETE FROM deleted_entities WHERE userId = ? AND entityId = ? AND entityType = ?;', [d.userId, oldId, d.entityType]);
+            continue;
+          }
+          await db.runAsync(
+            'UPDATE deleted_entities SET entityId = ? WHERE userId = ? AND entityId = ? AND entityType = ?;',
+            [newId, d.userId, oldId, d.entityType]
+          );
+        }
+      }
+
+      // G. local_session_queues
+      const sessions = await db.getAllAsync<any>('SELECT id, sourceId, orderedCardIds FROM local_session_queues;');
+      for (const s of sessions) {
+        const oldId = s.id;
+        const newId = getDeterministicUUID(oldId);
+        const oldSourceId = s.sourceId;
+        const newSourceId = oldSourceId ? getDeterministicUUID(oldSourceId) : oldSourceId;
+        let newOrderedCardIdsStr = s.orderedCardIds;
+        if (s.orderedCardIds) {
+          try {
+            const arr = JSON.parse(s.orderedCardIds);
+            if (Array.isArray(arr)) {
+              newOrderedCardIdsStr = JSON.stringify(arr.map(getDeterministicUUID));
+            }
+          } catch {}
+        }
+        
+        if (newId !== oldId || newSourceId !== oldSourceId || newOrderedCardIdsStr !== s.orderedCardIds) {
+          if (newId !== oldId) {
+            const exists = await db.getFirstAsync('SELECT id FROM local_session_queues WHERE id = ?;', [newId]);
+            if (exists) {
+              await db.runAsync('DELETE FROM local_session_queues WHERE id = ?;', [oldId]);
+              continue;
+            }
+          }
+          await db.runAsync(
+            'UPDATE local_session_queues SET id = ?, sourceId = ?, orderedCardIds = ? WHERE id = ?;',
+            [newId, newSourceId, newOrderedCardIdsStr, oldId]
+          );
+        }
+      }
+
+      // H. reel_sessions
+      const reels = await db.getAllAsync<any>('SELECT userId, selectedRootFolderIds, queue FROM reel_sessions;');
+      for (const r of reels) {
+        let newSelected = r.selectedRootFolderIds;
+        if (r.selectedRootFolderIds) {
+          try {
+            const arr = JSON.parse(r.selectedRootFolderIds);
+            if (Array.isArray(arr)) {
+              newSelected = JSON.stringify(arr.map(getDeterministicUUID));
+            }
+          } catch {}
+        }
+        let newQueue = r.queue;
+        if (r.queue) {
+          try {
+            const arr = JSON.parse(r.queue);
+            if (Array.isArray(arr)) {
+              newQueue = JSON.stringify(arr.map(getDeterministicUUID));
+            }
+          } catch {}
+        }
+        
+        if (newSelected !== r.selectedRootFolderIds || newQueue !== r.queue) {
+          await db.runAsync(
+            'UPDATE reel_sessions SET selectedRootFolderIds = ?, queue = ? WHERE userId = ?;',
+            [newSelected, newQueue, r.userId]
+          );
+        }
+      }
+
+      // I. id_translations
+      const translations = await db.getAllAsync<any>('SELECT tempId, realId FROM id_translations;');
+      for (const t of translations) {
+        const oldTempId = t.tempId;
+        const newTempId = getDeterministicUUID(oldTempId);
+        const oldRealId = t.realId;
+        const newRealId = getDeterministicUUID(oldRealId);
+        
+        if (newTempId !== oldTempId || newRealId !== oldRealId) {
+          if (newTempId !== oldTempId) {
+            const exists = await db.getFirstAsync('SELECT tempId FROM id_translations WHERE tempId = ?;', [newTempId]);
+            if (exists) {
+              await db.runAsync('DELETE FROM id_translations WHERE tempId = ?;', [oldTempId]);
+              continue;
+            }
+          }
+          await db.runAsync(
+            'UPDATE id_translations SET tempId = ?, realId = ? WHERE tempId = ?;',
+            [newTempId, newRealId, oldTempId]
+          );
+        }
+      }
+
+      // J. offline_queue
+      const { decryptPayload, encryptPayload } = require('./sqliteSyncBridge');
+      const queueRows = await db.getAllAsync<any>('SELECT id, payload FROM offline_queue;');
+      for (const q of queueRows) {
+        const oldId = q.id;
+        const newId = getDeterministicUUID(oldId);
+        
+        let newPayloadEnc = q.payload;
+        if (q.payload) {
+          try {
+            const decrypted = await decryptPayload(q.payload);
+            let payloadObj = JSON.parse(decrypted);
+            payloadObj = mapValuesRecursively(payloadObj);
+            const serialized = JSON.stringify(payloadObj);
+            newPayloadEnc = await encryptPayload(serialized);
+          } catch (err: any) {
+            console.warn('[SQLite Migration Warning] Failed to migrate offline queue payload:', err.message);
+          }
+        }
+        
+        if (newId !== oldId || newPayloadEnc !== q.payload) {
+          if (newId !== oldId) {
+            const exists = await db.getFirstAsync('SELECT id FROM offline_queue WHERE id = ?;', [newId]);
+            if (exists) {
+              await db.runAsync('DELETE FROM offline_queue WHERE id = ?;', [oldId]);
+              continue;
+            }
+          }
+          await db.runAsync(
+            'UPDATE offline_queue SET id = ?, payload = ? WHERE id = ?;',
+            [newId, newPayloadEnc, oldId]
+          );
+        }
+      }
+    });
+
+    console.log(`[SQLite Migration] Legacy temp-ID migration completed successfully in ${Date.now() - start}ms.`);
+  } catch (err: any) {
+    console.error('[SQLite Migration Error] Legacy migration failed:', err.message);
+    throw err;
+  } finally {
+    // 2. Re-enable foreign keys
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+  }
+}
+

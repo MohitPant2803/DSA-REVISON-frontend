@@ -4,6 +4,8 @@ import { Controller, Control, FieldError } from 'react-hook-form';
 import { z } from 'zod';
 import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
 import type { IFolder } from '@/types/folder';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 export const cardFormSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters.'),
@@ -41,28 +43,34 @@ interface FormInputProps {
   [key: string]: unknown;
 }
 
-export const FormInput = ({ name, label, control, error, ...props }: FormInputProps) => (
-  <View className="mb-5">
-    <Text className="text-slate-500 text-sm mb-2 font-semibold uppercase tracking-wider">{label}</Text>
-    <Controller
-      control={control}
-      name={name}
-      render={({ field: { onChange, onBlur, value } }) => (
-        <TextInput
-          className={`bg-white border ${
-            error ? 'border-rose-300' : 'border-slate-100'
-          } text-slate-900 p-4 rounded-2xl text-base shadow-sm`}
-          placeholderTextColor="#94a3b8"
-          onBlur={onBlur}
-          onChangeText={onChange}
-          value={value}
-          {...props}
-        />
-      )}
-    />
-    {error && <Text className="text-red-500 mt-1">{error.message}</Text>}
-  </View>
-);
+export const FormInput = ({ name, label, control, error, ...props }: FormInputProps) => {
+  const palette = useThemePalette();
+  return (
+    <View className="mb-5">
+      <Text className="text-xs mb-2 font-semibold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{label}</Text>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field: { onChange, onBlur, value } }) => (
+          <TextInput
+            className="border p-4 rounded-2xl text-base shadow-sm"
+            style={{
+              backgroundColor: palette.inputBg,
+              borderColor: error ? palette.error : palette.border,
+              color: palette.textPrimary,
+            }}
+            placeholderTextColor={palette.textMuted}
+            onBlur={onBlur}
+            onChangeText={onChange}
+            value={value}
+            {...props}
+          />
+        )}
+      />
+      {error && <Text className="mt-1 text-sm font-semibold" style={{ color: palette.error }}>{error.message}</Text>}
+    </View>
+  );
+};
 
 const DifficultySelector = ({ 
   control, 
@@ -70,35 +78,45 @@ const DifficultySelector = ({
 }: { 
   control: any; 
   folders: IFolder[] 
-}) => (
-  <View className="mb-5">
-    <Text className="text-zinc-400 text-base mb-2 font-semibold">Difficulty</Text>
-    <Controller
-      control={control}
-      name="difficulty"
-      render={({ field: { onChange, value } }) => (
-        <View className="flex-row">
-          {DifficultyLevels.map((level) => (
-            <TouchableOpacity
-              key={level}
-              onPress={() => onChange(level)}
-              className={`flex-1 py-3 rounded-lg items-center mr-2 ${
-                value === level ? 'bg-violet-600' : 'bg-zinc-800'
-              }`}
-            >
-              <Text className={`font-bold ${value === level ? 'text-white' : 'text-zinc-400'}`}>
-                {level}
-              </Text>
-            </TouchableOpacity>
-          ))}
+}) => {
+  const palette = useThemePalette();
+  return (
+    <View className="mb-5">
+      <Text className="text-base mb-2 font-semibold" style={{ color: palette.textSecondary }}>Difficulty</Text>
+      <Controller
+        control={control}
+        name="difficulty"
+        render={({ field: { onChange, value } }) => (
+          <View className="flex-row">
+            {DifficultyLevels.map((level) => (
+              <TouchableOpacity
+                key={level}
+                onPress={() => onChange(level)}
+                className="flex-1 py-3 rounded-lg items-center mr-2 border"
+                style={{
+                  backgroundColor: value === level ? palette.accent : palette.inputBg,
+                  borderColor: value === level ? palette.accent : palette.border,
+                }}
+              >
+                <Text 
+                  className="font-bold"
+                  style={{ color: value === level ? (palette.isDark ? palette.textPrimary : palette.surface) : palette.textSecondary }}
+                >
+                  {level}
+                </Text>
+              </TouchableOpacity>
+            ))}
             {folders.length === 0 && (
-              <Text className="text-amber-500 text-sm mt-1">No folders found. Create a folder in the Learn tab first.</Text>
+              <Text className="text-sm mt-1 font-semibold" style={{ color: palette.warning }}>
+                No folders found. Create a folder in the Learn tab first.
+              </Text>
             )}
-        </View>
-      )}
-    />
-  </View>
-);
+          </View>
+        )}
+      />
+    </View>
+  );
+};
 
 const FolderSelector = ({
   control,
@@ -108,35 +126,38 @@ const FolderSelector = ({
   control: any;
   folders: IFolder[];
   error?: FieldError;
-}) => (
-  <View className="mb-5">
-    <Text className="text-zinc-400 text-base mb-2 font-semibold">Folder</Text>
-    <Controller
-      control={control}
-      name="folderId"
-      render={({ field: { onChange, value } }) => (
-        <View className="flex-row flex-wrap gap-2">
-          {folders.map((folder) => (
-            <TouchableOpacity
-              key={folder._id}
-              onPress={() => onChange(folder._id)}
-              className={`px-4 py-2.5 rounded-full border ${
-                value === folder._id
-                  ? 'border-violet-500 bg-violet-600/30'
-                  : 'border-zinc-700 bg-zinc-800'
-              }`}
-            >
-              <Text className={value === folder._id ? 'text-violet-200' : 'text-zinc-400'}>
-                {folder.title}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    />
-    {error && <Text className="text-red-500 mt-1">{error.message}</Text>}
-  </View>
-);
+}) => {
+  const palette = useThemePalette();
+  return (
+    <View className="mb-5">
+      <Text className="text-base mb-2 font-semibold" style={{ color: palette.textSecondary }}>Folder</Text>
+      <Controller
+        control={control}
+        name="folderId"
+        render={({ field: { onChange, value } }) => (
+          <View className="flex-row flex-wrap gap-2">
+            {folders.map((folder) => (
+              <TouchableOpacity
+                key={folder._id}
+                onPress={() => onChange(folder._id)}
+                className="px-4 py-2.5 rounded-full border"
+                style={{
+                  backgroundColor: value === folder._id ? addAlpha(palette.accent, 0.12) : palette.inputBg,
+                  borderColor: value === folder._id ? palette.accent : palette.border,
+                }}
+              >
+                <Text style={{ color: value === folder._id ? palette.accent : palette.textSecondary, fontWeight: value === folder._id ? '600' : '400' }}>
+                  {folder.title}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      />
+      {error && <Text className="mt-1 text-sm font-semibold" style={{ color: palette.error }}>{error.message}</Text>}
+    </View>
+  );
+};
 
 interface RevisionFormProps {
   control: any;
@@ -145,6 +166,7 @@ interface RevisionFormProps {
 }
 
 export default function RevisionForm({ control, errors, folders }: RevisionFormProps) {
+  const palette = useThemePalette();
   return (
     <>
       <FormInput
@@ -164,7 +186,7 @@ export default function RevisionForm({ control, errors, folders }: RevisionFormP
       <FolderSelector control={control} folders={folders} error={errors.folderId} />
       <DifficultySelector control={control} folders={folders} />
       <View className="mb-5">
-        <Text className="text-zinc-400 text-base mb-2 font-semibold">Complexity (optional)</Text>
+        <Text className="text-base mb-2 font-semibold" style={{ color: palette.textSecondary }}>Complexity (optional)</Text>
         <Controller
           control={control}
           name="complexity"
@@ -174,11 +196,13 @@ export default function RevisionForm({ control, errors, folders }: RevisionFormP
                 <TouchableOpacity
                   key={c}
                   onPress={() => onChange(value === c ? undefined : c)}
-                  className={`px-3 py-2 rounded-lg border ${
-                    value === c ? 'border-violet-500 bg-violet-600/20' : 'border-zinc-700'
-                  }`}
+                  className="px-3 py-2 rounded-lg border"
+                  style={{
+                    backgroundColor: value === c ? addAlpha(palette.accent, 0.12) : palette.inputBg,
+                    borderColor: value === c ? palette.accent : palette.border,
+                  }}
                 >
-                  <Text className={`text-xs font-mono ${value === c ? 'text-violet-200' : 'text-zinc-500'}`}>
+                  <Text className="text-xs font-mono" style={{ color: value === c ? palette.accent : palette.textSecondary, fontWeight: value === c ? '600' : '400' }}>
                     {c}
                   </Text>
                 </TouchableOpacity>

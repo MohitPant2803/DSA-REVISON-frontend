@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, ActivityIndicator, TextInput } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import SyntaxHighlighter from '@/components/CustomSyntaxHighlighter';
-import { Tag, Code, BookOpen, Heart, BrainCircuit, Edit, Trash2, Archive, ListMusic, MoreVertical, X, Check } from 'lucide-react-native';
+import { Tag, Code, BookOpen, Heart, BrainCircuit, Edit, Trash2, Archive, ListMusic, MoreVertical, X, Check, Maximize2 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { RichText } from '@/components/RichText';
 
@@ -13,12 +13,12 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { useUpdateCardProgress, useUpdatePlaylistMembership } from '@/services/useProgress';
 import { canModifyItem, UserRole } from '@/utils/permissions';
-import { usePlaylists } from '@/hooks/usePlaylists';
-import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
-import { useDeleteRevisionCard } from '@/hooks/useRevisionCards';
+
+import { useDeleteRevisionCard, useUpdateRevisionCard } from '@/hooks/useRevisionCards';
 import { useRole } from '@/hooks/useRole';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 // Inlined Atom One Dark theme to fix Metro bundler path resolution bugs
 const atomOneDark = {
@@ -114,25 +114,30 @@ const ActionButton = ({ onPress, icon, label, isActive }: ActionButtonProps) => 
 );
 
 const DifficultyBadge = ({ difficulty }: { difficulty: IPopulatedRevisionCard['difficulty'] | string }) => {
-  const color =
-    difficulty === 'Easy'
-      ? 'bg-green-500/20 text-green-400'
-      : difficulty === 'Medium'
-      ? 'bg-yellow-500/20 text-yellow-400'
-      : 'bg-red-500/20 text-red-400';
-
+  const palette = useThemePalette();
+  const getStyles = (diff: string) => {
+    if (diff === 'Easy') {
+      return { bg: addAlpha(palette.success, 0.08), border: addAlpha(palette.success, 0.15), text: palette.success };
+    }
+    if (diff === 'Medium') {
+      return { bg: addAlpha(palette.warning, 0.08), border: addAlpha(palette.warning, 0.15), text: palette.warning };
+    }
+    return { bg: addAlpha(palette.error, 0.08), border: addAlpha(palette.error, 0.15), text: palette.error };
+  };
+  const styles = getStyles(difficulty);
   return (
-    <StyledView className={`px-4 py-1.5 rounded-full ${color.split(' ')[0]}`}>
-      <StyledText className={`font-bold text-sm ${color.split(' ')[1]}`}>{difficulty}</StyledText>
+    <StyledView className="px-4 py-1.5 rounded-full border" style={{ backgroundColor: styles.bg, borderColor: styles.border }}>
+      <StyledText className="font-semibold text-sm" style={{ color: styles.text }}>{difficulty}</StyledText>
     </StyledView>
   );
 };
 
 const TopicBadge = ({ topic }: { topic: string }) => {
+  const palette = useThemePalette();
   return (
-    <StyledView className="flex-row items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20">
-      <Tag color="#60a5fa" size={16} />
-      <StyledText className="font-bold text-sm text-blue-400">{topic}</StyledText>
+    <StyledView className="flex-row items-center gap-2 px-3 py-1 rounded-full border" style={{ backgroundColor: palette.accentBg, borderColor: palette.border }}>
+      <Tag color={palette.accent} size={16} />
+      <StyledText className="font-semibold text-sm" style={{ color: palette.accent }}>{topic}</StyledText>
     </StyledView>
   );
 };
@@ -144,22 +149,67 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
   const { mutate: updateProgress } = useUpdateCardProgress();
   const { mutate: updatePlaylistMembership } = useUpdatePlaylistMembership();
   const { mutate: deleteCard } = useDeleteRevisionCard();
-  const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
-  const { data: playlists = [] } = usePlaylists();
-  const { data: membership = {} } = useCardPlaylistMembership(card._id, showPlaylistPicker);
+  const { mutate: updateCard } = useUpdateRevisionCard();
+
+  const [isEditingCode, setIsEditingCode] = useState(false);
+  const [editedCode, setEditedCode] = useState(slide.code || '');
+  const [isFullscreenCodeOpen, setIsFullscreenCodeOpen] = useState(false);
+  const [zoomFontSize, setZoomFontSize] = useState(12);
+
+  React.useEffect(() => {
+    setEditedCode(slide.code || '');
+  }, [slide.code]);
+
+  const handleSaveCode = () => {
+    const updatedSlides = card.slides ? card.slides.map((s, idx) => {
+      if (idx === slide.slideIndex) {
+        return { ...s, code: editedCode };
+      }
+      return s;
+    }) : [];
+
+    updateCard(
+      {
+        cardId: card._id,
+        updateData: {
+          code: editedCode,
+          slides: updatedSlides,
+        },
+      },
+      {
+        onSuccess: () => {
+          Toast.show({
+            type: 'success',
+            text1: 'Code updated successfully',
+          });
+          setIsEditingCode(false);
+        },
+        onError: (err) => {
+          Toast.show({
+            type: 'error',
+            text1: 'Failed to update code',
+            text2: err.message,
+          });
+        },
+      }
+    );
+  };
+
+  const handleCancelCode = () => {
+    setEditedCode(slide.code || '');
+    setIsEditingCode(false);
+  };
+
 
   const { user } = useAuthStore();
   const { role } = useRole();
   const { preferences } = useUserPreferencesStore();
   const lowEndDeviceMode = !!preferences.lowEndDeviceMode;
 
-
-
   const [isCodeLoaded, setIsCodeLoaded] = useState(false);
   React.useEffect(() => {
     if (slide.type === 'code') {
       const delay = lowEndDeviceMode ? 500 : 250;
-      // Delay rendering the heavy SyntaxHighlighter by a dynamic buffer to allow swiping animations to fully settle first
       const timeout = setTimeout(() => {
         setIsCodeLoaded(true);
       }, delay);
@@ -170,7 +220,6 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
   const folderId =
     typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;
 
-  // Superadmin bypass for global CRUD
   const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
   const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role, user.id, card.createdBy) : false);
 
@@ -207,17 +256,40 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
       const text = parts.slice(1).join(':').trim();
       return (
         <StyledView className="gap-y-1 mt-1">
-          <StyledText className="text-[10px] font-black uppercase tracking-widest" style={{ color: palette.accent }}>{category}</StyledText>
-          <StyledText className="text-[25px] font-black tracking-tight leading-tight" style={{ color: palette.textPrimary }}>{text}</StyledText>
+          <StyledText className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: palette.accent }}>{category.toUpperCase()}</StyledText>
+          <StyledText className="text-[22px] font-semibold tracking-tight leading-tight" style={{ color: palette.textPrimary }}>{text}</StyledText>
         </StyledView>
       );
     }
     return (
-      <StyledText className="text-[25px] font-black tracking-tight leading-tight mt-1" style={{ color: palette.textPrimary }}>
+      <StyledText className="text-[22px] font-semibold tracking-tight leading-tight mt-1" style={{ color: palette.textPrimary }}>
         {headline}
       </StyledText>
     );
   };
+
+  const diffBadgeStyles = (() => {
+    const diff = card.difficulty || 'Medium';
+    if (diff === 'Easy') {
+      return {
+        bg: addAlpha(palette.success, 0.08),
+        border: addAlpha(palette.success, 0.15),
+        text: palette.success,
+      };
+    }
+    if (diff === 'Medium') {
+      return {
+        bg: addAlpha(palette.warning, 0.08),
+        border: addAlpha(palette.warning, 0.15),
+        text: palette.warning,
+      };
+    }
+    return {
+      bg: addAlpha(palette.error, 0.08),
+      border: addAlpha(palette.error, 0.15),
+      text: palette.error,
+    };
+  })();
 
   return (
     <StyledView className="flex-1 bg-transparent pr-14">
@@ -226,141 +298,247 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
           <StyledView className="gap-y-5">
             
             {/* Horizontal Segmented Slide Indicator Track */}
-            <StyledView className="flex-row gap-0.5 w-[50%] self-center mt-1 mb-2">
-              {Array.from({ length: slide.totalSlides }).map((_, i) => {
-                const isActive = i === slide.slideIndex;
-                const isCompleted = i < slide.slideIndex;
-                return (
-                  <StyledView 
-                    key={i} 
-                    style={{
-                      height: 2,
-                      flex: 1,
-                      borderRadius: 1,
-                      backgroundColor: isActive ? palette.accent : isCompleted ? (palette.isDark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.12)') : (palette.isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)')
-                    }} 
-                  />
-                );
-              })}
-            </StyledView>
-
-            {/* Premium Apple-style Badge Row */}
-            <StyledView className="flex-row flex-wrap gap-2 items-center">
-              <StyledView 
-                className="px-3 py-1 rounded-full border"
-                style={{ backgroundColor: palette.accentBg, borderColor: palette.border }}
-              >
-                <StyledText className="text-[10px] font-extrabold uppercase tracking-wider" style={{ color: palette.accent }}>{card.topic}</StyledText>
-              </StyledView>
-              <StyledView 
-                className="px-3 py-1 rounded-full border"
-                style={{
-                  backgroundColor: card.difficulty === 'Easy' ? (palette.isDark ? 'rgba(16, 185, 129, 0.12)' : '#ECFDF5') :
-                                   card.difficulty === 'Medium' ? (palette.isDark ? 'rgba(245, 158, 11, 0.12)' : '#FFFBEB') :
-                                   (palette.isDark ? 'rgba(239, 68, 68, 0.12)' : '#FFF5F5'),
-                  borderColor: card.difficulty === 'Easy' ? (palette.isDark ? 'rgba(16, 185, 129, 0.2)' : '#A7F3D0') :
-                               card.difficulty === 'Medium' ? (palette.isDark ? 'rgba(245, 158, 11, 0.2)' : '#FDE68A') :
-                               (palette.isDark ? 'rgba(239, 68, 68, 0.2)' : '#FED7D7')
-                }}
-              >
-                <StyledText className="text-[10px] font-extrabold uppercase tracking-wider" style={{
-                  color: card.difficulty === 'Easy' ? '#10B981' :
-                         card.difficulty === 'Medium' ? '#D97706' :
-                         '#EF4444'
-                }}>{card.difficulty}</StyledText>
-              </StyledView>
-              {card.complexity && (
-                <StyledView 
-                  className="px-3 py-1 rounded-full border"
-                  style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
-                >
-                  <StyledText className="text-[10px] font-mono font-extrabold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{card.complexity}</StyledText>
-                </StyledView>
-              )}
-            </StyledView>
-
-            {renderHeadline(slide.headline)}
-
-            {/* 1. Intro / Cover & 2. Intuition / Explanation slide rendering */}
-            {(slide.type === 'intro' || 
-              slide.type === 'explanation' || 
-              slide.type === 'intuition' ||
-              slide.type === 'core-intuition' ||
-              slide.type === 'deep-reasoning' ||
-              slide.type === 'visual-memory' ||
-              slide.type === 'elite-interview-insight') && (
-              <StyledView className="gap-y-4">
-                <RichText
-                  text={slide.body || card.explanation || ''}
-                  style={{ color: palette.textSecondary, fontSize: 15, lineHeight: 24 }}
-                  boldStyle={{ color: palette.textPrimary }}
-                />
+            {slide.slideIndex > 0 && (
+              <StyledView className="flex-row gap-0.5 w-[50%] self-center mt-1 mb-2">
+                {Array.from({ length: slide.totalSlides }).map((_, i) => {
+                  const isActive = i === slide.slideIndex;
+                  const isCompleted = i < slide.slideIndex;
+                  return (
+                    <StyledView 
+                      key={i} 
+                      style={{
+                        height: 2,
+                        flex: 1,
+                        borderRadius: 1,
+                        backgroundColor: isActive ? palette.accent : isCompleted ? addAlpha(palette.textPrimary, 0.25) : addAlpha(palette.textPrimary, 0.08)
+                      }} 
+                    />
+                  );
+                })}
               </StyledView>
             )}
 
-            {/* Optional Cover Image */}
-            {card.image && slide.type === 'intro' && (
-              <StyledImage
-                recycleKey={card._id}
-                decodeHeight={lowEndDeviceMode ? 100 : 120}
-                source={{ 
-                  uri: card.image,
-                  priority: slide.slideIndex === currentIndex ? 'high' : 'normal'
-                }}
-                className="w-full h-44 rounded-2xl bg-slate-100"
-                contentFit="cover"
-                transition={200}
-                cachePolicy="disk"
-                placeholder={{ blurhash: "L6PZ|Ye.dCg2_3trxupL~q%M9Fjt" }}
-              />
+            {/* Premium Apple-style Badge Row - Only visible on the first slide */}
+            {slide.slideIndex === 0 && (
+              <StyledView className="flex-row flex-wrap gap-2 items-center">
+                {card.topic && card.topic.trim() ? (
+                  <StyledView 
+                    className="px-3 py-1 rounded-full border"
+                    style={{ backgroundColor: palette.accentBg, borderColor: palette.border }}
+                  >
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.accent }}>{card.topic}</StyledText>
+                  </StyledView>
+                ) : null}
+                {card.difficulty && card.difficulty.trim() ? (
+                  <StyledView 
+                    className="px-3 py-1 rounded-full border"
+                    style={{
+                      backgroundColor: diffBadgeStyles.bg,
+                      borderColor: diffBadgeStyles.border
+                    }}
+                  >
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: diffBadgeStyles.text }}>
+                      {card.difficulty}
+                    </StyledText>
+                  </StyledView>
+                ) : null}
+                {card.complexity && (
+                  <StyledView 
+                    className="px-3 py-1 rounded-full border"
+                    style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
+                  >
+                    <StyledText className="text-[10px] font-mono font-semibold uppercase tracking-wider" style={{ color: palette.textSecondary }}>{card.complexity}</StyledText>
+                  </StyledView>
+                )}
+              </StyledView>
+            )}
+
+            {slide.type === 'intro' ? (
+              <StyledView className="gap-y-4">
+                {/* Card Title at the top */}
+                <StyledText
+                  style={{ fontSize: 24, fontWeight: '600', color: palette.textPrimary, letterSpacing: -0.3, lineHeight: 28, marginTop: 4 }}
+                  numberOfLines={2}
+                >
+                  {card.title}
+                </StyledText>
+
+                {/* Spacer / Margin */}
+                <StyledView style={{ height: 12 }} />
+
+                {/* Curved themed box in the center of the slide */}
+                <StyledView 
+                  style={{ 
+                    backgroundColor: palette.readingSurface, 
+                    borderRadius: 24, 
+                    borderWidth: 1, 
+                    borderColor: palette.readingBorder 
+                  }}
+                >
+                  <StyledView className="p-4 gap-y-3">
+                    <StyledView className="flex-row items-center justify-between">
+                      {/* <StyledText className="font-semibold tracking-tight text-[20px] leading-tight" style={{ color: palette.textPrimary }}>
+                        🎯 {slide.headline}
+                      </StyledText> */}
+                    </StyledView>
+                    <StyledView className="mt-1.5">
+                      <RichText
+                        text={`🎯 ${slide.body || ''}`}
+                        style={{ color: palette.textSecondary, fontSize: 15, lineHeight: 24, fontWeight: '400' }}
+                        boldStyle={{ color: palette.textPrimary, fontWeight: '600' }}
+                      />
+                    </StyledView>
+                  </StyledView>
+                </StyledView>
+
+                {/* Optional Cover Image */}
+                {card.image && (
+                  <StyledImage
+                    recycleKey={card._id}
+                    decodeHeight={lowEndDeviceMode ? 100 : 120}
+                    source={{ 
+                      uri: card.image,
+                      priority: slide.slideIndex === currentIndex ? 'high' : 'normal'
+                    }}
+                    className="w-full h-44 rounded-2xl mt-4"
+                    style={{ backgroundColor: palette.inputBg }}
+                    contentFit="cover"
+                    transition={200}
+                    cachePolicy="disk"
+                    placeholder={{ blurhash: "L6PZ|Ye.dCg2_3trxupL~q%M9Fjt" }}
+                  />
+                )}
+              </StyledView>
+            ) : (
+              <>
+                {renderHeadline(slide.headline)}
+
+                {/* 2. Intuition / Explanation slide rendering */}
+                {(slide.type === 'explanation' || 
+                  slide.type === 'intuition' ||
+                  slide.type === 'core-intuition' ||
+                  slide.type === 'deep-reasoning' ||
+                  slide.type === 'visual-memory' ||
+                  slide.type === 'elite-interview-insight') && (
+                  <StyledView className="gap-y-4">
+                    <RichText
+                      text={slide.body || ''}
+                      style={{ color: palette.textSecondary, fontSize: 15, lineHeight: 24 }}
+                      boldStyle={{ color: palette.textPrimary }}
+                    />
+                  </StyledView>
+                )}
+              </>
             )}
 
             {/* 3. Code Walkthrough slide (Progressive Highlights) */}
-            {slide.type === 'code' && (slide.code || card.code) && (
+            {slide.type === 'code' && slide.code && (
               (() => {
                 const codeLang = 'cpp';
-                const activeCode = slide.code || card.code || '';
+                const activeCode = slide.code || '';
                 return (
-                  <StyledView className="rounded-2xl border border-slate-800 overflow-hidden shadow-lg bg-[#0B0F19]">
+                  <StyledView 
+                    className="rounded-2xl border overflow-hidden shadow-lg"
+                    style={{ backgroundColor: '#090E1A', borderColor: '#1E293B' }}
+                  >
                     {/* macOS Style Mock Header */}
-                    <StyledView className="flex-row items-center gap-1.5 px-4 py-3 bg-[#111827] border-b border-slate-800">
-                      <StyledView className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
-                      <StyledView className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
-                      <StyledView className="w-2.5 h-2.5 rounded-full bg-[#10B981]" />
-                      <StyledText className="text-slate-500 font-mono text-[10px] ml-auto">{codeLang}</StyledText>
+                    <StyledView 
+                      className="flex-row items-center gap-1.5 px-4 py-3 border-b"
+                      style={{ backgroundColor: '#111827', borderBottomColor: '#1E293B' }}
+                    >
+                      <StyledView className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: palette.error }} />
+                      <StyledView className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: palette.warning }} />
+                      <StyledView className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: palette.success }} />
+                      
+                      {/* Action buttons (Edit/Save/Cancel) */}
+                      <StyledView className="flex-row items-center gap-2 ml-auto">
+                        {isEditingCode ? (
+                          <>
+                            <StyledTouchableOpacity 
+                              onPress={handleSaveCode}
+                              className="px-2.5 py-1 rounded bg-blue-500/20 border border-blue-500/30"
+                            >
+                              <StyledText className="text-[10px] font-semibold text-blue-400">Save</StyledText>
+                            </StyledTouchableOpacity>
+                            <StyledTouchableOpacity 
+                              onPress={handleCancelCode}
+                              className="px-2.5 py-1 rounded bg-zinc-800 border border-zinc-700"
+                            >
+                              <StyledText className="text-[10px] font-semibold text-zinc-400">Cancel</StyledText>
+                            </StyledTouchableOpacity>
+                          </>
+                        ) : (
+                          <StyledView className="flex-row items-center gap-2">
+                            <StyledTouchableOpacity 
+                              onPress={() => setIsEditingCode(true)}
+                              className="flex-row items-center gap-1 px-2.5 py-1 rounded bg-zinc-800/80 border border-zinc-700/60"
+                            >
+                              <Edit size={10} color="#94A3B8" />
+                              <StyledText className="text-[10px] font-semibold font-mono" style={{ color: '#94A3B8' }}>{codeLang.toUpperCase()}</StyledText>
+                            </StyledTouchableOpacity>
+                            <StyledTouchableOpacity 
+                              onPress={() => setIsFullscreenCodeOpen(true)}
+                              className="flex-row items-center justify-center p-1 rounded bg-zinc-800/80 border border-zinc-700/60"
+                            >
+                              <Maximize2 size={12} color="#94A3B8" />
+                            </StyledTouchableOpacity>
+                          </StyledView>
+                        )}
+                      </StyledView>
                     </StyledView>
                     
                     {isCodeLoaded ? (
-                      <SyntaxHighlighter
-                        language={codeLang}
-                        style={atomOneDark}
-                        customStyle={{ 
-                          borderRadius: 0, 
-                          padding: 16, 
-                          fontSize: 12, 
-                          lineHeight: 18, 
-                          fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
-                          backgroundColor: '#0B0F19' 
-                        } as any}
-                        // @ts-ignore
-                        CodeTag={CodeText}
-                        // @ts-ignore
-                        PreTag={Platform.OS === 'web' ? 'pre' : View}
-                      >
-                        {activeCode}
-                      </SyntaxHighlighter>
+                      isEditingCode ? (
+                        <TextInput
+                          value={editedCode}
+                          onChangeText={setEditedCode}
+                          multiline
+                          style={{
+                            color: '#abb2bf',
+                            fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+                            fontSize: 12,
+                            lineHeight: 18,
+                            padding: 16,
+                            backgroundColor: '#090E1A',
+                            minHeight: 200,
+                            textAlignVertical: 'top',
+                          }}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          spellCheck={false}
+                        />
+                      ) : (
+                        <SyntaxHighlighter
+                          language={codeLang}
+                          style={atomOneDark}
+                          customStyle={{ 
+                            borderRadius: 0, 
+                            padding: 16, 
+                            fontSize: 12, 
+                            lineHeight: 18, 
+                            fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+                            backgroundColor: '#090E1A' 
+                          } as any}
+                          // @ts-ignore
+                          CodeTag={CodeText}
+                          // @ts-ignore
+                          PreTag={Platform.OS === 'web' ? 'pre' : View}
+                        >
+                          {activeCode}
+                        </SyntaxHighlighter>
+                      )
                     ) : (
                       /* Premium macOS Code Mockup Skeleton Placeholder */
-                      <StyledView className="p-6 bg-[#0B0F19] min-h-[180px] gap-y-4">
+                      <StyledView className="p-6 min-h-[180px] gap-y-4" style={{ backgroundColor: '#090E1A' }}>
                         <StyledView className="flex-row items-center gap-2">
-                          <StyledView className="w-12 h-3.5 bg-slate-800/60 rounded" />
-                          <StyledView className="w-24 h-3.5 bg-slate-800/40 rounded" />
+                          <StyledView className="w-12 h-3.5 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+                          <StyledView className="w-24 h-3.5 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }} />
                         </StyledView>
-                        <StyledView className="w-3/4 h-3 bg-slate-800/60 rounded" />
-                        <StyledView className="w-1/2 h-3 bg-slate-800/60 rounded" />
-                        <StyledView className="w-5/6 h-3 bg-slate-800/60 rounded" />
-                        <StyledView className="w-2/3 h-3 bg-slate-800/60 rounded" />
-                        <StyledView className="w-4/5 h-3 bg-slate-800/60 rounded" />
+                        <StyledView className="w-3/4 h-3 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+                        <StyledView className="w-1/2 h-3 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+                        <StyledView className="w-5/6 h-3 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+                        <StyledView className="w-2/3 h-3 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+                        <StyledView className="w-4/5 h-3 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
                       </StyledView>
                     )}
                   </StyledView>
@@ -384,7 +562,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                         className="px-3 py-1 rounded-full border"
                         style={{ backgroundColor: palette.accentBg, borderColor: palette.border }}
                       >
-                        <StyledText className="text-xs font-bold" style={{ color: palette.accent }}>#{tag}</StyledText>
+                        <StyledText className="text-xs font-semibold" style={{ color: palette.accent }}>#{tag}</StyledText>
                       </StyledView>
                     ))}
                   </StyledView>
@@ -411,13 +589,13 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                                 key={cIdx}
                                 className="w-10 h-10 border m-0.5 justify-center items-center rounded-lg"
                                 style={{
-                                  backgroundColor: cell === 0 ? (palette.isDark ? 'rgba(239, 68, 68, 0.2)' : '#FFE4E6') : palette.surface,
-                                  borderColor: cell === 0 ? '#FDA4AF' : palette.border,
+                                  backgroundColor: cell === 0 ? addAlpha(palette.error, 0.08) : palette.surface,
+                                  borderColor: cell === 0 ? addAlpha(palette.error, 0.15) : palette.border,
                                 }}
                               >
                                 <StyledText 
-                                  className="font-black"
-                                  style={{ color: cell === 0 ? '#E11D48' : palette.textPrimary }}
+                                  className="font-bold"
+                                  style={{ color: cell === 0 ? palette.error : palette.textPrimary }}
                                 >
                                   {cell}
                                 </StyledText>
@@ -433,8 +611,8 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                 {/* Render Steps */}
                 {((Array.isArray((slide as any).steps) && (slide as any).steps.length > 0) || (Array.isArray(card.examples) && card.examples.length > 0)) && (
                   <StyledView className="gap-3">
-                    <StyledText className="text-[10px] font-black uppercase tracking-wider" style={{ color: palette.textSecondary }}>
-                      💡 Step-by-Step State Execution
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.textSecondary }}>
+
                     </StyledText>
                     {((Array.isArray((slide as any).steps) ? (slide as any).steps : null) || (Array.isArray(card.examples) ? card.examples : [])).map((ex: string, i: number) => (
                       <StyledView 
@@ -446,7 +624,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                           className="w-5 h-5 rounded-full justify-center items-center mt-0.5"
                           style={{ backgroundColor: palette.accentBg }}
                         >
-                          <StyledText className="text-[10px] font-black" style={{ color: palette.accent }}>{i + 1}</StyledText>
+                          {/* <StyledText className="text-[10px] font-semibold" style={{ color: palette.accent }}>{i + 1}</StyledText> */}
                         </StyledView>
                         <RichText 
                           text={ex || ''} 
@@ -463,19 +641,19 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                   <StyledView 
                     className="border rounded-xl p-4 mt-2"
                     style={{ 
-                      backgroundColor: palette.isDark ? 'rgba(245, 158, 11, 0.12)' : '#FFFBEB', 
-                      borderColor: palette.isDark ? 'rgba(245, 158, 11, 0.3)' : '#FDE68A' 
+                      backgroundColor: addAlpha(palette.warning, 0.08), 
+                      borderColor: addAlpha(palette.warning, 0.15) 
                     }}
                   >
                     <StyledText 
-                      className="text-[10px] font-black uppercase tracking-widest mb-1"
-                      style={{ color: palette.isDark ? '#FBBF24' : '#B45309' }}
+                      className="text-[10px] font-semibold uppercase tracking-widest mb-1"
+                      style={{ color: palette.warning }}
                     >
                       🔑 Key Observation
                     </StyledText>
                     <StyledText 
                       className="text-sm leading-relaxed font-semibold"
-                      style={{ color: palette.isDark ? '#FDE68A' : '#78350F' }}
+                      style={{ color: palette.textPrimary }}
                     >
                       {(slide as any).keyObservation}
                     </StyledText>
@@ -489,7 +667,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
               <StyledView className="gap-3 mt-1">
                 {Array.isArray((slide as any).steps) && (
                   <StyledView className="gap-3">
-                    <StyledText className="text-[10px] font-black uppercase tracking-wider" style={{ color: palette.textSecondary }}>
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.textSecondary }}>
                       🧩 Algorithmic Blueprint Steps
                     </StyledText>
                     {(slide as any).steps.map((step: string, i: number) => (
@@ -502,7 +680,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                           className="w-5 h-5 rounded-full justify-center items-center mt-0.5"
                           style={{ backgroundColor: palette.accentBg }}
                         >
-                          <StyledText className="text-[10px] font-black" style={{ color: palette.accent }}>{i + 1}</StyledText>
+                          <StyledText className="text-[10px] font-semibold" style={{ color: palette.accent }}>{i + 1}</StyledText>
                         </StyledView>
                         <RichText 
                           text={step || ''} 
@@ -517,19 +695,19 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                   <StyledView 
                     className="border rounded-xl p-4 mt-2"
                     style={{ 
-                      backgroundColor: palette.isDark ? 'rgba(16, 185, 129, 0.12)' : '#ECFDF5', 
-                      borderColor: palette.isDark ? 'rgba(16, 185, 129, 0.3)' : '#A7F3D0' 
+                      backgroundColor: addAlpha(palette.success, 0.08), 
+                      borderColor: addAlpha(palette.success, 0.15) 
                     }}
                   >
                     <StyledText 
-                      className="text-[10px] font-black uppercase tracking-widest mb-1"
-                      style={{ color: palette.isDark ? '#34D399' : '#047857' }}
+                      className="text-[10px] font-semibold uppercase tracking-widest mb-1"
+                      style={{ color: palette.success }}
                     >
                       💡 Mental Compression
                     </StyledText>
                     <StyledText 
-                      className="text-sm leading-relaxed font-bold"
-                      style={{ color: palette.isDark ? '#A7F3D0' : '#065F46' }}
+                      className="text-sm leading-relaxed font-semibold"
+                      style={{ color: palette.textPrimary }}
                     >
                       {(slide as any).mentalCompression}
                     </StyledText>
@@ -538,11 +716,12 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
               </StyledView>
             )}
 
-            {/* Bugs, Mistakes & Pi            {slide.type === 'pitfalls' && (
+            {/* Common Mistakes & Interview follow-ups */}
+            {slide.type === 'pitfalls' && (
               <StyledView className="gap-4">
                 {Array.isArray((slide as any).mistakes) && (
                   <StyledView className="gap-2">
-                    <StyledText className="text-rose-500 text-[10px] font-black uppercase tracking-wider">
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.error }}>
                       ⚠️ Common Bugs & Rookie Mistakes
                     </StyledText>
                     {(slide as any).mistakes.map((mistake: string, i: number) => (
@@ -550,14 +729,14 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                         key={i} 
                         className="flex-row items-start gap-2 rounded-xl p-3 border"
                         style={{ 
-                          backgroundColor: palette.isDark ? 'rgba(239, 68, 68, 0.08)' : '#FFF5F5', 
-                          borderColor: palette.isDark ? 'rgba(239, 68, 68, 0.2)' : '#FED7D7' 
+                          backgroundColor: addAlpha(palette.error, 0.08), 
+                          borderColor: addAlpha(palette.error, 0.15) 
                         }}
                       >
-                        <StyledText className="text-rose-600 font-bold mt-0.5">❌</StyledText>
+                        <StyledText style={{ color: palette.error, fontWeight: 'bold', marginTop: 2 }}>❌</StyledText>
                         <StyledText 
-                          className="text-sm leading-relaxed flex-1"
-                          style={{ color: palette.isDark ? '#FEB7B7' : '#9B2C2C' }}
+                          className="text-sm leading-relaxed flex-1 font-semibold"
+                          style={{ color: palette.textPrimary }}
                         >
                           {mistake}
                         </StyledText>
@@ -568,7 +747,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
 
                 {Array.isArray((slide as any).interviewerQuestions) && (
                   <StyledView className="gap-2 mt-2">
-                    <StyledText className="text-[10px] font-black uppercase tracking-wider" style={{ color: palette.accent }}>
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.accent }}>
                       ❓ Potential Interviewer Follow-ups
                     </StyledText>
                     {(slide as any).interviewerQuestions.map((q: string, i: number) => (
@@ -581,10 +760,10 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                           className="w-5 h-5 rounded-full justify-center items-center mt-0.5"
                           style={{ backgroundColor: palette.accentBg }}
                         >
-                          <StyledText className="text-[10px] font-black" style={{ color: palette.accent }}>?</StyledText>
+                          <StyledText className="text-[10px] font-semibold" style={{ color: palette.accent }}>?</StyledText>
                         </StyledView>
                         <StyledText 
-                          className="text-sm leading-relaxed font-bold flex-1"
+                          className="text-sm leading-relaxed font-semibold flex-1"
                           style={{ color: palette.textPrimary }}
                         >
                           {q}
@@ -594,7 +773,6 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                   </StyledView>
                 )}
               </StyledView>
-            )}iew>
             )}
 
             {/* Spaced Recall Timeframes */}
@@ -602,7 +780,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
               <StyledView className="gap-4">
                 {(slide as any).recall && typeof (slide as any).recall === 'object' && (
                   <StyledView className="gap-3">
-                    <StyledText className="text-[10px] font-black uppercase tracking-wider" style={{ color: palette.textSecondary }}>
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.textSecondary }}>
                       ⚡ Rapid Recall Compression
                     </StyledText>
                     {Object.entries((slide as any).recall).map(([time, text]: any, i) => (
@@ -615,7 +793,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                           className="px-2 py-0.5 rounded border mt-0.5"
                           style={{ backgroundColor: palette.accentBg, borderColor: palette.border, borderWidth: 1 }}
                         >
-                          <StyledText className="text-[9px] font-black uppercase" style={{ color: palette.accent }}>{time}</StyledText>
+                          <StyledText className="text-[9px] font-semibold uppercase" style={{ color: palette.accent }}>{time}</StyledText>
                         </StyledView>
                         <StyledText 
                           className="text-sm leading-relaxed flex-1 font-medium"
@@ -630,7 +808,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
 
                 {Array.isArray((slide as any).patternConnections) && (
                   <StyledView className="gap-2 mt-2">
-                    <StyledText className="text-[10px] font-black uppercase tracking-wider" style={{ color: palette.textSecondary }}>
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.textSecondary }}>
                       🔗 Pattern Connections & Similar Problems
                     </StyledText>
                     <StyledView className="flex-row flex-wrap gap-2">
@@ -640,7 +818,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                           className="px-3 py-1.5 rounded-xl border"
                           style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
                         >
-                          <StyledText className="text-xs font-bold" style={{ color: palette.textSecondary }}>🔗 {problem}</StyledText>
+                          <StyledText className="text-xs font-semibold" style={{ color: palette.textSecondary }}>🔗 {problem}</StyledText>
                         </StyledView>
                       ))}
                     </StyledView>
@@ -660,13 +838,13 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                   {/* Time Complexity Card */}
                   <StyledView 
                     className="flex-1 rounded-2xl p-4 items-center border"
-                    style={{ backgroundColor: palette.isDark ? 'rgba(129, 140, 248, 0.08)' : 'rgba(139, 92, 246, 0.04)', borderColor: palette.border }}
+                    style={{ backgroundColor: addAlpha(palette.accent, 0.08), borderColor: palette.border }}
                   >
                     <BrainCircuit color={palette.accent} size={24} />
-                    <StyledText className="text-lg font-black mt-2" style={{ color: palette.accent }}>
+                    <StyledText className="text-lg font-bold mt-2" style={{ color: palette.accent }}>
                       {card.complexity?.split('/')[0] || card.complexity || 'O(N)'}
                     </StyledText>
-                    <StyledText className="text-[10px] font-bold uppercase tracking-wider mt-1" style={{ color: palette.textPrimary }}>
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider mt-1" style={{ color: palette.textPrimary }}>
                       Time Complexity
                     </StyledText>
                     <StyledText className="text-[9px] text-center mt-2 leading-relaxed" style={{ color: palette.textSecondary }}>
@@ -677,13 +855,13 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                   {/* Space Complexity Card */}
                   <StyledView 
                     className="flex-1 rounded-2xl p-4 items-center border"
-                    style={{ backgroundColor: palette.isDark ? 'rgba(16, 185, 129, 0.08)' : 'rgba(16, 185, 129, 0.04)', borderColor: palette.border }}
+                    style={{ backgroundColor: addAlpha(palette.success, 0.08), borderColor: palette.border }}
                   >
-                    <Archive color="#10B981" size={24} />
-                    <StyledText className="text-lg font-black mt-2" style={{ color: '#10B981' }}>
+                    <Archive color={palette.success} size={24} />
+                    <StyledText className="text-lg font-bold mt-2" style={{ color: palette.success }}>
                       {card.complexity?.split('/')[1] || 'O(1)'}
                     </StyledText>
-                    <StyledText className="text-[10px] font-bold uppercase tracking-wider mt-1" style={{ color: palette.textPrimary }}>
+                    <StyledText className="text-[10px] font-semibold uppercase tracking-wider mt-1" style={{ color: palette.textPrimary }}>
                       Space Complexity
                     </StyledText>
                     <StyledText className="text-[9px] text-center mt-2 leading-relaxed" style={{ color: palette.textSecondary }}>
@@ -756,7 +934,7 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
               >
                 <StyledView className="flex-row items-center gap-2">
                   <StyledView className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: palette.accent }} />
-                  <StyledText className="text-[16px] font-black tracking-tight uppercase" style={{ color: palette.accent }}>
+                  <StyledText className="text-[16px] font-semibold tracking-tight uppercase" style={{ color: palette.accent }}>
                     Key Takeaways
                   </StyledText>
                 </StyledView>
@@ -770,6 +948,95 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
           </StyledView>
         </StyledScrollView>
       </StyledView>
+
+      <Modal
+        visible={isFullscreenCodeOpen}
+        animationType="fade"
+        presentationStyle="overFullScreen"
+        transparent={true}
+        onRequestClose={() => setIsFullscreenCodeOpen(false)}
+      >
+        <StyledView className="flex-1 bg-[#090E1A] pt-12 pb-6 px-4">
+          {/* Header */}
+          <StyledView className="flex-row items-center justify-between pb-4 border-b border-zinc-800/60 mb-4">
+            <StyledView className="flex-1 mr-4">
+              <StyledText className="text-[10px] font-semibold uppercase tracking-widest text-blue-400 mb-0.5">
+                {card.topic || 'DSA CODE'}
+              </StyledText>
+              <StyledText className="text-lg font-bold text-white leading-tight" numberOfLines={1}>
+                {card.title}
+              </StyledText>
+            </StyledView>
+            
+            {/* Controls */}
+            <StyledView className="flex-row items-center gap-3">
+              {/* Zoom Out Button */}
+              <StyledTouchableOpacity 
+                onPress={() => setZoomFontSize(prev => Math.max(8, prev - 1))}
+                className="w-8 h-8 rounded-lg bg-zinc-800/80 border border-zinc-700/60 items-center justify-center"
+              >
+                <StyledText className="text-white text-xs font-semibold">A-</StyledText>
+              </StyledTouchableOpacity>
+              
+              {/* Zoom Indicator */}
+              <StyledText className="text-zinc-400 font-mono text-xs w-6 text-center">{zoomFontSize}</StyledText>
+              
+              {/* Zoom In Button */}
+              <StyledTouchableOpacity 
+                onPress={() => setZoomFontSize(prev => Math.min(24, prev + 1))}
+                className="w-8 h-8 rounded-lg bg-zinc-800/80 border border-zinc-700/60 items-center justify-center"
+              >
+                <StyledText className="text-white text-xs font-semibold">A+</StyledText>
+              </StyledTouchableOpacity>
+
+              {/* Close Button */}
+              <StyledTouchableOpacity 
+                onPress={() => setIsFullscreenCodeOpen(false)}
+                className="w-8 h-8 rounded-full bg-zinc-800 items-center justify-center"
+              >
+                <X size={16} color="#FFFFFF" />
+              </StyledTouchableOpacity>
+            </StyledView>
+          </StyledView>
+
+          {/* Code Body */}
+          <StyledView className="flex-1 rounded-2xl border border-zinc-800/60 overflow-hidden bg-[#090E1A]">
+            <ScrollView 
+              showsVerticalScrollIndicator={true}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingVertical: 12 }}
+            >
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={true}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ minWidth: '100%', paddingHorizontal: 16 }}
+              >
+                <SyntaxHighlighter
+                  language="cpp"
+                  style={atomOneDark}
+                  fontSize={zoomFontSize}
+                  customStyle={{ 
+                    borderRadius: 0, 
+                    padding: 0, 
+                    fontSize: zoomFontSize, 
+                    lineHeight: Math.round(zoomFontSize * 1.5), 
+                    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+                    backgroundColor: '#090E1A',
+                  } as any}
+                  // @ts-ignore
+                  CodeTag={CodeText}
+                  // @ts-ignore
+                  PreTag={Platform.OS === 'web' ? 'pre' : View}
+                >
+                  {slide.code || ''}
+                </SyntaxHighlighter>
+              </ScrollView>
+            </ScrollView>
+          </StyledView>
+        </StyledView>
+      </Modal>
+
     </StyledView>
   );
 };

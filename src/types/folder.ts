@@ -26,6 +26,7 @@ export interface IFolder {
   cardIds?: string[];
   createdAt: string;
   updatedAt: string;
+  pinned?: boolean;
 }
 
 export type CreateFolderDTO = {

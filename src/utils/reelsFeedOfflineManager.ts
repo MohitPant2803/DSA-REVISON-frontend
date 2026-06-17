@@ -76,6 +76,11 @@ export function invalidateSliceCache() {
   cachedSliceUserId = '';
 }
 
+export function setSessionMemoryShadow(session: typeof sessionMemoryShadow) {
+  sessionMemoryShadow = session;
+  invalidateSliceCache();
+}
+
 let saveSessionTimeout: NodeJS.Timeout | null = null;
 let lastRegenTimestamp = 0;
 let replenishmentAttemptsCount = 0;
@@ -302,47 +307,21 @@ export async function computeLocalContentHash(
  * Get or Create user folder preferences asynchronously from SQLite.
  */
 export async function getLocalUserPreferences(userId: string): Promise<{ selectedRootFolderIds: string[] }> {
-  if (userId === 'guest-user') {
-    const selectedRootFolderIds = usePlaylistStateStore.getState().selectedRootFolderIds;
+  // Directly read from Zustand store to bypass SQLite database locking
+  const state = usePlaylistStateStore.getState();
+  const selectedRootFolderIds = state.selectedRootFolderIds;
+  if (Array.isArray(selectedRootFolderIds) && selectedRootFolderIds.length > 0) {
     return { selectedRootFolderIds };
   }
 
-  if (!isSQLiteAvailable()) return { selectedRootFolderIds: [] };
-  const db = await getDatabase();
+  // Fallback to root folders in Zustand (folders where parentFolderId is null/empty and non-deleted)
+  const foldersById = state.foldersById || {};
+  const rootFoldersFromStore = Object.values(foldersById).filter(
+    (f: any) => f && !f.isDeleted && (!f.parentFolderId || f.parentFolderId === null)
+  );
+  const folderIds = rootFoldersFromStore.map((f: any) => f.id || f._id).filter(Boolean);
 
-  try {
-    const row = await db.getFirstAsync<{ selectedRootFolderIds: string }>(
-      'SELECT selectedRootFolderIds FROM reel_sessions WHERE userId = ? LIMIT 1;',
-      [userId]
-    );
-
-    if (row && row.selectedRootFolderIds) {
-      const parsed = JSON.parse(row.selectedRootFolderIds);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return { selectedRootFolderIds: parsed };
-      }
-    }
-
-    // Default: find all root folders (parentFolderId is NULL)
-    const rootFolders = await db.getAllAsync<{ id: string }>(
-      'SELECT id FROM folders WHERE parentFolderId IS NULL AND isDeleted = 0;'
-    );
-    let folderIds = rootFolders.map(f => f.id);
-
-    if (folderIds.length === 0) {
-      // Fallback to Zustand state root folders if SQLite returns empty
-      const foldersById = usePlaylistStateStore.getState().foldersById;
-      const rootFoldersFromStore = Object.values(foldersById || {}).filter(
-        (f: any) => f && !f.isDeleted && (!f.parentFolderId || f.parentFolderId === null)
-      );
-      folderIds = rootFoldersFromStore.map((f: any) => f.id || f._id).filter(Boolean);
-    }
-
-    return { selectedRootFolderIds: folderIds };
-  } catch (err: any) {
-    console.error('[Offline Feed Manager] Failed to get user preferences:', err.message);
-    return { selectedRootFolderIds: [] };
-  }
+  return { selectedRootFolderIds: folderIds };
 }
 
 /**
@@ -925,6 +904,8 @@ export async function getReelFeedSliceLocally(userId: string, feedSessionId?: st
       sliceIds = cleanQueue.slice(startIdx, endIdx + 1);
 
       if (sliceIds.length === 0) break;
+
+
 
       orderedSlice = sliceIds.map(id => {
         const cleanId = id.split('-loop-')[0];

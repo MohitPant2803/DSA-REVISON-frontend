@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import * as playlistService from '@/services/playlistService';
 import * as revisionService from '@/services/revisionService';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
@@ -53,10 +54,27 @@ export const SYSTEM_PLAYLISTS = [
 
 export function buildSystemPlaylists() {
   const state = usePlaylistStateStore.getState();
+  const cardDifficultyMap = state.cardDifficultyMap;
 
   return SYSTEM_PLAYLISTS.map(p => {
     const playlistId = p.id;
-    const itemCount = Math.max(0, (state.initialSmartCounts[playlistId] || 0) + (state.smartPlaylistDeltaCounts[playlistId] || 0));
+    
+    // Resolve current count dynamically from loaded store cards
+    const resolved = Object.keys(state.cardsById)
+      .map((cardId) => state.cardsById[cardId])
+      .filter((card: any) => card && !card.isDeleted)
+      .map((card) => resolveCardState(card, cardDifficultyMap, state.cardsById))
+      .filter((resolvedCard) => resolvedCard.difficultyState === playlistId);
+
+    // Deduplicate by title to match actual playlist contents
+    const seenTitles = new Set<string>();
+    const itemCount = resolved.filter((card) => {
+      if (!card.title) return false;
+      const titleKey = card.title.trim().toLowerCase();
+      if (seenTitles.has(titleKey)) return false;
+      seenTitles.add(titleKey);
+      return true;
+    }).length;
     
     return {
       ...p,
@@ -78,7 +96,7 @@ export const usePlaylists = () => {
   const uiPlaylists = useMemo(() => {
     const smart = buildSystemPlaylists();
 
-    if (!isAuthenticated) {
+    if (!isAuthenticated && !isGuest) {
       return smart;
     }
 
@@ -90,46 +108,31 @@ export const usePlaylists = () => {
     );
 
     return [...smart, ...customPlaylists];
-  }, [playlistsById, isAuthenticated]);
+  }, [playlistsById, isAuthenticated, isGuest]);
 
   const queryResult = useQuery({
     queryKey: [PLAYLISTS_KEY, isAuthenticated],
     queryFn: async () => {
-      if (!isAuthenticated) return uiPlaylists;
-      try {
-        const list = await playlistService.getPlaylists();
-        if (list) {
-          hydratePlaylists(list);
-        }
-        
-        // Filter out system playlists from the API response so they don't leak into the custom UI
-        const filteredList = list.filter((p: any) => !p.isDeleted && p.kind !== 'system' && !p.systemKey);
-        const mappedList = filteredList.map((p, i) => mapApiPlaylist(p, i));
-        
-        const smart = buildSystemPlaylists();
-        return [...smart, ...mappedList];
-      } catch (err) {
-        return uiPlaylists;
-      }
+      return uiPlaylists;
     },
-    enabled: isAuthenticated && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60 * 10,
-    gcTime: 1000 * 60 * 60,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
+    enabled: false,
   });
 
-  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated || !isAuthenticated || Object.keys(playlistsById).length > 0;
-
   return {
-    data: hasLocal ? uiPlaylists : queryResult.data || [],
-    isLoading: queryResult.isLoading && !hasLocal,
-    isError: queryResult.isError && !hasLocal,
-    isFetched: queryResult.isFetched || hasLocal,
-    error: queryResult.error,
-    refetch: queryResult.refetch,
+    data: uiPlaylists,
+    isLoading: false,
+    isError: false,
+    isFetched: true,
+    error: null,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[usePlaylists] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
   };
 };
 
@@ -156,7 +159,6 @@ export const usePlaylistCards = (playlistId: string | null) => {
   const storeCards = useStorePlaylistCards(playlistId || '');
   const hydratePlaylistCards = usePlaylistStateStore((s) => s.hydratePlaylistCards);
   const hydratedPlaylists = usePlaylistStateStore((s) => s.hydratedPlaylists);
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId || '');
@@ -164,39 +166,39 @@ export const usePlaylistCards = (playlistId: string | null) => {
 
   const queryResult = useQuery({
     queryKey: [PLAYLIST_DETAIL_KEY, playlistId, 'cards'],
-    queryFn: async (): Promise<IPopulatedRevisionCard[]> => {
-      if (!playlistId) return [];
+    queryFn: async () => {
+      if (isGuest || isSmart || !playlistId) return storeCards;
       try {
-        const detail = await playlistService.getPlaylistById(playlistId);
-        if (!detail) return [];
-
-        let cards: IPopulatedRevisionCard[] = [];
-        if (detail.items && detail.items.length && typeof detail.items[0] === 'object') {
-          cards = detail.items as IPopulatedRevisionCard[];
-        } else if (detail.cardIds && detail.cardIds.length) {
-          cards = await revisionService.getRevisionCardsByIds(detail.cardIds);
-        }
-
-        // Always hydrate in local-first cache, even if count is 0, to set hydratedPlaylists flag
-        hydratePlaylistCards(playlistId, cards);
+        const { getPlaylistById } = require('@/services/playlistService');
+        const data = await getPlaylistById(playlistId);
+        const cards = data.items || [];
+        await hydratePlaylistCards(playlistId, cards);
         return cards;
       } catch (err) {
+        console.warn('[usePlaylistCards] Fetch failed, returning store cards:', err);
         return storeCards;
       }
     },
-    enabled: !!playlistId && !hasSyncedThisSession && !isGuest,
+    enabled: !!playlistId && !isGuest && !isSmart,
     staleTime: 1000 * 60 * 10,
   });
 
-  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = isSmart || isGuest ? hasHydrated : isHydrated;
+  const hasLocal = isSmart || isGuest ? true : isHydrated;
 
   return {
-    data: hasLocal ? storeCards : queryResult.data || [],
-    isLoading: queryResult.isLoading && !hasLocal,
-    isError: queryResult.isError && !hasLocal,
+    data: hasLocal && storeCards.length > 0 ? storeCards : queryResult.data || storeCards,
+    isLoading: queryResult.isLoading && !hasLocal && storeCards.length === 0,
+    isError: queryResult.isError && storeCards.length === 0,
     error: queryResult.error,
-    refetch: queryResult.refetch,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[usePlaylistCards] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
   };
 };
 
@@ -209,10 +211,10 @@ export const useCreatePlaylist = () => {
     mutationFn: async (name: string) => {
       const count = Object.keys(usePlaylistStateStore.getState().playlistsById).length;
       const [color1, color2] = PRESET_COLORS[count % PRESET_COLORS.length];
-      const tempId = `temp-playlist-${Date.now()}`;
+      const uuid = Crypto.randomUUID();
       
-      const tempPlaylist: ApiPlaylist = {
-        _id: tempId,
+      const playlist: ApiPlaylist = {
+        _id: uuid,
         name,
         color1,
         color2,
@@ -222,16 +224,16 @@ export const useCreatePlaylist = () => {
       };
 
       // 1. Optimistic update in Zustand store (always)
-      createPlaylistInStore(tempPlaylist);
+      createPlaylistInStore(playlist);
 
       // 2. Enqueue action for later sync
       enqueueOfflineAction({
         action: 'CREATE_PLAYLIST',
-        payload: { tempId, name, color1, color2 },
+        payload: { playlistId: uuid, name, color1, color2, cardIds: [] },
         timestamp: Date.now(),
       });
-      console.log(`[MUTATION] CREATE_PLAYLIST | ID: ${tempId} | Name: ${name}`);
-      return Promise.resolve(tempPlaylist);
+      console.log(`[MUTATION] CREATE_PLAYLIST | ID: ${uuid} | Name: ${name}`);
+      return Promise.resolve(playlist);
     },
   });
 };
@@ -289,24 +291,24 @@ export const useDuplicatePlaylist = () => {
       const source = usePlaylistStateStore.getState().playlistsById[playlistId];
       if (!source) throw new Error('Playlist not found in local cache');
 
-      const tempId = `temp-playlist-dup-${Date.now()}`;
-      const tempPlaylist: ApiPlaylist = {
+      const uuid = Crypto.randomUUID();
+      const playlist: ApiPlaylist = {
         ...source,
-        _id: tempId,
+        _id: uuid,
         name: `${source.name} (Copy)`,
       };
 
       // 1. Optimistic update
-      createPlaylistInStore(tempPlaylist);
+      createPlaylistInStore(playlist);
 
       // 2. Enqueue action for later sync
       enqueueOfflineAction({
         action: 'CREATE_PLAYLIST',
-        payload: { tempId, name: tempPlaylist.name, color1: tempPlaylist.color1, color2: tempPlaylist.color2, cardIds: tempPlaylist.cardIds },
+        payload: { playlistId: uuid, name: playlist.name, color1: playlist.color1, color2: playlist.color2, cardIds: playlist.cardIds },
         timestamp: Date.now(),
       });
       if (__DEV__) console.log('[useDuplicatePlaylist] Local-first mode active. Enqueued for later sync.');
-      return Promise.resolve(tempPlaylist);
+      return Promise.resolve(playlist);
     },
   });
 };

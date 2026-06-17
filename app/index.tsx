@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, Platform } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Dimensions, Platform, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import Animated, {
@@ -20,6 +20,9 @@ import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { springPresets, easings } from '@/theme/motion';
 import { preloadStaticAssets, preheatNetwork, startOptimisticDataPreload } from '@/utils/preload';
 import { hapticFeedback } from '@/utils/haptics';
+import { ReeWCharacter } from '@/components/ReeWCharacter';
+import { GlassPanel } from '@/components/motion/GlassPanel';
+import { useThemePalette } from '@/hooks/useThemePalette';
 
 const { width } = Dimensions.get('window');
 
@@ -28,10 +31,122 @@ export default function StartupCoordinator() {
   const { isLoading: isAuthLoading, isAuthenticated, user } = useAuthStore();
   const { isOnboarded, resetOnboarding } = useOnboardingStore();
   const [isPreloadComplete, setIsPreloadComplete] = useState(false);
+  const [hasTimeoutError, setHasTimeoutError] = useState(false);
+  const timeoutTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  
+  const palette = useThemePalette();
+  const buttonTextColor = palette.isDark ? palette.textPrimary : palette.surface;
 
   const bootstrapStatus = usePlaylistStateStore((s) => s.bootstrapStatus);
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
   const isStoreReady = hasHydrated && (bootstrapStatus === 'completed' || bootstrapStatus === 'failed');
+
+  const checkDatabaseAndSetTimeoutError = () => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    const state = usePlaylistStateStore.getState();
+    const currentStoreReady = state.hasHydrated && 
+      (state.bootstrapStatus === 'completed' || state.bootstrapStatus === 'failed');
+
+    if (currentStoreReady) {
+      const cardCount = Object.keys(state.cardsById || {}).length;
+      if (cardCount === 0) {
+        setHasTimeoutError(true);
+      } else {
+        // We have local cached cards in the database; bypass connection error and proceed
+        setIsPreloadComplete(true);
+      }
+    } else {
+      // Store not ready yet. Subscribe and check once hydration completes/fails.
+      unsubscribeRef.current = usePlaylistStateStore.subscribe((state) => {
+        const ready = state.hasHydrated && 
+          (state.bootstrapStatus === 'completed' || state.bootstrapStatus === 'failed');
+        if (ready) {
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+          }
+          const cardCount = Object.keys(state.cardsById || {}).length;
+          if (cardCount === 0) {
+            setHasTimeoutError(true);
+          } else {
+            setIsPreloadComplete(true);
+          }
+        }
+      });
+    }
+  };
+
+  const startTimeoutTimer = () => {
+    if (timeoutTimerRef.current) {
+      clearTimeout(timeoutTimerRef.current);
+    }
+    timeoutTimerRef.current = setTimeout(() => {
+      checkDatabaseAndSetTimeoutError();
+    }, 15000); // 15 seconds timeout
+  };
+
+  const clearTimeoutTimer = () => {
+    if (timeoutTimerRef.current) {
+      clearTimeout(timeoutTimerRef.current);
+      timeoutTimerRef.current = null;
+    }
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+  };
+
+  const handleRetry = async () => {
+    hapticFeedback.impactLight();
+    setHasTimeoutError(false);
+    
+    try {
+      const authStore = useAuthStore.getState();
+      if (!authStore.isAuthenticated && authStore.isLoading) {
+        await authStore.restoreSession();
+      }
+      
+      const currentTrigger = usePlaylistStateStore.getState().syncTriggerCount || 0;
+      usePlaylistStateStore.setState({ 
+        bootstrapStatus: 'not_started',
+        syncTriggerCount: currentTrigger + 1 
+      });
+    } catch (e) {
+      console.warn('Retry sync error:', e);
+    }
+    
+    startTimeoutTimer();
+  };
+
+  const handleRestartApp = () => {
+    hapticFeedback.impactMedium();
+    if (__DEV__) {
+      try {
+        const { DevSettings } = require('react-native');
+        DevSettings.reload();
+        return;
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    try {
+      const Updates = require('expo-updates');
+      if (Updates && typeof Updates.reloadAsync === 'function') {
+        Updates.reloadAsync();
+        return;
+      }
+    } catch (e) {
+      // ignore
+    }
+    
+    handleRetry();
+  };
 
   // Animation Shared Values
   const logoScale = useSharedValue(0.7);
@@ -100,10 +215,9 @@ export default function StartupCoordinator() {
     const executePipeline = async () => {
       const startTime = Date.now();
       try {
-        await Promise.all([
-          preloadStaticAssets(),
-          preheatNetwork(),
-        ]);
+        // Fire preheat in background without awaiting, so it does not block the splash screen
+        preheatNetwork().catch(() => {});
+        await preloadStaticAssets();
       } catch (e) {
         console.warn('Startup pipeline warning:', e);
       } finally {
@@ -117,6 +231,8 @@ export default function StartupCoordinator() {
     };
 
     executePipeline();
+    startTimeoutTimer();
+    return () => clearTimeoutTimer();
   }, []);
 
   // 4. PHASE 3 & 4: Exit sequence and Routing handoff
@@ -126,6 +242,7 @@ export default function StartupCoordinator() {
     if (needsStoreReady && !isStoreReady) return;
 
     const performCinematicExit = () => {
+      clearTimeoutTimer();
       // Set exit state
       isExiting.value = withTiming(1, { duration: 600, easing: easings.easeOutExpo });
       
@@ -197,7 +314,7 @@ export default function StartupCoordinator() {
   }));
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: palette.background }]}>
       {/* Dynamic Living Watercolor Background Canvas */}
       <Animated.View style={[StyleSheet.absoluteFill, glowAnimatedStyle]}>
         <Svg width="100%" height="100%" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice">
@@ -439,7 +556,7 @@ export default function StartupCoordinator() {
 
       <View style={styles.content}>
         {/* Glowing Branding Tile */}
-        <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
+        <Animated.View style={[styles.logoContainer, logoAnimatedStyle, { backgroundColor: palette.surface, borderColor: palette.border }]}>
           <Image
             source={require('../assets/icon213.png')}
             style={{ width: '100%', height: '100%', borderRadius: 24 }}
@@ -449,10 +566,56 @@ export default function StartupCoordinator() {
 
         {/* Cinematic Typographic Sequence */}
         <Animated.View style={[styles.textContainer, textAnimatedStyle]}>
-          <Text style={styles.title}>ReeWise</Text>
-          <Text style={styles.subtitle}>Curating active recall...</Text>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>ReeWise</Text>
+          <Text style={[styles.subtitle, { color: palette.textSecondary }]}>Making revision convinient...</Text>
         </Animated.View>
       </View>
+
+      {hasTimeoutError && (
+        <View style={[styles.overlayContainer, { backgroundColor: palette.overlayBg }]}>
+          <GlassPanel
+            intensity={30}
+            tint="light"
+            borderColor={palette.border}
+            borderRadius={32}
+            style={StyleSheet.flatten([styles.timeoutCard, { backgroundColor: palette.dialogBg, borderColor: palette.border, shadowColor: palette.shadow }])}
+          >
+            <View style={styles.cardContent}>
+              <ReeWCharacter state="cute_sad" size={88} disableIdleCycle={true} />
+              
+              <Text style={[styles.errorTitle, { color: palette.textPrimary }]}>Connection Issue</Text>
+              
+              <Text style={[styles.errorMessage, { color: palette.textSecondary }]}>
+                We couldn't connect to the server. Please check your internet connection and restart the app.
+              </Text>
+
+              <View style={styles.buttonContainer}>
+                <Pressable
+                  onPress={handleRetry}
+                  style={({ pressed }) => [
+                    styles.retryButton,
+                    { backgroundColor: palette.accent, shadowColor: palette.accentGlow },
+                    pressed && { opacity: 0.8 }
+                  ]}
+                >
+                  <Text style={[styles.retryButtonText, { color: buttonTextColor }]}>Retry Connection</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleRestartApp}
+                  style={({ pressed }) => [
+                    styles.restartButton,
+                    { borderColor: palette.accent },
+                    pressed && { opacity: 0.8 }
+                  ]}
+                >
+                  <Text style={[styles.restartButtonText, { color: palette.accent }]}>Restart App</Text>
+                </Pressable>
+              </View>
+            </View>
+          </GlassPanel>
+        </View>
+      )}
     </View>
   );
 }
@@ -460,7 +623,6 @@ export default function StartupCoordinator() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF6F0', // Serene warm sand-cream paper canvas
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -472,9 +634,7 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 24,
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -483,15 +643,79 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    color: '#0F172A', // Dark navy
     fontSize: 26,
     fontWeight: 'normal',
     letterSpacing: -0.5,
     marginBottom: 8,
   },
   subtitle: {
-    color: '#475569', // Soft charcoal
     fontSize: 14,
     fontWeight: 'normal',
+  },
+  overlayContainer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    padding: 24,
+  },
+  timeoutCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 1.5,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  cardContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    fontWeight: '600',
+    marginBottom: 20,
+  },
+  buttonContainer: {
+    width: '100%',
+    gap: 10,
+  },
+  retryButton: {
+    borderRadius: 16,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  retryButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  restartButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderRadius: 16,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restartButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

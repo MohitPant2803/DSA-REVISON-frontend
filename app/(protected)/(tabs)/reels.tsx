@@ -59,8 +59,12 @@ import { useGetFolders } from '@/hooks/useFolders';
 import { RevisionCard } from '../RevisionCard';
 import { useUpdateLastViewedCard, useFolderLoops } from '@/services/useUserProgress';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
-const ReelsSettingsOverlay = lazy(() => import('@/components/SettingsOverlay').then(m => ({ default: m.ReelsSettingsOverlay })));
-const PlaylistPickerModal = lazy(() => import('@/components/PlaylistPickerModal').then(m => ({ default: m.PlaylistPickerModal })));
+const ReelsSettingsOverlay = lazy(() =>
+  import('@/components/SettingsOverlay').then(m => ({ default: m.ReelsSettingsOverlay }))
+);
+const PlaylistPickerModal = lazy(() =>
+  import('@/components/PlaylistPickerModal').then(m => ({ default: m.PlaylistPickerModal }))
+);
 import { useShallow } from 'zustand/react/shallow';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 
@@ -100,14 +104,21 @@ import { usePlaylists, usePlaylistCards, useTogglePlaylistItem, useCreatePlaylis
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 
 import * as userCardStateService from '@/services/userCardStateService';
-import { ConceptCardPreview, ConceptCardPreviewStatic, getSlidesForCard } from '@/components/ConceptCardPreview';
+import { ConceptCardPreview, getSlidesForCard } from '@/components/ConceptCardPreview';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
+import { ThemeBackground } from '@/components/ThemeBackground';
 import { FirstFeedTutorial } from '@/components/onboarding/FirstFeedTutorial';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 
 // Global slides cache to store pre-compiled and pre-sorted slide arrays by card ID
+// IMPORTANT: Bump this version whenever getSlidesForCard logic changes,
+// to invalidate stale cache entries that persist across Metro fast refreshes.
+const SLIDES_LOGIC_VERSION = 2;
 const slidesCache = new Map<string, any[]>();
+slidesCache.clear(); // Force clear on module (re)load to bust stale hot-reload data
 const MAX_SLIDES_CACHE_SIZE = 50;
 
 const setCachedSlides = (key: string, value: any[]) => {
@@ -268,6 +279,7 @@ interface ReelItemSkeletonProps {
 
 // Complete mock visual structure of a Reel Card matching the live layout perfectly
 const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProps) => {
+  const palette = useThemePalette();
   const cardWidth = width * 0.97;
   return (
     <View
@@ -283,28 +295,30 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
           paddingTop: 64,
           paddingBottom: 24,
           justifyContent: 'space-between',
+          backgroundColor: palette.surface,
+          borderColor: palette.border,
         },
       ]}
     >
       <View style={{ gap: 20 }}>
         {/* Mock Badge Header capsules */}
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          <BreathingOpacitySkeleton style={{ width: 64, height: 20, borderRadius: 10, backgroundColor: 'rgba(139, 92, 246, 0.15)' }} />
-          <BreathingOpacitySkeleton style={{ width: 72, height: 20, borderRadius: 10, backgroundColor: 'rgba(16, 185, 129, 0.15)' }} />
-          <BreathingOpacitySkeleton style={{ width: 52, height: 20, borderRadius: 10, backgroundColor: 'rgba(100, 116, 139, 0.15)' }} />
+          <BreathingOpacitySkeleton style={{ width: 64, height: 20, borderRadius: 10, backgroundColor: addAlpha(palette.accent, 0.15) }} />
+          <BreathingOpacitySkeleton style={{ width: 72, height: 20, borderRadius: 10, backgroundColor: addAlpha(palette.success, 0.15) }} />
+          <BreathingOpacitySkeleton style={{ width: 52, height: 20, borderRadius: 10, backgroundColor: addAlpha(palette.textSecondary, 0.15) }} />
         </View>
 
         {/* Mock Title Multi-line layout */}
         <View style={{ gap: 8, marginTop: 12 }}>
-          <BreathingOpacitySkeleton style={{ width: '85%', height: 28, borderRadius: 8, backgroundColor: 'rgba(15, 23, 42, 0.1)' }} />
-          <BreathingOpacitySkeleton style={{ width: '65%', height: 28, borderRadius: 8, backgroundColor: 'rgba(15, 23, 42, 0.1)' }} />
+          <BreathingOpacitySkeleton style={{ width: '85%', height: 28, borderRadius: 8, backgroundColor: addAlpha(palette.textPrimary, 0.1) }} />
+          <BreathingOpacitySkeleton style={{ width: '65%', height: 28, borderRadius: 8, backgroundColor: addAlpha(palette.textPrimary, 0.1) }} />
         </View>
 
         {/* Mock Explanation block */}
         <View style={{ gap: 6, marginTop: 12 }}>
-          <BreathingOpacitySkeleton style={{ width: '95%', height: 14, borderRadius: 4, backgroundColor: 'rgba(15, 23, 42, 0.06)' }} />
-          <BreathingOpacitySkeleton style={{ width: '90%', height: 14, borderRadius: 4, backgroundColor: 'rgba(15, 23, 42, 0.06)' }} />
-          <BreathingOpacitySkeleton style={{ width: '75%', height: 14, borderRadius: 4, backgroundColor: 'rgba(15, 23, 42, 0.06)' }} />
+          <BreathingOpacitySkeleton style={{ width: '95%', height: 14, borderRadius: 4, backgroundColor: addAlpha(palette.textPrimary, 0.06) }} />
+          <BreathingOpacitySkeleton style={{ width: '90%', height: 14, borderRadius: 4, backgroundColor: addAlpha(palette.textPrimary, 0.06) }} />
+          <BreathingOpacitySkeleton style={{ width: '75%', height: 14, borderRadius: 4, backgroundColor: addAlpha(palette.textPrimary, 0.06) }} />
         </View>
       </View>
 
@@ -316,15 +330,15 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
             alignItems: 'center',
             height: 48,
             borderRadius: 16,
-            backgroundColor: 'rgba(139, 92, 246, 0.05)',
+            backgroundColor: addAlpha(palette.accent, 0.05),
             borderWidth: 1,
-            borderColor: 'rgba(139, 92, 246, 0.08)',
+            borderColor: addAlpha(palette.accent, 0.08),
             paddingHorizontal: 20,
           }}
         >
-          <BreathingOpacitySkeleton style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(139, 92, 246, 0.5)' }} />
-          <BreathingOpacitySkeleton style={{ width: 180, height: 12, borderRadius: 3, backgroundColor: 'rgba(139, 92, 246, 0.15)', marginLeft: 10 }} />
-          <BreathingOpacitySkeleton style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: 'rgba(139, 92, 246, 0.3)', marginLeft: 'auto' }} />
+          <BreathingOpacitySkeleton style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: addAlpha(palette.accent, 0.5) }} />
+          <BreathingOpacitySkeleton style={{ width: 180, height: 12, borderRadius: 3, backgroundColor: addAlpha(palette.accent, 0.15), marginLeft: 10 }} />
+          <BreathingOpacitySkeleton style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: addAlpha(palette.accent, 0.3), marginLeft: 'auto' }} />
         </View>
       </View>
 
@@ -338,14 +352,14 @@ const ReelItemSkeleton = React.memo(({ cardHeight, width }: ReelItemSkeletonProp
           backgroundColor: 'transparent',
           gap: 12,
           width: 50,
-        zIndex: 50,
-        elevation: 10,
+          zIndex: 50,
+          elevation: 10,
         }}
       >
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
-        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0, 0, 0, 0.1)' }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: addAlpha(palette.textPrimary, 0.1) }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: addAlpha(palette.textPrimary, 0.1) }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: addAlpha(palette.textPrimary, 0.1) }} />
+        <BreathingOpacitySkeleton style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: addAlpha(palette.textPrimary, 0.1) }} />
       </View>
 
     </View>
@@ -380,6 +394,9 @@ const ClassificationButton = React.memo(({
   shouldPulse = false,
   pulseDelay = 0,
 }: ClassificationButtonProps) => {
+  const palette = useThemePalette();
+  const isMidnight = palette.id === 'midnight';
+
   const handlePress = () => {
     onPress();
   };
@@ -388,7 +405,7 @@ const ClassificationButton = React.memo(({
     lightHaptic(); // Synchronous physical click haptic instantly on touch down!
   };
 
-  const displayColor = isActive ? activeColor : 'rgba(15, 23, 42, 0.22)';
+  const displayColor = isActive ? activeColor : (isMidnight ? '#FFFFFF' : 'rgba(15, 23, 42, 0.22)');
 
   return (
     <GHTouchableOpacity
@@ -432,7 +449,10 @@ const ReelsActionRail = React.memo(({
   isGuest,
   isDisabled = false,
 }: ReelsActionRailProps) => {
-  // â”€â”€ LOCAL STATE for instant visual feedback (no Zustand propagation wait) â”€â”€
+  const palette = useThemePalette();
+  const isMidnight = palette.id === 'midnight';
+
+  // ── LOCAL STATE for instant visual feedback (no Zustand propagation wait) ──
   const storeValue = usePlaylistStateStore(
     useCallback((s) => s.cardsById[cleanId]?.difficultyState ?? null, [cleanId])
   );
@@ -531,7 +551,7 @@ const ReelsActionRail = React.memo(({
       />
 
       {/* Futuristic Sleek Separator Line */}
-      <View style={{ width: 24, height: 1, backgroundColor: 'rgba(0, 0, 0, 0.15)', marginVertical: 6, marginBottom: 12 }} />
+      <View style={{ width: 24, height: 1, backgroundColor: isMidnight ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)', marginVertical: 6, marginBottom: 12 }} />
 
       <ClassificationButton
         label="Save"
@@ -611,6 +631,7 @@ const SlideCardWrapper = React.memo(({
   isLastSlide = false,
   flipRotation,
 }: SlideCardWrapperProps) => {
+  const palette = useThemePalette();
   // =========================================================================
   // Onboarding-style card stack animation with Dynamic Shadow Dampening
   // and Compositor-First solid opacities.
@@ -765,8 +786,12 @@ const SlideCardWrapper = React.memo(({
           height: cardHeight,
           position: 'absolute',
           overflow: 'visible', // Ensure outer shadow renders fully without clipping cuts
-          backgroundColor: isLastSlide ? '#F0F9FF' : '#ffffff', // Very light ice blue background
-          borderColor: isLastSlide ? 'rgba(234, 179, 8, 0.15)' : 'rgba(226, 232, 240, 0.8)', // Warm cohesive gold border
+          backgroundColor: isLastSlide
+            ? (palette.isDark ? '#090D1A' : '#F0F9FF')
+            : palette.surface,
+          borderColor: isLastSlide
+            ? (palette.isDark ? 'rgba(139, 92, 246, 0.25)' : 'rgba(234, 179, 8, 0.15)')
+            : palette.border,
         },
         animatedStyle,
       ]}
@@ -811,6 +836,7 @@ const ActiveReelItem = React.memo(({
   onScrollEnabledChange,
   isActiveCardClassified = true,
 }: ActiveReelItemProps) => {
+  const isActiveReel = index === activeIndex;
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const { preferences } = useUserPreferencesStore(
     useShallow((s) => ({ preferences: s.preferences }))
@@ -869,12 +895,14 @@ const ActiveReelItem = React.memo(({
   const isWatchLater = false;
 
   const slides = useMemo(() => {
-    const cacheKey = `${item._id}-${currentPrefsKey}`;
+    const slidesHash = item.slides ? JSON.stringify(item.slides) : '';
+    const cacheKey = `v${SLIDES_LOGIC_VERSION}-${item._id}-${item.updatedAt || ''}-${slidesHash}-${currentPrefsKey}`;
     if (slidesCache.has(cacheKey)) {
       return slidesCache.get(cacheKey)!;
     }
 
     const baseSlides = getSlidesForCard(item);
+
     const introSlide = baseSlides.find(s => s.type === 'intro');
     let otherSlides = baseSlides.filter(s => s.type !== 'intro');
     
@@ -1029,6 +1057,7 @@ const ActiveReelItem = React.memo(({
   const VELOCITY_THRESHOLD = 120; // registers fast finger flicks
 
   const horizontalGesture = Gesture.Pan()
+    .enabled(isActiveReel)
     // Optimized horizontal engagement window to prevent vertical swipe hijacking
     .activeOffsetX([-5, 5])
     .failOffsetY([-150, 150])
@@ -1138,16 +1167,6 @@ const ActiveReelItem = React.memo(({
     });
 
   const renderSlideContent = (slide: typeof slides[0], indexInDeck: number) => {
-    if (indexInDeck === 0) {
-      return (
-        <ConceptCardPreview
-          card={item}
-          activePlaylistId={activePlaylistId}
-          onViewExplanation={scrollHorizontal}
-          scrollEnabled={false}
-        />
-      );
-    }
     return (
       <RevisionCard
         slide={{
@@ -1204,6 +1223,7 @@ const ActiveReelItem = React.memo(({
         >
           {slides.map((slide, indexInDeck) => {
             const delta = indexInDeck - activeSlideIndex;
+            const isNearViewport = Math.abs(delta) <= 1;
 
             let zIndex = 0;
             if (delta === 0) zIndex = 2;
@@ -1223,7 +1243,7 @@ const ActiveReelItem = React.memo(({
                 cardHeight={cardHeight}
                 width={width}
                 zIndex={zIndex}
-                renderSlideContent={renderSlideContent}
+                renderSlideContent={isNearViewport ? renderSlideContent : () => <View style={{ flex: 1 }} />}
                 shadowProgress={shadowProgress}
                 isLastSlide={indexInDeck === slides.length - 1}
                 flipRotation={flipRotation}
@@ -1240,12 +1260,16 @@ const ActiveReelItem = React.memo(({
         onDifficultyStateUpdate={(state) => onDifficultyStateUpdate(cleanId, state)}
         onPlaylistPickerTrigger={onPlaylistPickerTrigger}
         isGuest={isGuest}
+        isDisabled={!isActiveReel}
       />
     </View>
   );
 }, (prevProps, nextProps) => {
   return (
     prevProps.item._id === nextProps.item._id &&
+    prevProps.item.updatedAt === nextProps.item.updatedAt &&
+    (prevProps.item as any).isContentFullyHydrated === (nextProps.item as any).isContentFullyHydrated &&
+    JSON.stringify(prevProps.item.slides) === JSON.stringify(nextProps.item.slides) &&
     prevProps.item.difficultyState === nextProps.item.difficultyState &&
     prevProps.activeIndex === nextProps.activeIndex &&
     prevProps.index === nextProps.index &&
@@ -1257,190 +1281,6 @@ const ActiveReelItem = React.memo(({
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
     prevProps.scrollEnabled === nextProps.scrollEnabled &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
-  );
-});
-
-interface InactiveReelItemProps {
-  item: IPopulatedRevisionCard;
-  index: number;
-  activeIndex: number;
-  cardHeight: number;
-  activePlaylistId: string | null;
-  isActiveCardClassified: boolean;
-  isGuest: boolean; // Add isGuest to ensure slide-comparators match exactly
-  shadowProgress: SharedValue<number>;
-}
-
-const InactiveReelItem = React.memo(({
-  item,
-  index,
-  activeIndex,
-  cardHeight,
-  activePlaylistId,
-  isActiveCardClassified,
-  isGuest,
-  shadowProgress,
-}: InactiveReelItemProps) => {
-  const isNextCard = index === activeIndex + 1;
-  const isLockedNextCard = false;
-
-  const fadeAnim = useRef(new RNAnimated.Value(1)).current;
-  const prevItemId = useRef(item._id);
-
-  useEffect(() => {
-    if (prevItemId.current !== item._id) {
-      prevItemId.current = item._id;
-      // Quick fade out and back in on card change
-      fadeAnim.setValue(0);
-      RNAnimated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 80,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [item._id]);
-
-  const animatedCardStyle = useAnimatedStyle(() => {
-    const shadowOpacity = 0.04 * shadowProgress.value;
-    const elevation = 3 * shadowProgress.value;
-    return {
-      transform: [{ scale: 1.0 }],
-      opacity: 1.0, // Promoted to fully solid, solid surface
-      shadowColor: '#0F172A',
-      shadowOffset: { width: 0, height: 10 },
-      shadowRadius: 20,
-      shadowOpacity,
-      elevation,
-    };
-  });
-
-  const overlayStyle = useAnimatedStyle(() => {
-    return {
-      opacity: isLockedNextCard ? 1 : 0,
-    };
-  });
-
-  return (
-    <View 
-      style={{ 
-        height: cardHeight, 
-        alignSelf: 'center', 
-        width: CARD_WIDTH,
-        marginBottom: 16,
-        backgroundColor: 'transparent',
-        overflow: 'visible',
-        top: 22,
-      }}
-    >
-      <Animated.View
-        style={[
-          styles.cardBase,
-          {
-            width: CARD_WIDTH,
-            height: cardHeight,
-          },
-          animatedCardStyle,
-        ]}
-      >
-        {/* Compositor-First Separation: Corner rounding and clipping nested securely inside */}
-        <View style={{ flex: 1, borderRadius: 24, overflow: 'hidden' }}>
-          <RNAnimated.View style={{ flex: 1, opacity: fadeAnim }}>
-            <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 64, paddingBottom: 24 }}>
-              {/* Card Content Backdrop */}
-              <Animated.View style={{ flex: 1, opacity: isLockedNextCard ? 0.12 : 1 }}>
-                <ConceptCardPreviewStatic
-                  key={item._id}
-                  card={item}
-                />
-              </Animated.View>
-
-            {/* Lock Blur Overlay */}
-            <Animated.View
-              style={[StyleSheet.absoluteFillObject, overlayStyle]}
-              pointerEvents={isLockedNextCard ? 'auto' : 'none'}
-            >
-              {Platform.OS === 'ios' ? (
-                (() => {
-                  try {
-                    const { BlurView } = require('expo-blur');
-                    return (
-                      <BlurView
-                        intensity={25}
-                        tint="dark"
-                        style={StyleSheet.absoluteFillObject}
-                      />
-                    );
-                  } catch {
-                    return (
-                      <View 
-                        style={[
-                          StyleSheet.absoluteFillObject, 
-                          { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-                        ]} 
-                      />
-                    );
-                  }
-                })()
-              ) : (
-                <View 
-                  style={[
-                    StyleSheet.absoluteFillObject, 
-                    { backgroundColor: 'rgba(15, 23, 42, 0.75)' }
-                  ]} 
-                />
-              )}
-
-              {/* Lock Indicator in center */}
-              <View 
-                style={{
-                  ...StyleSheet.absoluteFillObject,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: 12,
-                }}
-              >
-                <View
-                  style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: 28,
-                    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    borderWidth: 1,
-                    borderColor: 'rgba(255, 255, 255, 0.2)',
-                  }}
-                >
-                  <Lock color="#94A3B8" size={24} strokeWidth={2.5} />
-                </View>
-                <Text
-                  style={{
-                    color: '#94A3B8',
-                    fontSize: 12,
-                    fontWeight: '800',
-                    textTransform: 'uppercase',
-                    letterSpacing: 1.5,
-                  }}
-                >
-                  Locked Next Problem
-                </Text>
-              </View>
-            </Animated.View>
-          </View>
-        </RNAnimated.View>
-      </View>
-    </Animated.View>
-
-      {/* Render persistent Action Rail on inactive card viewport slots to ensure zero visual pop-in */}
-      <ReelsActionRail
-        cleanId={item._id.split('-loop-')[0]}
-        item={item}
-        onDifficultyStateUpdate={() => {}}
-        onPlaylistPickerTrigger={() => {}}
-        isGuest={isGuest}
-        isDisabled={true} // Lock clicks on inactive items during scroll
-      />
-    </View>
   );
 });
 
@@ -1493,21 +1333,6 @@ const ReelItem = React.memo((props: ReelItemProps) => {
   const isSuperAdmin = user?.email === 'mohit.pant@1828@gmail.com';
   const canEdit = isSuperAdmin || (user?.id ? canModifyItem(role as UserRole, user.id, item.createdBy) : false);
   const isFavorite = !!item.isFavorite || (!!props.activePlaylistId && props.activePlaylistId !== 'likes');
-
-  if (!isActiveReel) {
-    return (
-      <InactiveReelItem
-        item={item}
-        index={props.index}
-        activeIndex={props.activeIndex}
-        cardHeight={props.cardHeight}
-        activePlaylistId={props.activePlaylistId}
-        isActiveCardClassified={props.isActiveCardClassified ?? true}
-        isGuest={props.isGuest} // Pass isGuest to allow membership query stabilization
-        shadowProgress={shadowProgress}
-      />
-    );
-  }
 
   return (
     <ActiveReelItem 
@@ -1682,6 +1507,8 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const palette = useThemePalette();
+  const isMidnight = palette.id === 'midnight';
 
   const [isTransitionReady, setIsTransitionReady] = useState(false);
 
@@ -1699,11 +1526,17 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   useFocusEffect(
     useCallback(() => {
-      const task = InteractionManager.runAfterInteractions(() => {
+      const focusTime = Date.now();
+      console.log('[PERF] ReelsScreenContent: Focused at:', focusTime);
+      // Bypassed InteractionManager.runAfterInteractions with a minimal 16ms timeout
+      const timer = setTimeout(() => {
+        const execTime = Date.now();
+        console.log('[PERF] ReelsScreenContent: Focus task executed (via setTimeout) at:', execTime, '| Delay since focus:', execTime - focusTime, 'ms');
         setIsTransitionReady(true);
-      });
+        useWalkthroughStore.getState().setReelsLoadingState('ready');
+      }, 16);
       return () => {
-        task.cancel();
+        clearTimeout(timer);
       };
     }, [])
   );
@@ -1744,8 +1577,11 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
     // Disable swipe-back gesture on iOS so users are kept in immersive revision mode
     navigation.setOptions({
-      gestureEnabled: false,
+      gestureEnabled: isCustomPlayer ? true : false,
     });
+
+    // For custom players (folder/playlist), allow direct back without confirmation
+    if (isCustomPlayer) return;
 
     const unsubscribe = navigation.addListener('beforeRemove', (e) => {
       if (hasConfirmedExit.current) {
@@ -1772,6 +1608,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
   }, [navigation, isCustomPlayer]);
 
   const { user } = useAuthStore();
+  const isGuest = user?.id === 'guest-user';
 
   useEffect(() => {
     const checkTutorialStatus = async () => {
@@ -1888,9 +1725,10 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   const selectedRootFolderIds = usePlaylistStateStore((s) => s.selectedRootFolderIds);
   const currentRevisionCounter = usePlaylistStateStore((s) => s.currentRevisionCounter);
+  const cardsCount = usePlaylistStateStore((s) => Object.keys(s.cardsById).length);
   const sessionSeed = useRef(Date.now() % 997).current; // prime modulo for distribution
 
-  const [allCards, setAllCards] = useState<string[]>(() => {
+  const [allCardsState, setAllCardsState] = useState<string[]>(() => {
     if (isReusedSession) return reelsSessionCards;
     if (activePlaylistId) return [];
 
@@ -1899,8 +1737,13 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
       if (!storeState.hasHydrated) return [];
 
       let localCards = Object.values(storeState.cardsById).filter(Boolean);
-      const isGuest = storeState.userId === 'guest-user';
-      const isGeneralSessionActive = !isGuest && !isCustomPlayer;
+      const isGuestMode = storeState.userId === 'guest-user';
+      if (isGuestMode) {
+        // In guest mode, strictly load guest-card-1 ("Reverse Linked List") for the general feed
+        return ['guest-card-1'];
+      }
+
+      const isGeneralSessionActive = !isGuestMode && !isCustomPlayer;
 
       if (folderIdParam) {
         localCards = localCards.filter((c) => {
@@ -1954,11 +1797,34 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
       return [];
     }
   });
+
+  const allCards = allCardsState;
+
+  const setAllCards = useCallback((val: string[] | ((prev: string[]) => string[])) => {
+    setAllCardsState(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      if (isGuest) {
+        // Enforce exactly one card in guest mode
+        const targetId = next[0];
+        const prevId = prev[0];
+        if (next.length === 0 && prev.length === 0) {
+          return prev;
+        }
+        if (next.length > 0 && prev.length > 0 && targetId === prevId) {
+          return prev;
+        }
+        return next.length > 0 ? [next[0]] : [];
+      }
+      return next;
+    });
+  }, [isGuest]);
+
   const shuffledOrderRef = useRef<string[]>([]);
   const flatListRef = useRef<any>(null);
 
   // Pre-warm card detailed contents and prefetch assets in the background on mount
   useEffect(() => {
+    if (isGuest) return; // Disable card prewarming, prefetching, and next-card preparation in guest mode
     if (allCards.length > 0) {
       const store = usePlaylistStateStore.getState();
       // If we are in folder or playlist session, we proactively hydrate ALL cards
@@ -1985,7 +1851,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
         }
       }
     }
-  }, [allCards, isCustomPlayer, folderIdParam, activePlaylistId]);
+  }, [allCards, isCustomPlayer, folderIdParam, activePlaylistId, isGuest]);
 
   // Read saved position synchronously on mount
   const savedPositionRef = useRef<{ index: number; cardId: string } | null>(null);
@@ -2095,7 +1961,6 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
 
   // Decide if playback session is active
-  const isGuest = user?.id === 'guest-user';
   const isSessionActive = !isGuest && (!!folderIdParam || !!activePlaylistId);
 
   const [showRunConfig, setShowRunConfig] = useState(false);
@@ -2116,8 +1981,8 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     if (shouldPulseSettings) {
       settingsPulse.value = withRepeat(
         withSequence(
-          withTiming(0.4, { duration: 1000 }),
-          withTiming(1.0, { duration: 1000 })
+          withTiming(0.4, { duration: 500 }),
+          withTiming(1.0, { duration: 500 })
         ),
         -1,
         true
@@ -2131,7 +1996,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   const settingsPulseStyle = useAnimatedStyle(() => ({
     opacity: settingsPulse.value,
-    transform: [{ scale: shouldPulseSettings ? interpolate(settingsPulse.value, [0.4, 1.0], [0.92, 1.0], 'clamp') : 1.0 }]
+    transform: [{ scale: shouldPulseSettings ? interpolate(settingsPulse.value, [0.4, 1.0], [1.0, 1.25], 'clamp') : 1.0 }]
   }));
 
   // Boundary prefetch overlay states
@@ -2609,14 +2474,20 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
         .map((c) => c._id);
     }
     
+    let finalSortedIds = sortedIds;
+    if (isGuest) {
+      // In guest mode, strictly load guest-card-1 ("Reverse Linked List") for the general feed
+      finalSortedIds = ['guest-card-1'];
+    }
+    
     // Pure memory-first comparison to prevent infinite React rendering loops
-    const isFeedSame = allCards.length === sortedIds.length &&
-      allCards.every((id, idx) => id === sortedIds[idx]);
+    const isFeedSame = allCards.length === finalSortedIds.length &&
+      allCards.every((id, idx) => id === finalSortedIds[idx]);
 
     if (!isFeedSame) {
       hasScrolledToInitial.current = false;
       hasShownInitialPauseRef.current = false; // Reset pause modal flag to trigger it for the new folders selection!
-      setAllCards(sortedIds);
+      setAllCards(finalSortedIds);
       if (isGeneralSessionActive) {
         setNavState({ activeIndex: 0, prevIdx: -1 });
         setInitialScrollIndex(0);
@@ -2628,7 +2499,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
         });
       }
     }
-  }, [activePlaylistId, folderIdParam, isGeneralSessionActive, selectedRootFolderIds, currentRevisionCounter, isReusedSession, allCards]);
+  }, [activePlaylistId, folderIdParam, isGeneralSessionActive, selectedRootFolderIds, currentRevisionCounter, isReusedSession, allCards, cardsCount, isGuest]);
 
   // Unified transition coordinator with background sync
   const transitionToCard = (nextIdx: number) => {
@@ -3068,6 +2939,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
       // Defer all expensive prefetching and hydration work off the critical interaction frame
       InteractionManager.runAfterInteractions(() => {
         requestAnimationFrame(() => {
+          if (isGuest) return; // Disable card prewarming, prefetching, and next-card preparation in guest mode
           // 1. Maintain an extended, highly proactive pure memory hydration window to prevent SQLite lag on random access/fast scroll
           try {
             const store = usePlaylistStateStore.getState();
@@ -3216,7 +3088,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   if (isReelsLoading || !isTransitionReady) {
     return (
-      <View className="flex-1 bg-[#FAF9F7] justify-center items-center">
+      <View className="flex-1 justify-center items-center" style={{ backgroundColor: palette.background }}>
         <ReeWCharacter state="loading" size={90} />
       </View>
     );
@@ -3224,8 +3096,8 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   if (isReelsError) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#F8FAFC] p-6">
-        <Text className="text-[#64748B] text-lg text-center mb-4 font-medium">
+      <View className="flex-1 justify-center items-center p-6" style={{ backgroundColor: palette.background }}>
+        <Text className="text-lg text-center mb-4 font-medium" style={{ color: palette.textSecondary }}>
           {reelsErrorObj?.message || 'Failed to load reels'}
         </Text>
         <TouchableOpacity
@@ -3243,8 +3115,9 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
   const activeCard = cardsList[activeIndex];
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#F5F5F7' }} className="bg-[#F5F5F7]">
-      <SyncPauseGate />
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: 'transparent' }} className="bg-transparent">
+      <ThemeBackground style={{ flex: 1 }}>
+        <SyncPauseGate />
       
 
       
@@ -3263,20 +3136,22 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
       
       {/* Settings & Personalization Overlay */}
       {isSettingsOpen && (
-        <ReelsSettingsOverlay
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-          playlistName={activePlaybackName}
-          sessionTimer={formatTime(sessionTotalTime)}
-          questionsRevised={completedCardsCount}
-          showReelContentSelect={!isCustomPlayer}
-        />
+        <Suspense fallback={null}>
+          <ReelsSettingsOverlay
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            playlistName={activePlaybackName}
+            sessionTimer={formatTime(sessionTotalTime)}
+            questionsRevised={completedCardsCount}
+            showReelContentSelect={!isCustomPlayer}
+          />
+        </Suspense>
       )}
 
       {/* Premium minimal exit button for focused immersive revision sessions */}
       {isCustomPlayer && (
         <TouchableOpacity
-          onPress={() => setIsExitModalOpen(true)} // Open modal directly to ensure Reels screen remains fully active in the background
+          onPress={() => router.back()} // Exit directly without confirmation for folder/playlist players
           activeOpacity={0.7}
           style={{
             position: 'absolute',
@@ -3336,146 +3211,77 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
         {/* RIGHT SIDE: ChatGPT AI Assistant Icon */}
         <TouchableOpacity
           onPress={async () => {
-            const activeCardId = cardsList[activeIndex];
-            if (!activeCardId) return;
-            const activeCardItem = usePlaylistStateStore.getState().cardsById[activeCardId.split('-loop-')[0]];
-            if (!activeCardItem) return;
+            // Only send the currently active card's metadata — NOT the entire feed
+            const playlistState = usePlaylistStateStore.getState();
+            const currentCleanId = activeCardIdClean;
+            const currentCard = currentCleanId ? playlistState.cardsById[currentCleanId] : null;
 
-            const prompt = `You are a world-class educational designer and subject matter expert. Your job is to create deeply individualized, beautifully crafted flashcards following the strict **FLASHCARD GENERATION PROTOCOL**.
+            // Build a clean, human-readable prompt instead of raw JSON
+            const slides = currentCard?.slides || [];
+            const slidesText = slides.map((slide: any, i: number) => {
+              let section = `\n---\n**Slide ${i + 1}${slide.type ? ` (${slide.type})` : ''}**: ${slide.headline || 'Untitled'}`;
+              if (slide.body) section += `\n${slide.body}`;
+              if (slide.code) section += `\n\`\`\`\n${slide.code}\n\`\`\``;
+              if (Array.isArray(slide.steps)) {
+                slide.steps.forEach((step: string, j: number) => {
+                  section += `\n  ${j + 1}. ${step}`;
+                });
+              }
+              if (Array.isArray(slide.mistakes)) {
+                section += `\n⚠️ Common Mistakes:`;
+                slide.mistakes.forEach((m: string) => { section += `\n  ❌ ${m}`; });
+              }
+              if (slide.keyObservation) section += `\n🔑 Key Observation: ${slide.keyObservation}`;
+              if (slide.mentalCompression) section += `\n💡 Mental Compression: ${slide.mentalCompression}`;
+              return section;
+            }).join('\n');
 
-Act as a highly skilled peer (a student who has got an exceptional, deep grasp of the topic) trying to teach their juniors in terms they easily understand, keeping all technical terms intact so the explanation is both completely intuitive and academically complete.
+            // Check which GPT mode the user has selected in settings
+            const gptMode = useUserPreferencesStore.getState().preferences.gptPromptMode || 'explanation';
 
----
+            let prompt: string;
 
-**SYSTEM PROMPT â€” FLASHCARD GENERATION PROTOCOL**
+            if (gptMode === 'quiz') {
+              // ── TEST ME MODE: Interviewer asks 3 questions one-by-one ──
+              prompt = `You are a strict but friendly technical interviewer testing my understanding of the topic below. Follow these rules EXACTLY:
 
-## MANDATORY PIPELINE (Execute for every card)
+1. Ask me exactly 3 questions, ONE AT A TIME. Do NOT reveal the next question until I answer the current one.
+2. After I answer each question, give a BRIEF feedback (2-3 sentences max) on what was correct and what was off or missing. Do NOT write long paragraphs.
+3. Then immediately ask the next question.
+4. Keep your replies SHORT and STRICT — no lengthy explanations, no hand-holding. Be concise like a real interviewer.
+5. After all 3 questions are answered, give a FINAL REPORT in this format:
+   - Score: X/3
+   - Strengths: (1 line)
+   - Gaps: (1 line)
+   - Verdict: (Ready / Needs Revision / Weak)
 
-### STAGE 1 â€” DEEP CONTENT RESEARCH
-Before touching design or layout, spend time truly understanding this concept:
-- What is the *core insight* a student must internalize?
-- What are the most common misconceptions about this topic?
-- What is the most elegant, memorable way to explain this â€” not the most common way?
-- Use the sharpest analogy, the best example, the most precise wording.
-- Ask yourself: "If I had 30 seconds to make this click for someone, what would I say?"
-- Refine your explanation at least twice before moving forward.
+Start now by asking Question 1.
 
-### STAGE 2 â€” LAYOUT IDEATION (First Pass â€” Reject the Template)
-Think about how this specific concept wants to be shown:
-- Should it be a comparison? A flow? A formula breakdown? A visual metaphor? A numbered sequence? A single bold statement?
-- The layout must emerge from the content â€” not the other way around.
+## Topic: ${currentCard?.title || 'Unknown'}
+- **Subject**: ${currentCard?.topic || 'N/A'}
+- **Difficulty**: ${currentCard?.difficulty || 'N/A'}
+${slidesText}`;
+            } else {
+              // ── EXPLAIN THIS MODE: Teach me like a peer ──
+              prompt = `Act as a highly skilled peer (a student who has got an exceptional, deep grasp of the topic) trying to teach their juniors in terms they easily understand, keeping all technical terms intact so the explanation is both completely intuitive and academically complete.
 
-### STAGE 3 â€” VISUAL CRITIQUE (Second Pass â€” Kill the ClichÃ©)
-Review your planned visual and ask:
-- Does this look like every other card in the deck? If yes, redesign it.
-- Is the color palette, typography weight, or spacing doing meaningful work?
-- Redesign at least one element that felt "safe" or "default."
-- Consider: contrast ratios, visual hierarchy, use of negative space, accent elements, icons, diagrams.
-
-### STAGE 4 â€” FINAL BUILD
-Now write/render the final card with:
-- A layout that is specific to this concept â€” never recycled.
-- Typography that guides the eye through the hierarchy of information.
-- The explanation refined to its sharpest, most memorable form.
-- An optional "hook" â€” a micro-analogy, surprising fact, or one-line mnemonic that makes it stick.
-
----
-
-## HARD RULES
-âŒ Never reuse the same layout structure twice in a row.
-âŒ Never use a generic two-box Q&A template unless the concept is truly simple.
-âŒ Never copy-paste your explanation from a textbook â€” rewrite it in the sharpest possible voice.
-âŒ Never produce more than one card before fully completing this pipeline.
-âœ… Each card must look and feel like it was hand-designed for that specific question.
-âœ… If the concept is visual by nature, make it visual.
-âœ… If the concept is sequential, show sequence.
-âœ… If the concept is a contrast, show tension.
-
----
-
-### INPUT CONCEPT METADATA:
-Title: ${activeCardItem.title}
-Topic: ${activeCardItem.topic}
-Difficulty: ${activeCardItem.difficulty}
-Explanation: ${activeCardItem.explanation}
-Code: ${activeCardItem.code || 'N/A'}
-Complexity: ${activeCardItem.complexity || 'N/A'}
-Examples: ${JSON.stringify(activeCardItem.examples || [])}
-
----
-
-### OUTPUT FORMAT REQUIREMENTS:
-Generate a single, raw, valid JSON object matching the schema below. Do NOT write any conversational markdown text (e.g. do not write "Here is the JSON:") before or after the JSON codeblock. Wrap the JSON in a standard markdown json block.
-
-The output JSON MUST strictly match this schema:
-{
-  "title": "${activeCardItem.title}",
-  "topic": "${activeCardItem.topic}",
-  "difficulty": "${activeCardItem.difficulty}",
-  "complexity": "${activeCardItem.complexity || 'O(N)'}",
-  "explanation": "Provide a brief, crystal-clear 1-sentence breakdown of the core goal in the voice of a peer student teaching juniors.",
-  "analogy": "Provide a highly memorable, creative real-world analogy that builds immediate intuition.",
-  "intuition": "Explain the breakthrough insight (the 'Aha!' moment) that makes the optimal solution click, keeping it punchy.",
-  "mistake": "Highlight a common rookie mistake, trap, or sub-optimal brute force trap.",
-  "prefer": "Explain the clean, highly preferred optimal strategy and why it is superior.",
-  "dryRun": "A short, step-by-step visual trace explaining how running pointers/variables update.",
-  "code": "Provide the cleanest, most optimized C++ code implementation.",
-  "examples": [
-    "Step 1: Description of variables and active state",
-    "Step 2: Description of the next step",
-    "Step 3: Description of the final result state"
-  ],
-  "slides": [
-    {
-      "type": "intro",
-      "headline": "${activeCardItem.title}: Snapshot",
-      "body": "**Goal**:\\n{Brief peer statement}\\n\\nðŸ’¡ **Mental Analogy**:\\n{Analogy}\\n\\n*Let's see how to spot the pattern instantly...*"
-    },
-    {
-      "type": "explanation",
-      "headline": "Pattern: Spotting the Clues",
-      "body": "â“ **When does this click in interviews?**\\n- {Trigger 1}\\n- {Trigger 2}\\n\\nâš¡ **Trigger Words**: \`{word1}\`, \`{word2}\`.\\n\\nâŒ **Rookie Trap**: {Rookie mistake or sort first traps}."
-    },
-    {
-      "type": "explanation",
-      "headline": "Intuition: The Hook",
-      "body": "ðŸ§  **Peer Breakdown**:\\n{Intuition explanation}\\n\\n*Notice how shifting our perspective collapses the search space!*"
-    },
-    {
-      "type": "explanation",
-      "headline": "âš ï¸ Trap vs Clean Way",
-      "body": "âŒ **The Trap**:\\n{Rookie mistake/complexity trap}\\n\\nâœ… **The Clean Way**:\\n{Preferred strategy}."
-    },
-    {
-      "type": "code",
-      "headline": "Code: Breathable C++",
-      "body": "Review the clean, highly optimized implementation below:",
-      "code": "{Clean C++ code}"
-    },
-    {
-      "type": "dryrun",
-      "headline": "Visual: State Walkthrough",
-      "body": "Step-by-step trace simulation:\\n\\n{Dry run text}"
-    },
-    {
-      "type": "summary",
-      "headline": "Recall: Spaced Repetition",
-      "body": "âœ¨ **Mastery Takeaway**:\\n{Core breakthrough memory tip}\\n\\nâ±ï¸ **Big-O**:\\n- Time Complexity: \`{Time}\`\\n- Space Complexity: \`{Space}\`"
-    }
-  ]
-}`;
+## ${currentCard?.title || 'Unknown Card'}
+- **Topic**: ${currentCard?.topic || 'N/A'}
+- **Difficulty**: ${currentCard?.difficulty || 'N/A'}
+${slidesText}`;
+            }
             
-            // Fire clipboard asynchronously without blocking the UI thread
-            Clipboard.setStringAsync(prompt).catch(err => console.warn('Clipboard failed:', err));
+            // Copy full prompt to clipboard first (handles >2000 char prompts that URL truncates)
+            await Clipboard.setStringAsync(prompt).catch(err => console.warn('Clipboard failed:', err));
 
-            // To fully automate the pasting, we encode the entire massive prompt into the App Link.
-            // Note: If the payload is extremely large, Android may rarely truncate it, but this allows 1-tap automation!
+            // Open ChatGPT with the prompt via ?q= deep link — the native ChatGPT app
+            // intercepts https://chatgpt.com URLs and stays in-app with the prompt pre-filled.
+            // This avoids the chatgpt:// custom scheme which was redirecting to Chrome.
             const appLinkUrl = 'https://chatgpt.com/?q=' + encodeURIComponent(prompt);
-
-            Linking.openURL(appLinkUrl).catch(e => {
-              console.error('Deep link failed:', e);
-              // Fallback directly to web version if nothing intercepts it
-              Linking.openURL('https://chatgpt.com/').catch(err => console.error(err));
+            Linking.openURL(appLinkUrl).catch(() => {
+              Linking.openURL('https://chatgpt.com/').catch(err => {
+                console.error('Failed to open ChatGPT link:', err);
+              });
             });
           }}
           activeOpacity={0.7}
@@ -3488,7 +3294,10 @@ The output JSON MUST strictly match this schema:
         >
           <Image 
             source={require('../../../assets/chat-gpt.png')} 
-            style={{ width: 22, height: 22, resizeMode: 'contain', opacity: 0.9 }} 
+            style={[
+              { width: 22, height: 22, resizeMode: 'contain', opacity: 0.9 },
+              isMidnight && { tintColor: '#FFFFFF' }
+            ]} 
           />
         </TouchableOpacity>
       </View>
@@ -3501,7 +3310,7 @@ The output JSON MUST strictly match this schema:
           marginBottom: bottomTabBarHeight - 16,
           position: 'relative',
           width: '100%',
-          backgroundColor: '#F5F5F7', // Explicitly lock container background
+          backgroundColor: 'transparent',
         }}
       >
         {cardsList.length > 0 ? (
@@ -3541,7 +3350,7 @@ The output JSON MUST strictly match this schema:
             onScrollEndDrag={handleScrollEnd}
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}
-            style={{ width: '100%', height: '100%', backgroundColor: '#F5F5F7' }}
+            style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
             contentContainerStyle={{ alignItems: 'center' }}
           />
         ) : (
@@ -3574,7 +3383,7 @@ The output JSON MUST strictly match this schema:
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: 'rgba(250, 249, 247, 0.95)', // Transparent Light Paper overlay
+              backgroundColor: addAlpha(palette.background, 0.95),
               justifyContent: 'center',
               alignItems: 'center',
               zIndex: 100, // Sit on top of the list/empty state
@@ -3593,7 +3402,7 @@ The output JSON MUST strictly match this schema:
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: 'rgba(250, 249, 247, 0.95)', // Transparent Light Paper overlay
+              backgroundColor: addAlpha(palette.background, 0.95),
               justifyContent: 'center',
               alignItems: 'center',
               zIndex: 100, // Sit on top of the list/empty state
@@ -3703,10 +3512,12 @@ The output JSON MUST strictly match this schema:
 
       {/* Centralized Playlist Picker Modal */}
       {playlistModalCard !== null && (
-        <PlaylistPickerModal
-          card={playlistModalCard}
-          onClose={() => setPlaylistModalCard(null)}
-        />
+        <Suspense fallback={null}>
+          <PlaylistPickerModal
+            card={playlistModalCard}
+            onClose={() => setPlaylistModalCard(null)}
+          />
+        </Suspense>
       )}
 
       {/* Immersive Session Exit Confirmation Modal */}
@@ -3798,22 +3609,6 @@ The output JSON MUST strictly match this schema:
                   hasConfirmedExit.current = true;
                   setIsExitModalOpen(false);
                   
-                  if (isCustomPlayer) {
-                    if (folderIdParam) {
-                      router.push({
-                        pathname: '/(protected)/folder/[folderId]',
-                        params: { folderId: folderIdParam },
-                      });
-                      return;
-                    } else if (activePlaylistId) {
-                      router.push({
-                        pathname: '/(protected)/playlist/[playlistId]',
-                        params: { playlistId: activePlaylistId },
-                      });
-                      return;
-                    }
-                  }
-                  
                   router.back();
                 }}
                 activeOpacity={0.7}
@@ -3838,6 +3633,7 @@ The output JSON MUST strictly match this schema:
       )}
 
 
+      </ThemeBackground>
     </GestureHandlerRootView>
   );
 }
@@ -3858,20 +3654,28 @@ const styles = StyleSheet.create({
 // transition animation completes via InteractionManager.
 // =============================================================================
 export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer?: boolean }) {
+  const evaluateTime = Date.now();
+  console.log('[PERF] ReelsScreen: Component evaluated/rendered at:', evaluateTime);
+  const palette = useThemePalette();
   const [mountContent, setMountContent] = React.useState(false);
 
   React.useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
+    const mountTime = Date.now();
+    console.log('[PERF] ReelsScreen: Component mounted at:', mountTime);
+    // Bypassed InteractionManager.runAfterInteractions with a minimal 16ms timeout
+    const timer = setTimeout(() => {
+      const execTime = Date.now();
+      console.log('[PERF] ReelsScreen: Mount task executed (via setTimeout) at:', execTime, '| Delay since mount:', execTime - mountTime, 'ms');
       setMountContent(true);
-    });
-    return () => task.cancel();
+    }, 16);
+    return () => clearTimeout(timer);
   }, []);
 
   if (!mountContent) {
     return (
       <View style={{
         flex: 1,
-        backgroundColor: '#FAF9F7',
+        backgroundColor: palette.background,
         justifyContent: 'center',
         alignItems: 'center',
       }}>

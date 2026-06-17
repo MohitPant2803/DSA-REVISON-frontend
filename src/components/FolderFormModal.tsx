@@ -17,9 +17,10 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { SpringPressable } from './SpringPressable';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 const ICON_OPTIONS = ['folder', 'layers', 'graphs', 'dp', 'database', 'book', 'code', 'brain'];
-const COLOR_OPTIONS = ['#7C3AED', '#3B82F6', '#10B981', '#F97316', '#EC4899', '#6366F1'];
 
 interface FolderFormModalProps {
   visible: boolean;
@@ -37,15 +38,25 @@ export function FolderFormModal({
   isLoading,
 }: FolderFormModalProps) {
   const isEdit = !!folder;
+  const palette = useThemePalette();
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [icon, setIcon] = useState('folder');
-  const [color, setColor] = useState('#7C3AED');
+  const [color, setColor] = useState(palette.accent);
 
   const [mounted, setMounted] = useState(false);
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.92);
   const translateY = useSharedValue(100);
+
+  const colorOptions = [
+    palette.accent,
+    palette.success,
+    palette.info,
+    palette.warning,
+    palette.error
+  ];
 
   useEffect(() => {
     if (visible) {
@@ -67,9 +78,9 @@ export function FolderFormModal({
       setTitle(folder?.title ?? '');
       setDescription(folder?.description ?? '');
       setIcon(folder?.icon ?? 'folder');
-      setColor(folder?.color ?? '#7C3AED');
+      setColor(folder?.color ?? palette.accent);
     }
-  }, [visible, folder]);
+  }, [visible, folder, palette.accent]);
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -98,115 +109,126 @@ export function FolderFormModal({
     };
   });
 
+  const buttonTextColor = palette.isDark ? palette.textPrimary : palette.surface;
+
   return (
     <Modal visible={mounted} transparent onRequestClose={onClose}>
       <Animated.View 
-        style={[{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15, 23, 42, 0.35)' }, backdropStyle]}
+        style={[{ flex: 1, justifyContent: 'flex-end', backgroundColor: palette.overlayBg }, backdropStyle]}
       >
         <Animated.View 
-          className="bg-white rounded-t-[36px] max-h-[90%] shadow-2xl"
+          className="rounded-t-[36px] max-h-[90%] border-t"
           style={[
             {
-              shadowColor: '#0F172A',
+              backgroundColor: palette.dialogBg,
+              borderColor: palette.border,
+              shadowColor: palette.shadow,
               shadowOffset: { width: 0, height: -12 },
-              shadowOpacity: 0.08,
-              shadowRadius: 24,
+              shadowOpacity: palette.isDark ? 0.20 : 0.08,
+              shadowRadius: palette.isDark ? 30 : 24,
               elevation: 10,
             },
             sheetStyle,
           ]}
         >
           {/* Header row */}
-          <View className="flex-row justify-between items-center px-6 pt-7 pb-4 border-b border-slate-50">
+          <View className="flex-row justify-between items-center px-6 pt-7 pb-4 border-b" style={{ borderBottomColor: palette.border }}>
             <View>
-              <Text className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-0.5">
+              <Text className="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style={{ color: palette.textMuted }}>
                 {isEdit ? 'Update Collection' : 'New Collection'}
               </Text>
-              <Text className="text-slate-900 text-xl font-black tracking-tight">
+              <Text className="text-xl font-bold tracking-tight" style={{ color: palette.textPrimary }}>
                 {isEdit ? 'Edit collection details' : 'Create new collection'}
               </Text>
             </View>
             <SpringPressable 
               onPress={onClose} 
-              className="p-2 bg-slate-50 rounded-full border border-slate-100"
+              className="p-2 rounded-full border"
+              style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
             >
-              <X color="#64748B" size={18} strokeWidth={2.5} />
+              <X color={palette.textSecondary} size={18} strokeWidth={2.5} />
             </SpringPressable>
           </View>
 
           {/* Form Content */}
           <ScrollView className="px-6 py-5" keyboardShouldPersistTaps="handled">
-            <Text className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2.5">
+            <Text className="text-[10px] font-semibold uppercase tracking-widest mb-2.5" style={{ color: palette.textMuted }}>
               Collection Title
             </Text>
             <TextInput
               value={title}
               onChangeText={setTitle}
               placeholder="e.g. Arrays & Hashing"
-              placeholderTextColor="#94A3B8"
-              className="border border-slate-100 rounded-2xl px-4 py-3.5 text-slate-900 mb-5 font-semibold text-sm shadow-inner"
+              placeholderTextColor={palette.textMuted}
+              className="border rounded-2xl px-4 py-3.5 mb-5 font-semibold text-sm"
               style={{
-                backgroundColor: 'rgba(248, 250, 252, 0.7)',
+                color: palette.textPrimary,
+                backgroundColor: palette.inputBg,
+                borderColor: palette.border,
               }}
             />
 
-            <Text className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2.5">
+            <Text className="text-[10px] font-semibold uppercase tracking-widest mb-2.5" style={{ color: palette.textMuted }}>
               Description
             </Text>
             <TextInput
               value={description}
               onChangeText={setDescription}
               placeholder="Optional short description of this memory deck"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={palette.textMuted}
               multiline
-              className="border border-slate-100 rounded-2xl px-4 py-3.5 text-slate-900 mb-5 font-semibold text-sm min-h-[90px] shadow-inner"
+              className="border rounded-2xl px-4 py-3.5 mb-5 font-semibold text-sm min-h-[90px]"
               style={{
-                backgroundColor: 'rgba(248, 250, 252, 0.7)',
+                color: palette.textPrimary,
+                backgroundColor: palette.inputBg,
+                borderColor: palette.border,
               }}
             />
 
-            <Text className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2.5">
+            <Text className="text-[10px] font-semibold uppercase tracking-widest mb-2.5" style={{ color: palette.textMuted }}>
               Collection Icon
             </Text>
             <View className="flex-row flex-wrap gap-2.5 mb-5">
-              {ICON_OPTIONS.map((opt) => (
-                <SpringPressable
-                  key={opt}
-                  onPress={() => setIcon(opt)}
-                  className={`px-4 py-2.5 rounded-full border shadow-sm ${
-                    icon === opt 
-                      ? 'border-violet-500 bg-violet-50' 
-                      : 'border-slate-100 bg-white/80'
-                  }`}
-                  style={{
-                    shadowColor: '#8B5CF6',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: icon === opt ? 0.05 : 0,
-                    shadowRadius: 4,
-                  }}
-                >
-                  <Text className={`text-xs font-black uppercase tracking-wider ${
-                    icon === opt ? 'text-violet-600' : 'text-slate-500'
-                  }`}>
-                    {opt}
-                  </Text>
-                </SpringPressable>
-              ))}
+              {ICON_OPTIONS.map((opt) => {
+                const isActive = icon === opt;
+                return (
+                  <SpringPressable
+                    key={opt}
+                    onPress={() => setIcon(opt)}
+                    className="px-4 py-2.5 rounded-full border"
+                    style={{
+                      borderColor: isActive ? palette.accent : palette.border,
+                      backgroundColor: isActive ? addAlpha(palette.accent, 0.08) : palette.surface,
+                      shadowColor: palette.accentGlow,
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: isActive ? 0.05 : 0,
+                      shadowRadius: 4,
+                    }}
+                  >
+                    <Text 
+                      className="text-xs font-semibold uppercase tracking-wider"
+                      style={{ color: isActive ? palette.accent : palette.textSecondary }}
+                    >
+                      {opt}
+                    </Text>
+                  </SpringPressable>
+                );
+              })}
             </View>
 
-            <Text className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2.5">
+            <Text className="text-[10px] font-semibold uppercase tracking-widest mb-2.5" style={{ color: palette.textMuted }}>
               Accent Theme
             </Text>
             <View className="flex-row flex-wrap gap-3.5 mb-8">
-              {COLOR_OPTIONS.map((c) => (
+              {colorOptions.map((c) => (
                 <SpringPressable
                   key={c}
                   onPress={() => setColor(c)}
-                  className="w-9 h-9 rounded-full justify-center items-center shadow-sm"
+                  className="w-9 h-9 rounded-full justify-center items-center"
                   style={{ 
                     backgroundColor: c,
                     borderWidth: color === c ? 3 : 0,
-                    borderColor: '#ffffff',
+                    borderColor: palette.surface,
                     shadowColor: c,
                     shadowOffset: { width: 0, height: 4 },
                     shadowOpacity: 0.15,
@@ -219,10 +241,10 @@ export function FolderFormModal({
             <SpringPressable
               onPress={handleSave}
               disabled={isLoading || !title.trim()}
-              className="rounded-full py-4 items-center mb-10 disabled:opacity-40 shadow-lg"
+              className="rounded-full py-4 items-center mb-10 disabled:opacity-40"
               style={{
-                backgroundColor: '#7C3AED',
-                shadowColor: '#8B5CF6',
+                backgroundColor: palette.accent,
+                shadowColor: palette.accentGlow,
                 shadowOffset: { width: 0, height: 8 },
                 shadowOpacity: 0.2,
                 shadowRadius: 16,
@@ -230,9 +252,9 @@ export function FolderFormModal({
               }}
             >
               {isLoading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={buttonTextColor} />
               ) : (
-                <Text className="text-white font-extrabold text-sm uppercase tracking-widest">
+                <Text className="font-extrabold text-sm uppercase tracking-widest" style={{ color: buttonTextColor }}>
                   {isEdit ? 'Save Changes' : 'Create Collection'}
                 </Text>
               )}
@@ -243,3 +265,4 @@ export function FolderFormModal({
     </Modal>
   );
 }
+

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, ActivityIndicator, TouchableOpacity, Platform, DevSettings } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import { ReeWCharacter } from '@/components/ReeWCharacter';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -22,6 +23,7 @@ import { CinematicFadeIn } from '@/components/motion/CinematicFadeIn';
 import { hapticFeedback } from '@/utils/haptics';
 import ThemeBackground from '@/components/ThemeBackground';
 import { Image } from 'expo-image';
+import { addAlpha, themePalettes } from '@/theme/themePalettes';
 
 const { width } = Dimensions.get('window');
 
@@ -31,8 +33,71 @@ export default function LoginScreen() {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isConsentChecked, setIsConsentChecked] = useState(false);
+  const palette = themePalettes.midnight;
+  const buttonTextColor = palette.isDark ? palette.textPrimary : palette.surface;
+
+  // First-Time Sync State Selectors
+  const isFirstTimeSyncInProgress = usePlaylistStateStore((s) => {
+    const val = s.isFirstTimeSyncInProgress;
+    console.log(`[INSTRUMENT SELECTOR] login.tsx | Selector read: ${val} | Time: ${Date.now()}`);
+    return val;
+  });
+
+  const [syncFailed, setSyncFailed] = useState(false);
+  const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleRestart = async () => {
+    hapticFeedback.success();
+    if (Platform.OS === 'web') {
+      window.location.reload();
+    } else {
+      try {
+        const Updates = require('expo-updates');
+        await Updates.reloadAsync();
+      } catch (e) {
+        console.warn('[LoginScreen] Failed to reload with expo-updates, trying DevSettings:', e);
+        DevSettings.reload();
+      }
+    }
+  };
+
+  useEffect(() => {
+    console.log(`[INSTRUMENT EVALUATION] login.tsx | useEffect evaluate isFirstTimeSyncInProgress: ${isFirstTimeSyncInProgress} | Time: ${Date.now()}`);
+    if (isFirstTimeSyncInProgress) {
+      setSyncFailed(false);
+      // Start a 10-second fail-safe timer
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      if (typeof (global as any).dumpInstrumentState === 'function') {
+        (global as any).dumpInstrumentState('12. timeout timer starts');
+      }
+      syncTimerRef.current = setTimeout(() => {
+        if (typeof (global as any).dumpInstrumentState === 'function') {
+          (global as any).dumpInstrumentState('13. timeout timer fires');
+        }
+        setSyncFailed(true);
+        // Automatically trigger restart on timeout/hang
+        handleRestart();
+      }, 10000);
+    } else {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
+      setSyncFailed(false);
+    }
+
+    return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, [isFirstTimeSyncInProgress]);
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  if (isFirstTimeSyncInProgress && typeof (global as any).dumpInstrumentState === 'function') {
+    (global as any).dumpInstrumentState(syncFailed ? '14. restart screen renders' : 'UI overlays first-time sync card');
+  }
 
   const pageOpacity = useSharedValue(0);
 
@@ -71,6 +136,9 @@ export default function LoginScreen() {
     
     setAuthError(null);
     let isMounted = true;
+    if (typeof (global as any).dumpInstrumentState === 'function') {
+      (global as any).dumpInstrumentState('1. Login starts');
+    }
 
     try {
       setIsAuthenticating(true);
@@ -98,7 +166,6 @@ export default function LoginScreen() {
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
       }
 
       if (userInfo.type === 'success') {
@@ -112,6 +179,9 @@ export default function LoginScreen() {
         const clockEpoch = String(logicalClockSequence || 0);
         const res = await api.post('/auth/google', { idToken, deviceId, clockEpoch });
         const { token, user: rawUser } = res.data.data;
+        if (typeof (global as any).dumpInstrumentState === 'function') {
+          (global as any).dumpInstrumentState('2. Google token exchange succeeds');
+        }
 
         // Reset walkthrough state to make sure tutorial starts fresh for new Google sign-in accounts
         const createdAt = new Date(rawUser.createdAt).getTime();
@@ -140,13 +210,18 @@ export default function LoginScreen() {
 
         await login(token, user);
 
-        // Handle Deep Link holding redirect or default navigation
-        const targetDeepLink = useAuthStore.getState().targetDeepLink;
-        if (targetDeepLink) {
-          useAuthStore.getState().setTargetDeepLink(null);
-          router.replace(targetDeepLink as any);
-        } else {
-          router.replace('/(protected)/(tabs)/learn');
+        // Only redirect if first-time sync is NOT in progress.
+        // If it is, the RootLayout guard will redirect us once the sync completes.
+        const isSyncInProgress = usePlaylistStateStore.getState().isFirstTimeSyncInProgress;
+        console.log(`[INSTRUMENT EVALUATION] login.tsx | Direct state read isFirstTimeSyncInProgress: ${isSyncInProgress} | Time: ${Date.now()}`);
+        if (!isSyncInProgress) {
+          const targetDeepLink = useAuthStore.getState().targetDeepLink;
+          if (targetDeepLink) {
+            useAuthStore.getState().setTargetDeepLink(null);
+            router.replace(targetDeepLink as any);
+          } else {
+            router.replace('/(protected)/(tabs)/learn');
+          }
         }
       } else {
         setIsAuthenticating(false);
@@ -157,28 +232,30 @@ export default function LoginScreen() {
 
       if (!isMounted) return;
 
+      let friendlyMessage = 'Google login failed. Please try again.';
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        // User cancelled, fail silently and cleanly without showing error text
-        setAuthError(null);
+        friendlyMessage = 'Google sign-in was cancelled.';
       } else if (error.code === statusCodes.IN_PROGRESS) {
-        setAuthError('Another sign-in prompt is already active. Please complete it.');
+        friendlyMessage = 'Google sign-in is already in progress.';
       } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        setAuthError('Google Play Services is missing or outdated. Please update Play Services to log in securely.');
-      } else if (error.code === 'NETWORK_ERROR' || error.code === '7' || error.message?.toLowerCase().includes('network')) {
-        setAuthError('Connection issue detected. Please check your internet connection and try again.');
-      } else {
-        setAuthError(error.message || 'Something went wrong. Please check your connection and try again.');
+        friendlyMessage = 'Google Play Services are not available or outdated.';
+      } else if (error.message) {
+        friendlyMessage = error.message;
       }
+      
+      setAuthError(friendlyMessage);
       setIsAuthenticating(false);
     }
   };
 
   const handleSeeTrial = async () => {
-    setAuthError(null);
     try {
       setIsAuthenticating(true);
       hapticFeedback.success();
-      
+
+      // 1-second delay for premium animation transition
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       const mockToken = '';
       const mockUser = {
         id: 'guest-user',
@@ -188,19 +265,22 @@ export default function LoginScreen() {
         role: 'user' as const,
       };
 
-      // Reset walkthrough state to make sure tutorial starts fresh
-      const { useWalkthroughStore } = require('@/store/useWalkthroughStore');
-      useWalkthroughStore.getState().setStep('point-reels');
-      
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      await AsyncStorage.removeItem('dsa-reels-walkthrough-complete');
-      await AsyncStorage.removeItem('dsa-reels-tutorial-complete');
-      await AsyncStorage.removeItem('guest-dsa-reels-walkthrough-complete');
-      await AsyncStorage.removeItem('guest-dsa-reels-tutorial-complete');
-
       // Set onboarding as completed for trial so they go straight to walkthrough
       const { useOnboardingStore } = require('@/store/useOnboardingStore');
       await useOnboardingStore.getState().completeOnboarding();
+
+      // Reset guest walkthrough and tutorial keys for a fresh trial run
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.removeItem('guest-dsa-reels-walkthrough-complete');
+      await AsyncStorage.removeItem('guest-dsa-reels-tutorial-complete');
+
+      const { useWalkthroughStore } = require('@/store/useWalkthroughStore');
+      useWalkthroughStore.setState({
+        step: 'point-reels',
+        isComplete: false,
+        reelsTutorialStep: 0,
+        reelsShot: 1,
+      });
 
       await login(mockToken, mockUser);
       
@@ -222,12 +302,12 @@ export default function LoginScreen() {
 
   return (
     <Animated.View style={pageAnimatedStyle}>
-      <ThemeBackground style={{ flex: 1 }}>
+      <ThemeBackground style={{ flex: 1 }} themeId="midnight">
       <SafeAreaView style={[styles.container, { backgroundColor: 'transparent' }]}>
         <View style={styles.content}>
         
         <CinematicFadeIn delay={100} style={styles.brandingBlock}>
-          <View style={styles.logoTile}>
+          <View style={[styles.logoTile, { backgroundColor: palette.surface, borderColor: palette.border, shadowColor: palette.shadow }]}>
             <Image
               source={require('../../assets/icon213.png')}
               style={{ width: '100%', height: '100%', borderRadius: 24 }}
@@ -238,8 +318,8 @@ export default function LoginScreen() {
 
         {/* CENTER: Typography content */}
         <CinematicFadeIn delay={250} style={styles.typographyBlock}>
-          <Text style={styles.title}>ReeWise</Text>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>ReeWise</Text>
+          <Text style={[styles.subtitle, { color: palette.textSecondary }]}>
             Short revisions, playlists, and active recall in one calm place.
           </Text>
         </CinematicFadeIn>
@@ -261,11 +341,11 @@ export default function LoginScreen() {
             accessibilityState={{ checked: isConsentChecked }}
           >
             {isConsentChecked ? (
-              <CheckSquare size={20} color="#8B5CF6" strokeWidth={2.5} />
+              <CheckSquare size={20} color={palette.accent} strokeWidth={2.5} />
             ) : (
-              <Square size={20} color="#94A3B8" strokeWidth={2} />
+              <Square size={20} color={palette.textMuted} strokeWidth={2} />
             )}
-            <Text style={{ fontSize: 12, fontWeight: '600', color: '#64748B', marginLeft: 10, flex: 1, lineHeight: 16 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: palette.textSecondary, marginLeft: 10, flex: 1, lineHeight: 16 }}>
               I agree to the Terms of Service and Privacy Policy
             </Text>
           </TouchableOpacity>
@@ -275,34 +355,38 @@ export default function LoginScreen() {
             disabled={isAuthenticating}
             onPress={handleGoogleLogin}
             activeScale={isConsentChecked ? 0.96 : 1.0}
-            style={[styles.primaryBtn, !isConsentChecked && { backgroundColor: '#CBD5E1', shadowColor: 'transparent' }]}
+            style={[
+              styles.primaryBtn,
+              { backgroundColor: palette.accent, shadowColor: palette.accentGlow },
+              !isConsentChecked && { backgroundColor: palette.inputBg, shadowColor: 'transparent' }
+            ]}
             accessibilityLabel={isAuthenticating ? "Logging in to Google" : "Continue with Google button"}
             accessibilityRole="button"
             accessibilityState={{ disabled: isAuthenticating || !isConsentChecked }}
           >
             {isAuthenticating ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={buttonTextColor} />
             ) : (
               <View style={styles.btnContent}>
-                <Text style={styles.primaryBtnText}>Continue with Google</Text>
-                <ArrowRight color="#FFFFFF" size={16} strokeWidth={2.5} style={styles.btnArrow} />
+                <Text style={[styles.primaryBtnText, { color: buttonTextColor }]}>Continue with Google</Text>
+                <ArrowRight color={buttonTextColor} size={16} strokeWidth={2.5} style={styles.btnArrow} />
               </View>
             )}
           </SuperchargedPressable>
 
-          {/* SECONDARY CTA: See Trial Button */}
+          {/* SECONDARY CTA: Try without logging in Button */}
           <SuperchargedPressable
             disabled={isAuthenticating}
             onPress={handleSeeTrial}
             activeScale={0.96}
-            style={styles.trialBtn}
-            accessibilityLabel="See Trial button"
+            style={[styles.trialBtn, { backgroundColor: palette.surface, borderColor: palette.accent, shadowColor: palette.accentGlow }]}
+            accessibilityLabel="Try without logging in button"
             accessibilityRole="button"
             accessibilityState={{ disabled: isAuthenticating }}
           >
             <View style={styles.btnContent}>
-              <Text style={styles.trialBtnText}>See Trial</Text>
-              <ArrowRight color="#8B5CF6" size={16} strokeWidth={2.5} style={styles.btnArrow} />
+              <Text style={[styles.trialBtnText, { color: palette.accent }]}>Try without logging in</Text>
+              <ArrowRight color={palette.accent} size={16} strokeWidth={2.5} style={styles.btnArrow} />
             </View>
           </SuperchargedPressable>
 
@@ -312,21 +396,51 @@ export default function LoginScreen() {
               style={{ paddingHorizontal: 12, marginBottom: 12, width: '100%' }}
               accessibilityLiveRegion="assertive"
             >
-              <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 18 }}>
+              <Text style={{ color: palette.error, fontSize: 12, fontWeight: '700', textAlign: 'center', lineHeight: 18 }}>
                 {authError}
               </Text>
             </View>
           )}
 
-
-
-          <Text style={styles.termsText}>
+          <Text style={[styles.termsText, { color: palette.textMuted }]}>
             ReeWise protects your data and respects your privacy.
           </Text>
         </CinematicFadeIn>
       </View>
     </SafeAreaView>
     </ThemeBackground>
+
+    {/* Premium First-Time Sync Loading Overlay */}
+    {isFirstTimeSyncInProgress && (
+      <View style={[StyleSheet.absoluteFillObject, styles.overlayContainer, { backgroundColor: addAlpha(palette.background, 0.96) }]}>
+        <CinematicFadeIn duration={400} style={{ ...styles.overlayCard, backgroundColor: palette.surface, borderColor: palette.border, shadowColor: palette.shadow }}>
+          <View style={styles.characterContainer}>
+            <ReeWCharacter state={syncFailed ? 'cute_sad' : 'thinking'} size={120} />
+          </View>
+          
+          {syncFailed ? (
+            <View style={styles.overlayTextContainer}>
+              <Text style={[styles.overlayTitle, { color: palette.textPrimary }]}>Connection is Weak</Text>
+              <Text style={[styles.overlaySubtitle, { color: palette.textSecondary }]}>
+                We couldn't download the syllabus contents. Please check your internet connection and restart the app.
+              </Text>
+              
+              <SuperchargedPressable
+                onPress={handleRestart}
+                activeScale={0.96}
+                style={[styles.restartBtn, { backgroundColor: palette.accent, shadowColor: palette.accentGlow }]}
+              >
+                <Text style={[styles.restartBtnText, { color: buttonTextColor }]}>Restart App</Text>
+              </SuperchargedPressable>
+            </View>
+          ) : (
+            <View style={styles.overlayTextContainer}>
+              <Text style={[styles.overlayTitle, { color: palette.textPrimary, marginBottom: 0 }]}>Getting started...</Text>
+            </View>
+          )}
+        </CinematicFadeIn>
+      </View>
+    )}
     </Animated.View>
   );
 }
@@ -334,7 +448,6 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F7', // Warm off-white
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -355,12 +468,9 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 24,
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.03,
     shadowRadius: 16,
@@ -373,7 +483,6 @@ const styles = StyleSheet.create({
     marginVertical: 40,
   },
   title: {
-    color: '#0F172A', // Dark Navy
     fontSize: 28,
     fontWeight: 'bold',
     letterSpacing: -0.5,
@@ -382,7 +491,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   subtitle: {
-    color: '#475569', // Soft Charcoal
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
@@ -393,13 +501,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtn: {
-    backgroundColor: '#8B5CF6',
     height: 52,
     borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
@@ -407,15 +513,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   trialBtn: {
-    backgroundColor: '#FFFFFF',
     height: 52,
     borderRadius: 26,
     borderWidth: 1.5,
-    borderColor: '#8B5CF6',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -423,7 +526,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   trialBtnText: {
-    color: '#8B5CF6',
     fontSize: 15,
     fontWeight: 'bold',
   },
@@ -432,7 +534,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: 'bold',
   },
@@ -446,15 +547,85 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryBtnText: {
-    color: '#475569',
     fontSize: 14,
     fontWeight: '600',
   },
   termsText: {
-    color: '#94A3B8',
     fontSize: 11,
     textAlign: 'center',
     marginTop: 24,
     lineHeight: 16,
+  },
+  overlayContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  overlayCard: {
+    width: width - 64,
+    paddingVertical: 36,
+    paddingHorizontal: 24,
+    borderRadius: 32,
+    borderWidth: 1,
+    alignItems: 'center',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    elevation: 4,
+  },
+  characterContainer: {
+    height: 120,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  overlayTextContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  overlayTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  overlaySubtitle: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  progressBarContainer: {
+    width: '100%',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  restartBtn: {
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 2,
+    marginTop: 8,
+  },
+  restartBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

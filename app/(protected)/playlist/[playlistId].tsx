@@ -37,13 +37,14 @@ import Animated, { useAnimatedStyle, withSpring, FadeInUp, FadeOut, useSharedVal
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { transitionScheduler } from '@/utils/transitionScheduler';
 import { ThemeBackground } from '@/components/ThemeBackground';
 import { useThemePalette } from '@/hooks/useThemePalette';
 import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 import { GlassPanel } from '@/components/motion/GlassPanel';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
-
+import { addAlpha } from '@/theme/themePalettes';
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -63,14 +64,17 @@ interface CardItemProps {
 const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemProps) => {
   if (!card || !card._id) return null;
   const palette = useThemePalette();
+  const step = useWalkthroughStore(s => s.step);
+  const isWalkthroughActive = step !== 'none';
 
   return (
     <ScaleDecorator activeScale={1.0}>
       <TouchableOpacity
         activeOpacity={isActive ? 1 : 0.85}
-        onPress={() => !isActive && startRevising(false, false, card._id)}
-        disabled={isActive}
+        onPress={() => !isActive && !isWalkthroughActive && startRevising(false, false, card._id)}
+        disabled={isActive || isWalkthroughActive}
         onLongPress={() => {
+          if (isWalkthroughActive && step !== 'playlist-reorder') return;
           lightHaptic();
           drag();
         }}
@@ -79,18 +83,10 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
           styles.cardWrapper,
           { 
             backgroundColor: palette.surface, 
-            borderColor: palette.border,
-            shadowColor: palette.isDark ? '#000000' : '#94A3B8',
+            borderColor: isActive ? palette.accent : palette.border,
+            shadowColor: palette.shadow,
             shadowOpacity: palette.isDark ? 0.25 : 0.05,
-          },
-          isActive && [
-            styles.cardActive,
-            { 
-              borderColor: palette.accent, 
-              backgroundColor: palette.surface,
-              shadowColor: palette.accent,
-            }
-          ]
+          }
         ]}
       >
         <View className="flex-1 justify-center">
@@ -105,10 +101,10 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
               className="text-xs font-semibold"
               style={{
                 color: card.difficulty === 'Easy'
-                  ? '#10B981'
+                  ? palette.success
                   : card.difficulty === 'Medium'
-                  ? '#D97706'
-                  : '#EF4444'
+                  ? palette.warning
+                  : palette.error
               }}
             >
               {card.difficulty}
@@ -124,8 +120,7 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
     prevProps.card._id === nextProps.card._id &&
     prevProps.card.title === nextProps.card.title &&
     prevProps.card.topic === nextProps.card.topic &&
-    prevProps.card.difficulty === nextProps.card.difficulty &&
-    prevProps.startRevising === nextProps.startRevising
+    prevProps.card.difficulty === nextProps.card.difficulty
   );
 });
 
@@ -181,6 +176,7 @@ const ConfettiParticle = ({ p, progress }: { p: any; progress: SharedValue<numbe
 
 const ConfettiBlast = () => {
   const progress = useSharedValue(0);
+  const palette = useThemePalette();
 
   useEffect(() => {
     progress.value = withTiming(1, { duration: 1200 });
@@ -188,7 +184,7 @@ const ConfettiBlast = () => {
 
   const numParticles = 30;
   const particles = useMemo(() => {
-    const colors = ['#FFC700', '#FF0055', '#00E1FF', '#FF00A0', '#42E862', '#8F00FF'];
+    const colors = [palette.accent, palette.error, palette.info, palette.success, palette.warning];
     return Array.from({ length: numParticles }).map((_, i) => {
       const angle = (i / numParticles) * 360 + (Math.random() * 20 - 10);
       const angleRad = (angle * Math.PI) / 180;
@@ -208,7 +204,7 @@ const ConfettiBlast = () => {
         rotateEnd,
       };
     });
-  }, []);
+  }, [palette]);
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
@@ -231,21 +227,83 @@ export default function PlaylistCardsScreen() {
   }>();
   const playlistId = normalizeParam(params.playlistId) ?? '';
   const isLikes = playlistId === 'likes';
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log(`[Playlist Screen Focus] playlistId="${playlistId}"`);
+      if (playlistId && playlistId !== 'all') {
+        usePlaylistStateStore.getState().hydratePlaylistCardsOnDemand(playlistId).catch((err) => {
+          console.error(`[Playlist Screen Focus] hydratePlaylistCardsOnDemand failed:`, err);
+        });
+      }
+    }, [playlistId])
+  );
   
   const { user, logout } = useAuthStore();
+  const isGuest = user?.id === 'guest-user';
+  
+  const GUEST_PLAYLIST_CARDS: IPopulatedRevisionCard[] = useMemo(() => [
+    {
+      _id: 'guest-card-3',
+      title: 'Merge K Sorted Lists',
+      topic: 'HEAPS',
+      difficulty: 'Hard',
+      explanation: 'Combine elements of K sorted linked lists by using a min-heap.',
+      examples: [],
+      tags: [],
+      createdBy: { _id: 'admin', name: 'Admin', email: 'admin@dsa-reels.com', avatarUrl: '' },
+      folderId: '6a1655fab129b168bb16bb1f',
+      visibility: 'public',
+      order: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      _id: 'guest-card-4',
+      title: 'Course Schedule II',
+      topic: 'GRAPHS',
+      difficulty: 'Hard',
+      explanation: 'Topological sort using Kahn\'s algorithm (BFS) or DFS to find task order.',
+      examples: [],
+      tags: [],
+      createdBy: { _id: 'admin', name: 'Admin', email: 'admin@dsa-reels.com', avatarUrl: '' },
+      folderId: '6a1655fab129b168bb16bb1f',
+      visibility: 'public',
+      order: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      _id: 'guest-card-5',
+      title: '0/1 Knapsack Core',
+      topic: 'DYNAMIC PROGRAMMING',
+      difficulty: 'Hard',
+      explanation: 'Find maximum subset value for limited weight using bottom-up tabulation.',
+      examples: [],
+      tags: [],
+      createdBy: { _id: 'admin', name: 'Admin', email: 'admin@dsa-reels.com', avatarUrl: '' },
+      folderId: '6a1655fab129b168bb16bb1f',
+      visibility: 'public',
+      order: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+  ], []);
+
   const { setActivePlaylistId } = useBookmarkStore();
   const { data: playlists } = usePlaylists();
   
+
   const playlist = playlists?.find(p => p.id === playlistId);
 
   // Normal playlist hook
-  const { data: cardsData, isLoading: cardsLoading, isError: cardsIsError, error: cardsError, refetch: refetchCards } = usePlaylistCards(isLikes ? null : playlistId);
+  const { data: cardsData, isLoading: cardsLoading, isError: cardsIsError, error: cardsError, refetch: refetchCards } = usePlaylistCards(isLikes || isGuest ? null : playlistId);
   // Likes hook
   const { data: libraryData, isLoading: libraryLoading, isError: libraryIsError, error: libraryError, refetch: refetchLibrary } = usePersonalLibrary();
   
-  const isLoading = isLikes ? libraryLoading : cardsLoading;
-  const isError = isLikes ? libraryIsError : cardsIsError;
-  const error = isLikes ? libraryError : cardsError;
+  const isLoading = isGuest ? false : (isLikes ? libraryLoading : cardsLoading);
+  const isError = isGuest ? false : (isLikes ? libraryIsError : cardsIsError);
+  const error = isGuest ? null : (isLikes ? libraryError : cardsError);
   const refetch = isLikes ? refetchLibrary : refetchCards;
 
   const reorderPlaylist = useReorderPlaylist();
@@ -254,33 +312,59 @@ export default function PlaylistCardsScreen() {
   const hydratePlaylistCards = usePlaylistStateStore((state) => state.hydratePlaylistCards);
   const setPlaylistCardOrder = usePlaylistStateStore((state) => state.setPlaylistCardOrder);
   const storeCards = useStorePlaylistCards(playlistId);
+  console.log(`[Playlist Screen Render] playlistId="${playlistId}", storeCards.length=${storeCards?.length}, isLikes=${isLikes}`);
+
+  const favoritesKey = isLikes
+    ? (libraryData?.favorites ?? []).map(f => f.card?._id).filter(Boolean).join(',')
+    : '';
 
   useEffect(() => {
+    if (isGuest) return;
     if (isLikes && libraryData?.favorites) {
       const favCards = libraryData.favorites
         .filter(f => f != null && f.card != null && typeof f.card === 'object' && '_id' in f.card)
         .map(f => f.card) as IPopulatedRevisionCard[];
       hydratePlaylistCards(playlistId, favCards.filter(Boolean).filter(c => c && c._id));
     }
-  }, [libraryData, isLikes, playlistId, hydratePlaylistCards]);
+  }, [favoritesKey, isLikes, playlistId, hydratePlaylistCards, isGuest]);
 
-  const [localCards, setLocalCards] = useState<IPopulatedRevisionCard[]>(() => storeCards || []);
+  const [localCards, setLocalCards] = useState<IPopulatedRevisionCard[]>(() => {
+    const initial = isGuest ? GUEST_PLAYLIST_CARDS : (storeCards || []);
+    console.log(`[Playlist Screen State Initializer] initialCards.length=${initial.length}`);
+    return initial;
+  });
+
+  useEffect(() => {
+    if (isGuest) {
+      const loadCards = async () => {
+        try {
+          const val = await AsyncStorage.getItem(`guest-playlist-${playlistId}-cards`);
+          if (val) {
+            setLocalCards(JSON.parse(val));
+          } else {
+            setLocalCards(GUEST_PLAYLIST_CARDS);
+          }
+        } catch (e) {
+          setLocalCards(GUEST_PLAYLIST_CARDS);
+        }
+      };
+      loadCards();
+    }
+  }, [isGuest, playlistId, GUEST_PLAYLIST_CARDS]);
+
   const [undoVisible, setUndoVisible] = useState(false);
 
   const { step, setStep, completeWalkthrough, isComplete } = useWalkthroughStore();
+  const isWalkthroughActive = step !== 'none';
 
   const handleBack = useCallback(() => {
     if (playlistId === 'hard' && !isComplete) {
-      // Don't allow back when in hard section during tutorial
       return true;
     }
-    // Fast path: use router.back() which just pops the stack
-    // This is 2-3x faster than router.replace() which triggers a full mount
     if (router.canGoBack()) {
       router.back();
       return true;
     }
-    // Fallback: if somehow at root, navigate to personal tab
     router.replace('/(protected)/(tabs)/personal');
     return true;
   }, [router, playlistId, isComplete]);
@@ -386,9 +470,11 @@ export default function PlaylistCardsScreen() {
   }, [undoVisible]);
 
   useEffect(() => {
+    if (isGuest) return;
     if (storeCards) {
       const currentIds = localCards.map(c => c?._id).join(',');
       const nextIds = storeCards.map(c => c?._id).join(',');
+      console.log(`[Playlist Screen Sync useEffect] currentIds="${currentIds}", nextIds="${nextIds}", isOptimistic=${isOptimisticUpdateRef.current}`);
       
       if (isOptimisticUpdateRef.current) {
         const storeCleanIds = storeCards.map(c => c?._id?.split('-loop-')[0]).join(',');
@@ -400,11 +486,12 @@ export default function PlaylistCardsScreen() {
       }
       
       if (currentIds !== nextIds) {
+        console.log(`[Playlist Screen Sync useEffect] Updating localCards! nextIds="${nextIds}"`);
         setLocalCards(storeCards);
       }
       isLoadingMoreRef.current = false;
     }
-  }, [storeCards]);
+  }, [storeCards, isGuest]);
 
 
 
@@ -416,6 +503,10 @@ export default function PlaylistCardsScreen() {
     const ref = swipeableRefs.current.get(cleanId);
     if (ref) {
       ref.close();
+    }
+
+    if (step === 'playlist-remove') {
+      setStep('playlist-reminder');
     }
 
     const currentIndex = localCards.findIndex(c => {
@@ -438,6 +529,11 @@ export default function PlaylistCardsScreen() {
       return cId !== cleanId;
     });
     setLocalCards(nextCards);
+
+    if (isGuest) {
+      setUndoVisible(true);
+      return;
+    }
 
     // Apply store changes optimistically
     if (isSmart) {
@@ -472,6 +568,12 @@ export default function PlaylistCardsScreen() {
     nextCards.splice(index, 0, card);
     setLocalCards(nextCards);
 
+    if (isGuest) {
+      setLastRemoved(null);
+      setUndoVisible(false);
+      return;
+    }
+
     // Restore store
     const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
     if (isSmart && originalDifficulty) {
@@ -497,7 +599,7 @@ export default function PlaylistCardsScreen() {
     // Clean up
     setLastRemoved(null);
     setUndoVisible(false);
-  }, [lastRemoved, localCards, playlistId]);
+  }, [lastRemoved, localCards, playlistId, isGuest]);
 
   const displayTitle = isLikes ? 'Revised' : (playlist?.name || 'Playlist');
 
@@ -578,11 +680,12 @@ export default function PlaylistCardsScreen() {
   }, [pickerMode, selectedDate, confirmReminderScheduling, closeDatePicker]);
 
   const openRevisionReminderPicker = useCallback(() => {
+    if (step !== 'playlist-reminder' && step !== 'none') return;
     lightHaptic();
     setSelectedDate(new Date());
     setPickerMode(Platform.OS === 'ios' ? 'datetime' : 'date');
     setShowDatePicker(true);
-  }, []);
+  }, [step]);
 
   const pendingOrderRef = useRef<IPopulatedRevisionCard[]>([]);
 
@@ -598,6 +701,12 @@ export default function PlaylistCardsScreen() {
     // 1. Commit immediately to local state so visual positions settle
     setLocalCards(data);
 
+    if (step === 'playlist-reorder') {
+      setStep('playlist-remove');
+    }
+
+    if (isGuest) return;
+
     // 2. Map and update store/backend
     const draggedIds = data.map(c => c._id);
     const originalIds = usePlaylistStateStore.getState().playlistCardOrderMap[playlistId] || [];
@@ -607,6 +716,18 @@ export default function PlaylistCardsScreen() {
 
     setPlaylistCardOrder(playlistId, finalIds);
 
+    // Invalidate stale reels session so reels load in the new order
+    const trackingState = useTrackingStore.getState();
+    if (trackingState.reelsSourceId === playlistId) {
+      useTrackingStore.setState({
+        reelsSessionId: null,
+        reelsSessionCards: [],
+        reelsActiveIndex: 0,
+        reelsSourceType: null,
+        reelsSourceId: null,
+      });
+    }
+
     if (isLikes) {
       reorderLikes.mutate(finalIds);
     } else if (['easy', 'medium', 'hard', 'skipped'].includes(playlistId)) {
@@ -614,7 +735,7 @@ export default function PlaylistCardsScreen() {
     } else {
       reorderPlaylist.mutate({ playlistId, cardIds: finalIds });
     }
-  }, [playlistId, isLikes, setPlaylistCardOrder, reorderLikes, reorderPlaylist, queryClient]);
+  }, [playlistId, isLikes, setPlaylistCardOrder, reorderLikes, reorderPlaylist, queryClient, isGuest]);
 
   const handleDragEnd = useCallback(({ data }: { data: IPopulatedRevisionCard[] }) => {
     pendingOrderRef.current = data;
@@ -629,8 +750,6 @@ export default function PlaylistCardsScreen() {
 
   const startRevising = useCallback((shuffle = false, resume = false, startCardId?: string) => {
     if (!playlistId) return;
-    
-
 
     if (localCards.length === 0) {
       Alert.alert('No cards to revise', 'Add cards to this playlist before starting a run.');
@@ -658,6 +777,7 @@ export default function PlaylistCardsScreen() {
             swipeableRefs.current.set(cleanId, ref);
           }
         }}
+        enabled={!isWalkthroughActive || step === 'playlist-remove'}
         activeOffsetX={[-3, 30]}
         failOffsetY={[-10, 10]}
         renderRightActions={() => (
@@ -665,7 +785,7 @@ export default function PlaylistCardsScreen() {
             onPress={() => handleSwipeRemove(card)}
             activeOpacity={0.8}
             style={{
-              backgroundColor: palette.isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2',
+              backgroundColor: addAlpha(palette.error, 0.12),
               justifyContent: 'center',
               alignItems: 'center',
               width: 70,
@@ -674,10 +794,10 @@ export default function PlaylistCardsScreen() {
               marginBottom: 12,
               marginLeft: 8,
               borderWidth: 1,
-              borderColor: palette.isDark ? 'rgba(239, 68, 68, 0.3)' : '#FCA5A5',
+              borderColor: addAlpha(palette.error, 0.25),
             }}
           >
-            <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 12 }}>Remove</Text>
+            <Text style={{ color: palette.error, fontWeight: 'bold', fontSize: 12 }}>Remove</Text>
           </TouchableOpacity>
         )}
         onSwipeableOpen={(direction) => {
@@ -694,7 +814,7 @@ export default function PlaylistCardsScreen() {
         />
       </Swipeable>
     );
-  }, [startRevising, handleSwipeRemove]);
+  }, [startRevising, handleSwipeRemove, palette, isWalkthroughActive, step]);
 
   if (!playlistId) {
     return (
@@ -702,7 +822,7 @@ export default function PlaylistCardsScreen() {
         <SafeAreaView className="flex-1 justify-center items-center px-6" style={{ backgroundColor: 'transparent' }}>
           <Text className="text-center mb-4" style={{ color: palette.textSecondary }}>Invalid playlist link.</Text>
           <TouchableOpacity onPress={handleBack} className="px-6 py-3 rounded-full" style={{ backgroundColor: palette.accent }}>
-            <Text className="text-white">Go back</Text>
+            <Text style={{ color: palette.isDark ? palette.textPrimary : palette.surface }}>Go back</Text>
           </TouchableOpacity>
         </SafeAreaView>
       </ThemeBackground>
@@ -720,7 +840,8 @@ export default function PlaylistCardsScreen() {
     } else if (localStep === 'playlist-happy') {
       await completeWalkthrough();
       if (user?.id === 'guest-user') {
-        await logout();
+        const { useAuthStore } = require('@/store/useAuthStore');
+        await useAuthStore.getState().logout();
         router.replace('/(auth)/login');
       } else {
         router.replace('/(protected)/(tabs)/learn');
@@ -758,15 +879,16 @@ export default function PlaylistCardsScreen() {
         >
           <TouchableOpacity
             onPress={() => startRevising(false, false)}
-            disabled={localStep === 'playlist-reminder'}
+            disabled={['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(localStep)}
             className="flex-1 flex-row items-center justify-center py-3 rounded-2xl"
-            style={{ backgroundColor: palette.accent, opacity: localStep === 'playlist-reminder' ? 0.5 : 1 }}
+            style={{ backgroundColor: palette.accent, opacity: ['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(localStep) ? 0.5 : 1 }}
           >
-            <Play color="#fff" size={18} />
-            <Text className="text-white font-semibold text-sm ml-2">Run in Order</Text>
+            <Play color={palette.isDark ? palette.textPrimary : palette.surface} size={18} />
+            <Text className="font-semibold text-sm ml-2" style={{ color: palette.isDark ? palette.textPrimary : palette.surface }}>Run in Order</Text>
           </TouchableOpacity>
           <AnimatedTouchableOpacity
             onPress={openRevisionReminderPicker}
+            disabled={localStep !== 'playlist-reminder' && localStep !== 'none'}
             className="flex-1 flex-row items-center justify-center border py-3 rounded-2xl"
             style={[
               {
@@ -800,7 +922,7 @@ export default function PlaylistCardsScreen() {
         <ActivityIndicator size="large" color={palette.accent} className="mt-12" />
       ) : isError && localCards.length === 0 ? (
         <View className="rounded-2xl p-6 mb-6 mx-4 border" style={{ backgroundColor: palette.surface, borderColor: palette.border }}>
-          <Text className="text-red-500 font-medium">{error?.message}</Text>
+          <Text className="font-medium" style={{ color: palette.error }}>{error?.message}</Text>
           <TouchableOpacity onPress={() => refetch()} className="mt-4">
             <Text className="font-medium text-center" style={{ color: palette.accent }}>Retry</Text>
           </TouchableOpacity>
@@ -830,12 +952,12 @@ export default function PlaylistCardsScreen() {
           maxToRenderPerBatch={5}
           updateCellsBatchingPeriod={100}
           getItemLayout={(_, index) => ({
-            length: 116,
-            offset: 116 * index,
+            length: 104,
+            offset: 104 * index,
             index,
           })}
           onEndReached={() => {
-            if (playlistId && !isLoadingMoreRef.current) {
+            if (playlistId === 'all' && !isLoadingMoreRef.current) {
               isLoadingMoreRef.current = true;
               usePlaylistStateStore.getState().checkAndLoadMorePlaylistCards(playlistId, localCards.length - 1);
             }
@@ -860,7 +982,7 @@ export default function PlaylistCardsScreen() {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
-            shadowColor: palette.isDark ? '#000000' : '#0F172A',
+            shadowColor: palette.shadow,
             shadowOffset: { width: 0, height: 8 },
             shadowOpacity: palette.isDark ? 0.3 : 0.1,
             shadowRadius: 16,
@@ -883,7 +1005,7 @@ export default function PlaylistCardsScreen() {
               borderRadius: 12,
             }}
           >
-            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+            <Text style={{ color: palette.isDark ? palette.textPrimary : palette.surface, fontSize: 12, fontWeight: '700' }}>
               Undo
             </Text>
           </TouchableOpacity>
@@ -893,7 +1015,7 @@ export default function PlaylistCardsScreen() {
         <Modal visible={true} transparent animationType="fade" onRequestClose={closeDatePicker}>
           <View style={{
             flex: 1,
-            backgroundColor: palette.isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(15, 23, 42, 0.45)',
+            backgroundColor: palette.overlayBg,
             justifyContent: 'center',
             alignItems: 'center',
             padding: 24,
@@ -905,7 +1027,7 @@ export default function PlaylistCardsScreen() {
               borderRadius: 32,
               padding: 20,
               alignItems: 'center',
-              shadowColor: palette.isDark ? '#000000' : '#0F172A',
+              shadowColor: palette.shadow,
               shadowOffset: { width: 0, height: 16 },
               shadowOpacity: 0.15,
               shadowRadius: 28,
@@ -983,7 +1105,7 @@ export default function PlaylistCardsScreen() {
                     backgroundColor: palette.accent,
                   }}
                 >
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#ffffff' }}>Confirm</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: palette.isDark ? palette.textPrimary : palette.surface }}>Confirm</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1002,12 +1124,12 @@ export default function PlaylistCardsScreen() {
       )}
 
       {/* Tutorial backdrop overlays blocking invalid clicks and forwarding to handleBackdropPress */}
-      {['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(localStep) && (
+      {['playlist-reminder', 'playlist-happy'].includes(localStep) && (
         <Pressable
           onPress={handleBackdropPress}
           style={{
             ...StyleSheet.absoluteFillObject,
-            backgroundColor: 'rgba(0, 0, 0, 0.01)',
+            backgroundColor: addAlpha(palette.shadow, 0.01),
             zIndex: 9990,
           }}
         />
@@ -1017,7 +1139,7 @@ export default function PlaylistCardsScreen() {
       {['playlist-reorder', 'playlist-remove', 'playlist-reminder', 'playlist-happy'].includes(localStep) && (
         <View style={{
           position: 'absolute',
-          top: '35%',
+          bottom: '30%',
           left: 16,
           right: 16,
           zIndex: 10000, // Make sure panel sits on top of the backdrop overlays
@@ -1027,15 +1149,15 @@ export default function PlaylistCardsScreen() {
               width: '100%',
               padding: 20,
               borderRadius: 32,
-              borderColor: '#EADEC9',
+              borderColor: palette.border,
               borderWidth: 1.5,
-              backgroundColor: 'rgba(250, 246, 240, 0.95)',
-              shadowColor: '#8C6A5C',
+              backgroundColor: addAlpha(palette.surface, 0.95),
+              shadowColor: palette.shadow,
               shadowOffset: { width: 0, height: 10 },
               shadowOpacity: 0.08,
               shadowRadius: 20,
               elevation: 6,
-            }} intensity={30} tint="light">
+            }} intensity={30} tint={palette.isDark ? "dark" : "light"}>
               <Animated.View style={[{ width: '100%' }, panelAnimatedStyle]}>
                 {localStep === 'playlist-happy' && <ConfettiBlast />}
 
@@ -1057,40 +1179,40 @@ export default function PlaylistCardsScreen() {
                 <View style={{ flex: 1, justifyContent: 'center', gap: 6 }}>
                   {localStep === 'playlist-reorder' && (
                     <>
-                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3E3431', lineHeight: 24, textAlign: 'left' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', lineHeight: 24, textAlign: 'left', color: palette.textPrimary }}>
                         {"I long press the card and then reorder it to customize my revision sequence!"}
                       </Text>
-                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4, color: palette.textMuted }}>
                         Tap anywhere to continue
                       </Text>
                     </>
                   )}
                   {localStep === 'playlist-remove' && (
                     <>
-                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3E3431', lineHeight: 24, textAlign: 'left' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', lineHeight: 24, textAlign: 'left', color: palette.textPrimary }}>
                         {"I swipe left on the card I no longer want in the playlist to remove it."}
                       </Text>
-                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4, color: palette.textMuted }}>
                         Tap anywhere to continue
                       </Text>
                     </>
                   )}
                   {localStep === 'playlist-reminder' && (
                     <>
-                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3E3431', lineHeight: 24, textAlign: 'left' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', lineHeight: 24, textAlign: 'left', color: palette.textPrimary }}>
                         {"I use the revision reminder for revision. Open the revision reminder!"}
                       </Text>
-                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4, color: palette.accent }}>
                         tap the revision reminder
                       </Text>
                     </>
                   )}
                   {localStep === 'playlist-happy' && (
                     <>
-                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#8C6A5C', textAlign: 'left' }}>
+                      <Text style={{ fontSize: 18, fontWeight: '900', textAlign: 'left', color: palette.accent }}>
                         {"Happy ReeWising!!"}
                       </Text>
-                      <Text style={{ fontSize: 10, color: '#8C6A5C', fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', opacity: 0.6, letterSpacing: 0.5, marginTop: 4, color: palette.textMuted }}>
                         Tap anywhere to continue
                       </Text>
                     </>
@@ -1109,25 +1231,17 @@ export default function PlaylistCardsScreen() {
 
 const styles = StyleSheet.create({
   cardWrapper: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 20,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
-    shadowColor: '#94A3B8',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 1,
     height: 104,
   },
   cardActive: {
-    backgroundColor: '#fff',
-    borderColor: '#C4B5FD',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
     shadowRadius: 16,
     elevation: 8,
   }

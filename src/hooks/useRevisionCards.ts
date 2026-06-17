@@ -1,6 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { getAllDescendantFolderIds } from '@/utils/folderHelpers';
 import * as revisionService from '@/services/revisionService';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -47,91 +48,80 @@ export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
   const queryResult = useQuery({
     queryKey: ['revisionCards', query],
     queryFn: async () => {
-      try {
-        const paginated = await revisionService.getRevisionCards(query || {});
-        if (paginated && paginated.results) {
-          usePlaylistStateStore.getState().hydratePlaylistCards('all', paginated.results);
-        }
-        return {
-          ...paginated,
-          results: paginated.results?.map(c => c._id) || [],
-        };
-      } catch (err) {
-        return {
-          results: cardIds,
-          page: 1,
-          limit: 100,
-          totalPages: 1,
-          totalResults: cardIds.length,
-        } as any;
-      }
+      return {
+        results: cardIds,
+        page: 1,
+        limit: 100,
+        totalPages: 1,
+        totalResults: cardIds.length,
+      };
     },
-    enabled: !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60 * 10,
-    gcTime: 1000 * 60 * 60,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
+    enabled: false,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated || cardIds.length > 0;
 
   return {
-    data: hasLocal ? {
+    data: {
       results: cardIds,
       page: 1,
       limit: 100,
       totalPages: 1,
       totalResults: cardIds.length,
-    } as any : {
-      ...queryResult.data,
-      results: queryResult.data?.results?.map((c: any) => typeof c === 'string' ? c : c._id) || [],
     },
-    isLoading: queryResult.isLoading && !hasLocal,
-    isError: queryResult.isError && !hasLocal,
-    isFetching: queryResult.isFetching,
-    error: queryResult.error,
-    refetch: queryResult.refetch,
+    isLoading: !hasHydrated,
+    isError: false,
+    isFetching: false,
+    error: null,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[useGetRevisionCards] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
     isRefetching: queryResult.isRefetching,
   };
 };
 
 export const useGetRevisionCard = (cardId: string | undefined) => {
   const card = usePlaylistStateStore((s) => cardId ? s.cardsById[cardId] : undefined);
-  const hydratePlaylistCards = usePlaylistStateStore((s) => s.hydratePlaylistCards);
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
-  const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
+
+  useEffect(() => {
+    if (cardId && card && !card.isContentFullyHydrated) {
+      usePlaylistStateStore.getState().hydrateCardContentOnDemand(cardId).catch((err) => {
+        console.warn(`[useGetRevisionCard] Failed on-demand content hydration for card: ${cardId}`, err.message);
+      });
+    }
+  }, [cardId, card]);
 
   const queryResult = useQuery({
     queryKey: ['revisionCards', 'detail', cardId],
     queryFn: async () => {
-      if (!cardId) return null;
-      try {
-        const data = await revisionService.getRevisionCardById(cardId);
-        if (data) {
-          hydratePlaylistCards('all', [data]);
-        }
-        return data;
-      } catch (err) {
-        return card || null;
-      }
+      return card || null;
     },
-    enabled: !!cardId && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60 * 60,
-    gcTime: 1000 * 60 * 60 * 24,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    enabled: false,
   });
 
+  const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
+
   return {
-    data: card || queryResult.data,
-    isLoading: queryResult.isLoading && !card,
-    isError: queryResult.isError && !card,
-    isFetching: queryResult.isFetching,
-    error: queryResult.error,
-    refetch: queryResult.refetch,
+    data: card || null,
+    isLoading: !hasHydrated && !card,
+    isError: false,
+    isFetching: false,
+    error: null,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[useGetRevisionCard] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
   };
 };
 
@@ -159,43 +149,40 @@ export const useGetCardsByFolder = (
   const queryResult = useQuery({
     queryKey: ['cards_folder', folderId, query],
     queryFn: async () => {
-      if (!folderId) return { results: [], page: 1, limit: 100, totalPages: 1, totalResults: 0 };
-      try {
-        const paginated = await revisionService.getCardsByFolder(folderId, query);
-        if (paginated && paginated.results) {
-          hydratePlaylistCards(folderId, paginated.results);
-        }
-        return paginated;
-      } catch (err) {
-        return {
-          results: filteredCards,
-          page: 1,
-          limit: 100,
-          totalPages: 1,
-          totalResults: filteredCards.length,
-        } as PaginatedRevisionCards;
-      }
+      return {
+        results: filteredCards,
+        page: 1,
+        limit: 100,
+        totalPages: 1,
+        totalResults: filteredCards.length,
+      } as PaginatedRevisionCards;
     },
-    enabled: !!folderId && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60 * 10,
+    enabled: false,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated || filteredCards.length > 0;
 
   return {
-    data: hasLocal ? {
+    data: {
       results: filteredCards,
       page: 1,
       limit: 100,
       totalPages: 1,
       totalResults: filteredCards.length,
-    } as PaginatedRevisionCards : queryResult.data,
-    isLoading: queryResult.isLoading && !hasLocal,
-    isError: queryResult.isError && !hasLocal,
-    isFetching: queryResult.isFetching,
-    error: queryResult.error,
-    refetch: queryResult.refetch,
+    } as PaginatedRevisionCards,
+    isLoading: !hasHydrated && filteredCards.length === 0,
+    isError: false,
+    isFetching: false,
+    error: null,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[useGetCardsByFolder] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
     isRefetching: queryResult.isRefetching,
   };
 };
@@ -207,9 +194,9 @@ export const useCreateRevisionCard = () => {
 
   return useMutation({
     mutationFn: async (dto: CreateRevisionCardDTO) => {
-      const tempId = `temp-card-${Date.now()}`;
-      const tempCard: IPopulatedRevisionCard = {
-        _id: tempId,
+      const uuid = Crypto.randomUUID();
+      const card: IPopulatedRevisionCard = {
+        _id: uuid,
         title: dto.title,
         topic: dto.topic,
         explanation: dto.explanation,
@@ -232,17 +219,17 @@ export const useCreateRevisionCard = () => {
 
       // 1. Optimistic Update Local Zustand Store immediately
       usePlaylistStateStore.setState((state) => ({
-        cardsById: { ...state.cardsById, [tempId]: tempCard },
+        cardsById: { ...state.cardsById, [uuid]: card },
       }));
 
       // 2. Enqueue offline action
       enqueueOfflineAction({
         action: 'CREATE_CARD',
-        payload: { tempId, dto },
+        payload: { cardId: uuid, dto: { ...dto, _id: uuid } },
         timestamp: Date.now(),
       });
 
-      return Promise.resolve(tempCard);
+      return Promise.resolve(card);
     },
   });
 };

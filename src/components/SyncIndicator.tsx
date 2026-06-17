@@ -2,9 +2,12 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { usePlaylistStateStore } from '../store/usePlaylistStateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { LucideIcon, Cloud, CloudOff, CloudLightning, RefreshCw, CheckCircle2 } from 'lucide-react-native';
+import { CheckCircle2, RefreshCw, CloudOff } from 'lucide-react-native';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 export function SyncIndicator() {
+  const palette = useThemePalette();
   const { syncStatus, offlineActionQueue, triggerSync } = usePlaylistStateStore(
     useShallow((s) => ({
       syncStatus: s.syncStatus,
@@ -20,24 +23,33 @@ export function SyncIndicator() {
     triggerSync();
   };
 
-  let iconColor = '#10B981'; // Green
+  let iconColor = palette.success; // Green (palette.success)
   let statusText = 'Synced';
   let IconComponent = CheckCircle2;
   let showLoader = false;
 
   if (syncStatus === 'syncing') {
-    iconColor = '#8B5CF6'; // Violet
+    iconColor = palette.accent; // Violet/Accent
     statusText = 'Syncing...';
     IconComponent = RefreshCw;
     showLoader = true;
   } else if (syncStatus === 'offline' || pendingCount > 0) {
-    iconColor = '#F59E0B'; // Orange
+    iconColor = palette.warning; // Orange/Warning
     statusText = pendingCount > 0 ? `${pendingCount} Pending` : 'Offline';
     IconComponent = CloudOff;
   }
 
   return (
-    <Pressable onPress={handlePress} style={styles.container}>
+    <Pressable 
+      onPress={handlePress} 
+      style={[
+        styles.container, 
+        { 
+          backgroundColor: addAlpha(palette.textPrimary, 0.04), 
+          borderColor: palette.border 
+        }
+      ]}
+    >
       <View style={styles.statusRow}>
         <View style={[styles.indicator, { backgroundColor: iconColor }]} />
         {showLoader ? (
@@ -58,9 +70,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
     alignSelf: 'flex-start',
     justifyContent: 'center',
     alignItems: 'center',

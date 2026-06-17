@@ -1,26 +1,52 @@
 import React from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 export const DifficultyBadge = ({ difficulty }: { difficulty: IPopulatedRevisionCard['difficulty'] | string }) => {
-  const styles =
+  const palette = useThemePalette();
+  
+  const statusColor =
     difficulty === 'Easy'
-      ? { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-100' }
+      ? palette.success
       : difficulty === 'Medium'
-      ? { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-100' }
-      : { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-100' };
+      ? palette.warning
+      : palette.error;
 
   return (
-    <View className={`px-2.5 py-1 rounded-full border ${styles.bg} ${styles.border}`}>
-      <Text className={`text-xs font-medium ${styles.text}`}>{difficulty}</Text>
+    <View 
+      className="px-2.5 py-1 rounded-full border"
+      style={{
+        backgroundColor: addAlpha(statusColor, 0.08),
+        borderColor: addAlpha(statusColor, 0.15),
+      }}
+    >
+      <Text 
+        className="text-xs font-medium"
+        style={{ color: statusColor }}
+      >
+        {difficulty}
+      </Text>
     </View>
   );
 };
 
 export const TopicBadge = ({ topic }: { topic: string }) => {
+  const palette = useThemePalette();
   return (
-    <View className="px-2.5 py-1 rounded-full bg-violet-50 border border-violet-100">
-      <Text className="text-xs font-medium text-violet-700" numberOfLines={1}>
+    <View 
+      className="px-2.5 py-1 rounded-full border"
+      style={{
+        backgroundColor: addAlpha(palette.accent, 0.08),
+        borderColor: addAlpha(palette.accent, 0.15),
+      }}
+    >
+      <Text 
+        className="text-xs font-medium" 
+        style={{ color: palette.accent }}
+        numberOfLines={1}
+      >
         {topic}
       </Text>
     </View>
@@ -46,13 +72,21 @@ export const CinematicCardWrapper = ({
   totalSlides,
   footerContent,
 }: CinematicCardWrapperProps) => {
+  const palette = useThemePalette();
+
   return (
     <View className="flex-1 justify-between bg-transparent h-full">
-      <Text className="text-[#94A3B8] text-[13px] mb-3">
+      <Text 
+        className="text-[13px] mb-3"
+        style={{ color: palette.textMuted }}
+      >
         {card.topic} · {card.difficulty}
       </Text>
 
-      <Text className="text-[#0F172A] font-normal tracking-tight leading-tight mb-6 text-[28px]">
+      <Text 
+        className="font-semibold tracking-tight leading-tight mb-6 text-[24px]"
+        style={{ color: palette.textPrimary }}
+      >
         {headline}
       </Text>
 
@@ -60,8 +94,14 @@ export const CinematicCardWrapper = ({
         {children}
       </ScrollView>
 
-      <View className="flex-row items-center justify-between border-t border-slate-100/80 pt-5">
-        <Text className="text-[#94A3B8] text-[13px]">
+      <View 
+        className="flex-row items-center justify-between border-t pt-5"
+        style={{ borderColor: palette.border }}
+      >
+        <Text 
+          className="text-[13px]"
+          style={{ color: palette.textMuted }}
+        >
           {slideIndex + 1} of {totalSlides}
         </Text>
         {footerContent}

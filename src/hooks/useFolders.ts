@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import * as folderService from '@/services/folderService';
 import { useAuthStore } from '@/store/useAuthStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
@@ -40,46 +41,39 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
   const queryResult = useQuery({
     queryKey: ['folders', query],
     queryFn: async () => {
-      try {
-        const paginated = await folderService.getFolders(query);
-        if (paginated && paginated.results) {
-          hydrateFolders(paginated.results);
-        }
-        return paginated;
-      } catch (err) {
-        console.warn('[useGetFolders] Background fetch failed, using local cache:', err);
-        return {
-          results: folderList,
-          page: 1,
-          limit: 100,
-          totalPages: 1,
-          totalResults: folderList.length,
-        } as PaginatedFolders;
-      }
+      return {
+        results: folderList,
+        page: 1,
+        limit: 100,
+        totalPages: 1,
+        totalResults: folderList.length,
+      } as PaginatedFolders;
     },
-    enabled: !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60 * 10,
-    gcTime: 1000 * 60 * 60,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
+    enabled: false,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
-  const hasLocal = hasHydrated || Object.keys(foldersById).length > 0;
 
   return {
-    data: hasLocal ? {
+    data: {
       results: folderList,
       page: 1,
       limit: 100,
       totalPages: 1,
       totalResults: folderList.length,
-    } as PaginatedFolders : queryResult.data,
-    isLoading: queryResult.isLoading && !hasLocal,
-    isError: queryResult.isError && !hasLocal,
-    error: queryResult.error,
-    refetch: queryResult.refetch,
+    } as PaginatedFolders,
+    isLoading: !hasHydrated,
+    isError: false,
+    error: null,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[useGetFolders] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
     isRefetching: queryResult.isRefetching,
   };
 };
@@ -93,29 +87,27 @@ export const useGetFolder = (folderId: string | undefined) => {
   const queryResult = useQuery({
     queryKey: ['folders', folderId],
     queryFn: async () => {
-      if (!folderId) return null;
-      try {
-        const data = await folderService.getFolderById(folderId);
-        if (data) {
-          hydrateFolders([data]);
-        }
-        return data;
-      } catch (err) {
-        return folder || null;
-      }
+      return folder || null;
     },
-    enabled: !!folderId && !hasSyncedThisSession && !isGuest,
-    staleTime: 1000 * 60 * 10,
+    enabled: false,
   });
 
   const hasHydrated = usePlaylistStateStore((s) => s.hasHydrated);
 
   return {
-    data: folder || queryResult.data,
-    isLoading: queryResult.isLoading && !hasHydrated && !folder,
-    isError: queryResult.isError && !hasHydrated && !folder,
-    error: queryResult.error,
-    refetch: queryResult.refetch,
+    data: folder || null,
+    isLoading: !hasHydrated && !folder,
+    isError: false,
+    error: null,
+    refetch: async () => {
+      try {
+        const { syncManager } = require('@/utils/syncManager');
+        await syncManager.sync(true);
+      } catch (err) {
+        console.warn('[useGetFolder] Refetch sync failed:', err);
+      }
+      return queryResult.refetch();
+    },
   };
 };
 
@@ -127,10 +119,10 @@ export const useCreateFolder = () => {
 
   return useMutation({
     mutationFn: async (dto: CreateFolderDTO) => {
-      const tempId = `temp-folder-${Date.now()}`;
+      const uuid = Crypto.randomUUID();
       
-      const tempFolder: IFolder = {
-        _id: tempId,
+      const folder: IFolder = {
+        _id: uuid,
         title: dto.title,
         description: dto.description || '',
         icon: dto.icon || 'Folder',
@@ -150,16 +142,16 @@ export const useCreateFolder = () => {
       };
 
       // 1. Optimistic Update Local Zustand Store immediately
-      createFolderInStore(tempFolder);
+      createFolderInStore(folder);
 
       // 2. Enqueue offline action with unique client-side actionId
       enqueueOfflineAction({
         action: 'CREATE_FOLDER',
-        payload: { tempId, dto },
+        payload: { folderId: uuid, dto: { ...dto, _id: uuid } },
         timestamp: Date.now(),
       });
 
-      return Promise.resolve(tempFolder);
+      return Promise.resolve(folder);
     },
   });
 };

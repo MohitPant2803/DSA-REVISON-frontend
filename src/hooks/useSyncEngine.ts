@@ -13,7 +13,7 @@ import { syncTelemetry } from '@/utils/syncTelemetry';
 import { mergeCardState } from '@/utils/resolveCardState';
 import type { IFolder } from '@/types/folder';
 import type { ApiPlaylist } from '@/services/playlistService';
-import offlineSeed from '../constants/offlineSeed.json';
+import offlineSeed from '../components/constants/offlineSeed.json';
 import { interactionScheduler } from '@/utils/interactionScheduler';
 import { sqliteWriteManager } from '@/utils/sqliteWriteManager';
 import {
@@ -86,7 +86,27 @@ function mergeEntityState<T extends { _id: string; updatedAt?: string | number; 
 }
 
 // Module-level persistent session flag to survive layout unmounts/remounts during boot transitions
-const globalStartupSyncTriggered = new Map<string, boolean>();
+const rawGlobalStartupSyncTriggered = new Map<string, boolean>();
+const globalStartupSyncTriggered = {
+  get(key: string) {
+    return rawGlobalStartupSyncTriggered.get(key);
+  },
+  set(key: string, value: boolean) {
+    const prev = rawGlobalStartupSyncTriggered.get(key);
+    const stack = new Error().stack || '';
+    const callerLine = stack.split('\n')[2] || '';
+    console.log(`[INSTRUMENT] globalStartupSyncTriggered.set | Key: "${key}" | Prev: ${prev} | New: ${value} | Caller: ${callerLine.trim()}`);
+    return rawGlobalStartupSyncTriggered.set(key, value);
+  },
+  has(key: string) {
+    return rawGlobalStartupSyncTriggered.has(key);
+  },
+  clear() {
+    return rawGlobalStartupSyncTriggered.clear();
+  }
+};
+
+let lastKnownUserId = 'guest-user';
 
 export function useSyncEngine() {
   const queryClient = useQueryClient();
@@ -219,6 +239,9 @@ export function useSyncEngine() {
 
   // Comprehensive fallback: fully re-download canonical catalog and overwrite store (Loophole 64)
   const executeFullResync = useCallback(async (forcedByChecksum = false) => {
+    if (typeof (global as any).dumpInstrumentState === 'function') {
+      (global as any).dumpInstrumentState('7. executeFullResync starts');
+    }
     const user = useAuthStore.getState().user;
     if (!user || user.id === 'guest-user') return;
 
@@ -249,7 +272,13 @@ export function useSyncEngine() {
       
       // Request complete clean revision fetch
       setSyncProgress(25, 'Downloading playlists, folders, and cards from MongoDB...');
+      if (typeof (global as any).dumpInstrumentState === 'function') {
+        (global as any).dumpInstrumentState('8. API /sync request starts');
+      }
       const response = await api.get('/sync?sinceRevision=0&since=');
+      if (typeof (global as any).dumpInstrumentState === 'function') {
+        (global as any).dumpInstrumentState('9. API /sync request completes');
+      }
       const payload = response.data?.data;
       console.log('[DEBUG] Playlists in payload:', JSON.stringify(payload?.delta?.playlists ?? 'undefined'));
 
@@ -645,6 +674,9 @@ export function useSyncEngine() {
         }
  
         const commitStateSwap = () => {
+          if (typeof (global as any).dumpInstrumentState === 'function') {
+            (global as any).dumpInstrumentState('10. commitStateSwap starts');
+          }
           setSyncProgress(100, 'Completed');
           const nextHydratedPlaylists: Record<string, boolean> = {};
           Object.keys(shadowPlaylists).forEach((pId) => {
@@ -662,12 +694,16 @@ export function useSyncEngine() {
             lastSyncedAt: payload.timestamp || new Date().toISOString(),
             lastSuccessfulSyncAt: Date.now(),
             syncFailureCount: 0,
+            isFirstTimeSyncInProgress: false,
           };
           if (fullPlaylistCardsChanged) {
             nextState.fullPlaylistCards = nextFullPlaylistCards;
             nextState.hydratedPlaylistCardCounts = nextHydratedPlaylistCardCounts;
           }
           usePlaylistStateStore.setState(nextState);
+          if (typeof (global as any).dumpInstrumentState === 'function') {
+            (global as any).dumpInstrumentState('11. commitStateSwap completes');
+          }
         };
  
         if (interactionScheduler.isInteracting()) {
@@ -694,6 +730,17 @@ export function useSyncEngine() {
       console.error('[Shadow Cache Swap] Full resync failed:', err.message);
       syncTelemetry.logSyncFailure(err, usePlaylistStateStore.getState().syncFailureCount + 1);
       usePlaylistStateStore.getState().incrementSyncFailure();
+
+      // Offline/Failure fallback: if first-time sync hangs or fails, let the user into the app 
+      // if they have local seeded cards, rather than looping restart
+      const playlistStore = usePlaylistStateStore.getState();
+      if (playlistStore.isFirstTimeSyncInProgress) {
+        const localCardsCount = Object.keys(playlistStore.cardsById).length;
+        if (localCardsCount > 0) {
+          usePlaylistStateStore.setState({ isFirstTimeSyncInProgress: false });
+          console.log(`[Sync Engine] Offline/Failure Fallback: Cleared first-time sync gate since we have ${localCardsCount} seeded cards.`);
+        }
+      }
     } finally {
       isSyncInFlight.current = false;
       setSyncStatus('synced');
@@ -726,6 +773,9 @@ export function useSyncEngine() {
   }, []);
 
   const triggerBackgroundSync = useCallback(async (force?: boolean) => {
+    if (typeof (global as any).dumpInstrumentState === 'function') {
+      (global as any).dumpInstrumentState('6. triggerBackgroundSync starts');
+    }
     const isGuest = useAuthStore.getState().user?.id === 'guest-user';
     const isOnboarding = !useOnboardingStore.getState().isOnboarded;
     const hasAccess = isAuthenticated || isGuest || isOnboarding;
@@ -900,6 +950,17 @@ export function useSyncEngine() {
             timestamp: Date.now(),
             priority: 'critical',
           });
+
+          if (seniorQuotes && seniorQuotes.length > 0) {
+            await sqliteWriteManager.enqueue({
+              id: `seed-quotes-${Date.now()}`,
+              type: 'quotes',
+              userId: activeUserId,
+              data: seniorQuotes,
+              timestamp: Date.now(),
+              priority: 'critical',
+            });
+          }
         } catch (sqlErr: any) {
           console.error('[SQLite Sync Engine Error] Local seeding SQLite persistence failed:', sqlErr.message);
         }
@@ -1078,11 +1139,17 @@ export function useSyncEngine() {
 
   useEffect(() => {
     const activeUserId = userId || 'guest-user';
+    const previousUserId = lastKnownUserId;
+    if (activeUserId !== lastKnownUserId) {
+      lastKnownUserId = activeUserId;
+    }
     const isGuest = useAuthStore.getState().user?.id === 'guest-user';
     const isOnboarding = !useOnboardingStore.getState().isOnboarded;
     const hasTriggered = !!globalStartupSyncTriggered.get(activeUserId);
     const shouldSync = (isAuthenticated || isGuest || isOnboarding) && isAuthReady && (!hasTriggered || bootstrapStatus === 'not_started');
     
+    console.log(`[INSTRUMENT] shouldSync Evaluation | activeUserId: "${activeUserId}" | previousUserId: "${previousUserId}" | hasTriggered: ${hasTriggered} | bootstrapStatus: "${bootstrapStatus}" | isAuthenticated: ${isAuthenticated} | isGuest: ${isGuest} | isAuthReady: ${isAuthReady} | shouldSync: ${shouldSync}`);
+
     if (shouldSync) {
       globalStartupSyncTriggered.set(activeUserId, true);
       triggerBackgroundSyncRef.current?.(false);

@@ -43,6 +43,7 @@ import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { theme } from '@/theme';
 import { FolderCard } from '@/components/FolderCard';
 import { FolderFormModal } from '@/components/FolderFormModal';
+import { FolderActionsModal } from '@/components/FolderActionsModal';
 import { SearchFilterBar } from '@/components/SearchFilterBar';
 import type { CreateFolderDTO, IFolder } from '@/types/folder';
 import { canModifyItem } from '@/utils/permissions';
@@ -191,6 +192,8 @@ export default function LearnScreen() {
   const { canManageContent, role } = useRole();
   const { setHasAppBeenAnimated } = useUIStore();
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
+  const pinnedFolderIds = usePlaylistStateStore((s) => s.pinnedFolderIds);
+  const toggleFolderPin = usePlaylistStateStore((s) => s.toggleFolderPin);
 
   const { data: stats, refetch: refetchStats, isRefetching: isStatsRefetching } = useDashboard();
   const { setActivePlaylistId } = useBookmarkStore();
@@ -199,17 +202,140 @@ export default function LearnScreen() {
   const [search, setSearch] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [editingFolder, setEditingFolder] = useState<IFolder | null>(null);
+  const [selectedActionFolder, setSelectedActionFolder] = useState<IFolder | null>(null);
+  const [isActionsModalVisible, setIsActionsModalVisible] = useState(false);
+  const isGuest = user?.id === 'guest-user';
 
-  const { data, isLoading, isError, error, refetch, isRefetching } = useGetFolders({
+  const { data, isLoading: queryLoading, isError: queryIsError, error: queryError, refetch, isRefetching } = useGetFolders({
     limit: 100,
     search: search.trim() || undefined,
   });
+
+  const isLoading = isGuest ? false : queryLoading;
+  const isError = isGuest ? false : queryIsError;
+  const error = isGuest ? null : queryError;
 
   const createFolder = useCreateFolder();
   const updateFolder = useUpdateFolder();
   const deleteFolder = useDeleteFolder();
 
-  const folders = useMemo(() => data?.results ?? [], [data]);
+  const folders = useMemo(() => {
+    if (isGuest) {
+      const guestList = [
+        {
+          _id: "6a1655fab129b168bb16bb1f",
+          title: "DSA",
+          description: "Master Data Structures and Algorithms conceptually.",
+          icon: "code",
+          color: "#7C3AED",
+          createdBy: "6a0ec3e2524e0638be79c9f2",
+          visibility: "public",
+          order: 0,
+          parentFolderId: null,
+          cardIds: ["guest-card-1"],
+          createdAt: "2026-05-27T02:24:58.338Z",
+          updatedAt: "2026-05-27T02:24:58.338Z"
+        } as any,
+        {
+          _id: "guest-folder-os",
+          title: "OS",
+          description: "Operating System internals, processes, threads, and memory management.",
+          icon: "brain",
+          color: "#EC4899",
+          createdBy: "admin",
+          visibility: "public",
+          order: 1,
+          parentFolderId: null,
+          cardIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as any,
+        {
+          _id: "guest-folder-cn",
+          title: "CN",
+          description: "Computer Networks, TCP/IP stack, routing protocols, and sockets.",
+          icon: "graphs",
+          color: "#3B82F6",
+          createdBy: "admin",
+          visibility: "public",
+          order: 2,
+          parentFolderId: null,
+          cardIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as any,
+        {
+          _id: "guest-folder-sys",
+          title: "System Design",
+          description: "High-level system architecture, load balancers, caching, and databases.",
+          icon: "layers",
+          color: "#10B981",
+          createdBy: "admin",
+          visibility: "public",
+          order: 3,
+          parentFolderId: null,
+          cardIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as any,
+        {
+          _id: "guest-folder-case",
+          title: "Case Study",
+          description: "Interactive business, product, and tech case studies.",
+          icon: "book",
+          color: "#F59E0B",
+          createdBy: "admin",
+          visibility: "public",
+          order: 4,
+          parentFolderId: null,
+          cardIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as any,
+        {
+          _id: "guest-folder-guess",
+          title: "Guesstimate",
+          description: "Structured estimations and quantitative problem solving.",
+          icon: "dp",
+          color: "#6366F1",
+          createdBy: "admin",
+          visibility: "public",
+          order: 5,
+          parentFolderId: null,
+          cardIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as any,
+        {
+          _id: "guest-folder-dbms",
+          title: "DBMS",
+          description: "Relational databases, SQL querying, transactions, and indexing.",
+          icon: "database",
+          color: "#14B8A6",
+          createdBy: "admin",
+          visibility: "public",
+          order: 6,
+          parentFolderId: null,
+          cardIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as any
+      ];
+      return guestList.sort((a, b) => {
+        const aPinned = pinnedFolderIds.has(a._id) ? 1 : 0;
+        const bPinned = pinnedFolderIds.has(b._id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        return (a.order || 0) - (b.order || 0);
+      });
+    }
+    const dbList = data?.results ?? [];
+    return [...dbList].sort((a, b) => {
+      const aPinned = pinnedFolderIds.has(a._id) ? 1 : 0;
+      const bPinned = pinnedFolderIds.has(b._id) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      return (a.order || 0) - (b.order || 0);
+    });
+  }, [data, isGuest, pinnedFolderIds]);
 
   // Explicit cinematic loading phases
   const [phase, setPhase] = useState<'typing' | 'authorReveal' | 'contentReady' | 'settled'>(globalHasPlayedLearnAnimation ? 'settled' : 'typing');
@@ -220,34 +346,44 @@ export default function LearnScreen() {
 
   // Dynamic MongoDB Quote integration with Zustand Local-First Persistence
   const cachedQuotes = usePlaylistStateStore((s) => s.seniorQuotes);
-  const setSeniorQuotes = usePlaylistStateStore((s) => s.setSeniorQuotes);
   const [quotesList, setQuotesList] = useState<any[]>(cachedQuotes || []);
 
+  // Sync state with cached quotes once they are loaded from SQLite
   useEffect(() => {
-    if (user?.id === 'guest-user') {
-      // Strictly bypass network requests for guest users to remain completely offline
-      return;
+    if (cachedQuotes && cachedQuotes.length > 0) {
+      setQuotesList(cachedQuotes);
     }
-    const fetchQuotes = async () => {
-      try {
-        const response = await api.get('/senior-quotes');
-        if (response.data?.success && response.data?.data && response.data.data.length > 0) {
-          const freshQuotes = response.data.data;
-          setSeniorQuotes(freshQuotes);
-          setQuotesList(freshQuotes);
-        }
-      } catch (err) {
-        // Safe silent background catch to comply with offline-first guidelines
-      }
-    };
-    fetchQuotes();
-  }, [setSeniorQuotes, user?.id]);
+  }, [cachedQuotes]);
 
   // Selected Quote Selection for Ghost Typing - sequential rotation per user entry
   const [selectedQuote, setSelectedQuote] = useState<any>(null);
-
   useEffect(() => {
-    if (!quotesList || quotesList.length === 0) return;
+    if (isGuest) {
+      if (selectedQuote) return;
+      setSelectedQuote({
+        _id: "6a13357421b348638d89b061",
+        text: "Family is the most important thing, be it real one or in kgp. live here don't just survive. study hard party harder. Be passionate about something and be extremely skillfull in one domain or another. CDC won't define your worth, people have gone through 0 interviews in internships to getting day1 day2 placements, it's never too late, just stay relentless and believe in yourself",
+        author: "Mohit Pant",
+        collegeName: "IIT KGP",
+        branch: "Mining",
+        yearOfGraduation: 2027
+      });
+      return;
+    }
+
+    if (!quotesList || quotesList.length === 0) {
+      if (!selectedQuote) {
+        setSelectedQuote({
+          _id: "6a13357421b348638d89b061",
+          text: "Family is the most important thing, be it real one or in kgp. live here don't just survive. study hard party harder. Be passionate about something and be extremely skillfull in one domain or another. CDC won't define your worth, people have gone through 0 interviews in internships to getting day1 day2 placements, it's never too late, just stay relentless and believe in yourself",
+          author: "Mohit Pant",
+          collegeName: "IIT KGP",
+          branch: "Mining",
+          yearOfGraduation: 2027
+        });
+      }
+      return;
+    }
 
     const store = usePlaylistStateStore.getState();
 
@@ -271,10 +407,17 @@ export default function LearnScreen() {
 
     const quote = quotesList[index];
     setSelectedQuote(quote);
-
-    // Increment index so the next app entry shows the next quote
-    store.incrementQuoteIndex(quotesList.length);
   }, [quotesList, selectedQuote]);
+
+  // Compute normalized and truncated dashboard quote text
+  const dashboardQuoteText = useMemo(() => {
+    if (!selectedQuote || !selectedQuote.text) return '';
+    const MAX_QUOTE_LENGTH = 116;
+    const cleanText = selectedQuote.text.replace(/\r?\n/g, ' ');
+    return cleanText.length > MAX_QUOTE_LENGTH
+      ? cleanText.substring(0, MAX_QUOTE_LENGTH).trim() + '...'
+      : cleanText;
+  }, [selectedQuote]);
 
   const authorName = selectedQuote?.author || selectedQuote?.name || selectedQuote?.studentName || "Senior Author";
 
@@ -392,7 +535,7 @@ export default function LearnScreen() {
 
     // If we have already animated once this session, snap to the finished layout instantly
     if (globalHasPlayedLearnAnimation) {
-      setDisplayedMessage(selectedQuote.text);
+      setDisplayedMessage(dashboardQuoteText);
       setIsTypingComplete(true);
       timelineProgress.value = 100;
       cursorOpacity.value = 0;
@@ -423,18 +566,18 @@ export default function LearnScreen() {
     const typeNextChar = () => {
       if (!isActive) return;
 
-      if (index < selectedQuote.text.length) {
+      if (index < dashboardQuoteText.length) {
         // Type 2 characters at a time to reduce CPU re-render storms during boot
-        const nextIdx = Math.min(selectedQuote.text.length, index + 2);
-        setDisplayedMessage(selectedQuote.text.substring(0, nextIdx));
+        const nextIdx = Math.min(dashboardQuoteText.length, index + 2);
+        setDisplayedMessage(dashboardQuoteText.substring(0, nextIdx));
         index = nextIdx;
         
         // Calculate typing progress and assign to master timeline (0% to 30%)
-        const currentProgress = (index / selectedQuote.text.length) * 30;
+        const currentProgress = (index / dashboardQuoteText.length) * 30;
         timelineProgress.value = currentProgress;
         
         // Pacing irregularity (timing variation) for natural human typing feel
-        const randomDelay = 60 + Math.random() * 20;
+        const randomDelay = 35 + Math.random() * 15;
         timer = setTimeout(typeNextChar, randomDelay);
       } else {
         timelineProgress.value = 30;
@@ -452,7 +595,7 @@ export default function LearnScreen() {
       clearTimeout(startDelay);
       if (timer) clearTimeout(timer);
     };
-  }, [selectedQuote]);
+  }, [selectedQuote, dashboardQuoteText]);
 
   // 3. State-Driven Loading Check
   useEffect(() => {
@@ -587,25 +730,8 @@ export default function LearnScreen() {
   };
 
   const handleFolderLongPress = (folder: IFolder) => {
-    if (!user?.id || !canModifyItem(role, user.id, folder.createdBy)) return;
-    Alert.alert(folder.title, 'Choose an action', [
-      { text: 'Edit', onPress: () => openEdit(folder) },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('Delete folder', 'All cards in this folder will be removed.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: () => deleteFolder.mutate(folder._id),
-            },
-          ]);
-        },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setSelectedActionFolder(folder);
+    setIsActionsModalVisible(true);
   };
 
   const handleSubmit = (payload: CreateFolderDTO) => {
@@ -629,7 +755,6 @@ export default function LearnScreen() {
     }
   };
 
-  const isGuest = user?.id === 'guest-user';
   const firstName = isGuest ? 'Guest' : (user?.name?.split(' ')[0] || 'there');
   const streak = stats?.streakCount ?? 4;
   const cardsRevised = stats?.totalRevisions ?? 24;
@@ -753,6 +878,7 @@ export default function LearnScreen() {
                   <FolderCard
                     folder={folder}
                     hideCardCount={true}
+                    pinned={pinnedFolderIds.has(folder._id)}
                     onPress={() =>
                       router.push({
                         pathname: '/(protected)/folder/[folderId]',
@@ -778,6 +904,33 @@ export default function LearnScreen() {
         onSubmit={handleSubmit}
         isLoading={createFolder.isPending || updateFolder.isPending}
       />
+
+      <FolderActionsModal
+        visible={isActionsModalVisible}
+        folder={selectedActionFolder}
+        isPinned={selectedActionFolder ? pinnedFolderIds.has(selectedActionFolder._id) : false}
+        canModify={selectedActionFolder ? (!!user?.id && canModifyItem(role, user.id, selectedActionFolder.createdBy)) : false}
+        onClose={() => {
+          setIsActionsModalVisible(false);
+          setSelectedActionFolder(null);
+        }}
+        onTogglePin={() => {
+          if (selectedActionFolder) {
+            toggleFolderPin(selectedActionFolder._id);
+          }
+        }}
+        onEdit={() => {
+          if (selectedActionFolder) {
+            openEdit(selectedActionFolder);
+          }
+        }}
+        onDelete={() => {
+          if (selectedActionFolder) {
+            deleteFolder.mutate(selectedActionFolder._id);
+          }
+        }}
+      />
+
 
       {/* 3. Senior Details Glassmorphism Overlay */}
       {seniorModalVisible && selectedQuote && (

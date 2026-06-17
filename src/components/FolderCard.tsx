@@ -11,9 +11,11 @@ import {
   Code,
   Brain,
   ChevronRight,
+  Pin,
 } from 'lucide-react-native';
 import type { IFolder } from '@/types/folder';
 import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 const ICON_MAP: Record<string, React.ComponentType<{ color: string; size: number; strokeWidth?: number }>> = {
   folder: Folder,
@@ -31,9 +33,10 @@ interface FolderCardProps {
   onPress: () => void;
   onLongPress?: () => void;
   hideCardCount?: boolean;
+  pinned?: boolean;
 }
 
-function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = false }: FolderCardProps) {
+function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = false, pinned = false }: FolderCardProps) {
   const palette = useThemePalette();
   const IconComponent = ICON_MAP[folder.icon] || Folder;
   const count = folder.cardCount ?? 0;
@@ -53,7 +56,7 @@ function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = fal
       style={{
         backgroundColor: palette.surface,
         borderColor: palette.border,
-        shadowColor: '#0F172A',
+        shadowColor: palette.shadow,
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: palette.isDark ? 0.2 : 0.03,
         shadowRadius: 18,
@@ -63,7 +66,7 @@ function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = fal
       <View
         className="w-11 h-11 rounded-2xl mr-4 justify-center items-center border"
         style={{ 
-          backgroundColor: folder.color ? folder.color + '15' : palette.accentBg, 
+          backgroundColor: addAlpha(accent, 0.08), 
           borderColor: palette.border,
           opacity: 0.95
         }}
@@ -102,6 +105,11 @@ function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = fal
         )}
       </View>
  
+      {pinned && (
+        <View style={{ marginRight: 8, transform: [{ rotate: '45deg' }] }}>
+          <Pin color={accent} size={15} strokeWidth={2.4} />
+        </View>
+      )}
       <ChevronRight color={palette.textSecondary} size={18} strokeWidth={2.2} />
     </SpringPressable>
   );
@@ -110,6 +118,7 @@ function FolderCardComponent({ folder, onPress, onLongPress, hideCardCount = fal
 export const FolderCard = React.memo(FolderCardComponent, (prevProps, nextProps) => {
   return (
     prevProps.hideCardCount === nextProps.hideCardCount &&
+    prevProps.pinned === nextProps.pinned &&
     prevProps.folder._id === nextProps.folder._id &&
     prevProps.folder.title === nextProps.folder.title &&
     prevProps.folder.description === nextProps.folder.description &&

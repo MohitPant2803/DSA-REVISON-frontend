@@ -11,7 +11,7 @@ function StackWithBack() {
       <Stack.Screen name="admin" />
       <Stack.Screen name="playlist/[playlistId]" />
       <Stack.Screen name="folder/[folderId]" />
-      <Stack.Screen name="reels-player" options={{ gestureEnabled: false }} />
+      <Stack.Screen name="reels-player" options={{ gestureEnabled: true }} />
       <Stack.Screen name="CreateRevisionScreen" />
       <Stack.Screen name="RevisionForm" />
       <Stack.Screen name="RevisionCard" />

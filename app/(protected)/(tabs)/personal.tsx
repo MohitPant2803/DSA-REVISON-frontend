@@ -43,6 +43,7 @@ import {
   MoreHorizontal,
   Settings2,
   Lock,
+  Flame,
 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -210,6 +211,21 @@ const SmartPlaylistCard = React.memo(({ playlist, onPress, shouldGlow = false }:
             style={{ backgroundColor: theme.iconBg, borderColor: palette.border }}
           >
             <IconComponent color={theme.text} size={15} strokeWidth={2.0} />
+          </View>
+
+          <View 
+            className="px-2.5 py-1 rounded-full border"
+            style={{ 
+              backgroundColor: palette.isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.02)',
+              borderColor: palette.border,
+            }}
+          >
+            <Text 
+              className="text-[10px] font-extrabold tracking-tight"
+              style={{ color: palette.textSecondary }}
+            >
+              {playlist.itemCount ?? 0} {playlist.itemCount === 1 ? 'card' : 'cards'}
+            </Text>
           </View>
         </View>
 
@@ -600,6 +616,37 @@ export default function PersonalScreen() {
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
 
   const [isTransitionReady, setIsTransitionReady] = useState(true);
+  const [isStreakOverlayOpen, setIsStreakOverlayOpen] = useState(false);
+
+  const scaleGlow = useSharedValue(1);
+  const scaleFlame = useSharedValue(1);
+
+  useEffect(() => {
+    scaleGlow.value = withRepeat(
+      withSequence(
+        withTiming(1.18, { duration: 1200 }),
+        withTiming(1.0, { duration: 1200 })
+      ),
+      -1,
+      true
+    );
+    scaleFlame.value = withRepeat(
+      withSequence(
+        withTiming(1.06, { duration: 600 }),
+        withTiming(1.0, { duration: 600 })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const flameGlowAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scaleGlow.value }],
+  }));
+
+  const flamePulseAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scaleFlame.value }],
+  }));
 
   useFocusEffect(
     useCallback(() => {
@@ -709,6 +756,14 @@ export default function PersonalScreen() {
 
   // Smart split lists sorted exactly like the reference screenshot grid layout
   const smartPlaylists = useMemo(() => {
+    if (isGuest) {
+      return [
+        { id: 'hard', name: 'Hard Focus', itemCount: 3, orderedCardIds: ['guest-card-3', 'guest-card-4', 'guest-card-5'] },
+        { id: 'easy', name: 'Easy Focus', itemCount: 0, orderedCardIds: [] },
+        { id: 'medium', name: 'Medium Focus', itemCount: 0, orderedCardIds: [] },
+        { id: 'skipped', name: 'Skipped Focus', itemCount: 0, orderedCardIds: [] }
+      ];
+    }
     const safePlaylists = Array.isArray(playlists) ? playlists : [];
     const order = ['hard', 'easy', 'medium', 'skipped'];
     return order
@@ -726,16 +781,17 @@ export default function PersonalScreen() {
         };
       })
       .filter((p): p is any => p !== undefined);
-  }, [playlists, easyCount, mediumCount, hardCount, skippedCount]);
+  }, [playlists, easyCount, mediumCount, hardCount, skippedCount, isGuest]);
 
   const customPlaylists = useMemo(() => {
+    if (isGuest) return [];
     const safePlaylists = Array.isArray(playlists) ? playlists : [];
     return safePlaylists.filter((p) => 
       p && 
       !['easy', 'medium', 'hard', 'skipped'].includes(p.id) &&
       !['easy', 'medium', 'hard', 'skipped'].includes(p.name?.toLowerCase())
     );
-  }, [playlists]);
+  }, [playlists, isGuest]);
 
   const handlePressSettings = () => {
     lightHaptic();
@@ -964,80 +1020,44 @@ export default function PersonalScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Right Column: Dynamic Vector-styled Illustration */}
-            <View className="relative w-24 h-24 items-center justify-center">
-              {/* Background circular glow */}
-              <View className="absolute w-20 h-20 rounded-full" style={{ backgroundColor: palette.accent, opacity: 0.08 }} />
-              
-              {/* Stacking Book Layer 1 */}
-              <View 
-                className="absolute w-14 h-9 rounded-lg border"
-                style={{
-                  backgroundColor: palette.isDark ? '#1E293B' : '#E2E8F0',
-                  borderColor: palette.border,
-                  transform: [{ rotate: '-8deg' }, { translateY: 6 }, { translateX: -4 }],
-                  shadowColor: '#0F172A',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 5,
-                }}
+            {/* Right Column: Clickable Pulsing Flame Widget */}
+            <TouchableOpacity
+              onPress={() => setIsStreakOverlayOpen(true)}
+              activeOpacity={0.8}
+              className="relative w-24 h-24 items-center justify-center"
+            >
+              {/* Pulsing circular glow */}
+              <Animated.View 
+                className="absolute w-20 h-20 rounded-full" 
+                style={[
+                  { backgroundColor: '#EA580C', opacity: 0.08 },
+                  flameGlowAnimatedStyle
+                ]} 
               />
               
-              {/* Stacking Book Layer 2 */}
-              <View 
-                className="absolute w-14 h-9 rounded-lg border"
-                style={{
-                  backgroundColor: palette.isDark ? '#334155' : '#CBD5E1',
-                  borderColor: palette.border,
-                  transform: [{ rotate: '4deg' }, { translateY: -2 }, { translateX: 2 }],
-                  shadowColor: '#0F172A',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 5,
-                }}
-              />
+              {/* Pulsing Flame icon */}
+              <Animated.View style={flamePulseAnimatedStyle}>
+                <Flame color="#EA580C" size={48} strokeWidth={2.2} fill="#FFEDD5" />
+              </Animated.View>
               
-              {/* Stacking Book Layer 3 (Top) */}
+              {/* Current Streak badge overlay */}
               <View 
-                className="absolute w-14 h-9 rounded-lg border items-center justify-center"
+                className="absolute bottom-1.5 px-2.5 py-0.5 rounded-full border items-center justify-center"
                 style={{
-                  backgroundColor: palette.inputBg,
-                  borderColor: palette.border,
-                  transform: [{ rotate: '-2deg' }, { translateY: -10 }],
-                  shadowColor: '#0F172A',
-                  shadowOffset: { width: 0, height: 6 },
-                  shadowOpacity: 0.08,
-                  shadowRadius: 8,
+                  backgroundColor: palette.surface,
+                  borderColor: '#EA580C',
+                  shadowColor: '#EA580C',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 4,
                   elevation: 2,
                 }}
               >
-                {/* Book cover spine marker line */}
-                <View className="w-8 h-1 rounded-full mb-1" style={{ backgroundColor: palette.accent, opacity: 0.3 }} />
-                <View className="w-6 h-1 rounded-full" style={{ backgroundColor: palette.accent, opacity: 0.2 }} />
+                <Text className="text-[11px] font-black" style={{ color: '#EA580C' }}>
+                  {user?.streakCount || 0}
+                </Text>
               </View>
-              
-              {/* Plant branch leaf decorations */}
-              <View 
-                className="absolute w-2 h-5 rounded-full"
-                style={{
-                  backgroundColor: palette.accent,
-                  opacity: 0.25,
-                  top: 14,
-                  right: 8,
-                  transform: [{ rotate: '25deg' }],
-                }}
-              />
-              <View 
-                className="absolute w-1.5 h-3 rounded-full"
-                style={{
-                  backgroundColor: palette.accent,
-                  opacity: 0.18,
-                  top: 28,
-                  right: 4,
-                  transform: [{ rotate: '45deg' }],
-                }}
-              />
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1183,7 +1203,7 @@ export default function PersonalScreen() {
               </View>
               <Text className="font-bold text-sm mb-1.5" style={{ color: palette.textPrimary }}>No Playlists Yet</Text>
               <Text className="text-xs text-center leading-relaxed" style={{ color: palette.textSecondary }}>
-                Create your own path. Bundle topics, key tags, or custom card decks into single peaceful collections.
+                Build your own pre-interview revision rituals, CDC cracker playlists, or custom topic decks to stay relentless.
               </Text>
             </View>
           )}
@@ -1197,6 +1217,92 @@ export default function PersonalScreen() {
           onClose={() => setIsSettingsOpen(false)}
         />
       )}
+
+      {/* Streak Details Overlay Modal */}
+      <Modal
+        visible={isStreakOverlayOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsStreakOverlayOpen(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.4)' }} 
+          onPress={() => setIsStreakOverlayOpen(false)}
+          className="items-center justify-center px-6"
+        >
+          <Pressable 
+            className="w-full max-w-sm rounded-[32px] border p-6 overflow-hidden"
+            style={{
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+              shadowColor: '#0F172A',
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.08,
+              shadowRadius: 24,
+              elevation: 4,
+            }}
+            onTouchEnd={(e) => e.stopPropagation()}
+          >
+            {/* Header info */}
+            <View className="items-center mb-6">
+              <View className="w-16 h-16 rounded-full items-center justify-center mb-4" style={{ backgroundColor: '#FFEDD5' }}>
+                <Flame color="#EA580C" size={36} fill="#EA580C" />
+              </View>
+              <Text className="text-xl font-black tracking-tight" style={{ color: palette.textPrimary }}>
+                Revision Momentum
+              </Text>
+              <Text className="text-xs font-semibold text-center mt-1 px-4 leading-normal" style={{ color: palette.textSecondary }}>
+                Maintain your streak by visiting the app daily!
+              </Text>
+            </View>
+
+            {/* Streak metrics rows */}
+            <View className="gap-3 mb-6">
+              <View 
+                className="flex-row items-center justify-between p-4 rounded-2xl border"
+                style={{ backgroundColor: palette.accentBg, borderColor: palette.border }}
+              >
+                <View className="flex-row items-center gap-3">
+                  <Flame color="#EA580C" size={20} fill="#EA580C" />
+                  <Text className="text-[13px] font-bold" style={{ color: palette.textPrimary }}>
+                    Current Streak
+                  </Text>
+                </View>
+                <Text className="text-lg font-black" style={{ color: '#EA580C' }}>
+                  {user?.streakCount || 0} { (user?.streakCount || 0) === 1 ? 'Day' : 'Days' }
+                </Text>
+              </View>
+
+              <View 
+                className="flex-row items-center justify-between p-4 rounded-2xl border"
+                style={{ backgroundColor: palette.inputBg, borderColor: palette.border }}
+              >
+                <View className="flex-row items-center gap-3">
+                  <Zap color="#EAB308" size={20} fill="#EAB308" />
+                  <Text className="text-[13px] font-bold" style={{ color: palette.textPrimary }}>
+                    Personal Best
+                  </Text>
+                </View>
+                <Text className="text-lg font-black" style={{ color: '#CA8A04' }}>
+                  {user?.maxStreakCount || 0} { (user?.maxStreakCount || 0) === 1 ? 'Day' : 'Days' }
+                </Text>
+              </View>
+            </View>
+
+            {/* Close action */}
+            <TouchableOpacity
+              onPress={() => setIsStreakOverlayOpen(false)}
+              activeOpacity={0.85}
+              className="py-3 rounded-full items-center justify-center"
+              style={{ backgroundColor: palette.accent }}
+            >
+              <Text className="text-white font-bold text-xs">
+                Awesome
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* SMALL ELEGANT ANALYTICS OVERLAY MODAL */}
       <Modal

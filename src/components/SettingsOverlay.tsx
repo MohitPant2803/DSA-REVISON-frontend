@@ -15,19 +15,21 @@ import {
   FlatList,
   Share,
   Linking,
+  Switch,
 } from 'react-native';
 import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, LogOut, LogIn, Moon, Sun, CheckSquare, Square, Folder as FolderIcon } from 'lucide-react-native';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
-import { themePalettes } from '@/theme/themePalettes';
+import { themePalettes, addAlpha } from '@/theme/themePalettes';
 import { useThemePalette } from '@/hooks/useThemePalette';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useGetFolders } from '@/hooks/useFolders';
 import { useSyncEngine } from '@/hooks/useSyncEngine';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 import { syncManager } from '@/utils/syncManager';
 import * as reelsFeedService from '@/services/reelsFeedService';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -41,15 +43,22 @@ import Animated, {
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import api from '@/services/api';
 import Toast from 'react-native-toast-message';
+import { SpringPressable } from '@/components/SpringPressable';
 
 
 const { width, height } = Dimensions.get('window');
 
 const lightHaptic = () => {
-  if (Platform.OS === 'android') {
-    Vibration.vibrate(10);
-  } else {
-    Vibration.vibrate(6);
+  if (Platform.OS === 'web') return;
+  try {
+    const Haptics = require('expo-haptics');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  } catch {
+    if (Platform.OS === 'android') {
+      Vibration.vibrate(10);
+    } else {
+      Vibration.vibrate(6);
+    }
   }
 };
 
@@ -130,13 +139,12 @@ export function SegmentedControl({ options, activeId, onChange }: SegmentedContr
 
   return (
     <View style={[segmentedStyles.container, { backgroundColor: palette.inputBg, borderColor: palette.border }]}>
-      <Animated.View style={[segmentedStyles.pill, animatedStyle, { backgroundColor: palette.surface }]} />
+      <Animated.View style={[segmentedStyles.pill, animatedStyle, { backgroundColor: palette.surface, shadowColor: palette.shadow }]} />
       {options.map((option) => {
         const isActive = option.id === activeId;
         return (
-          <TouchableOpacity
+          <Pressable
             key={option.id}
-            activeOpacity={0.85}
             onPress={() => {
               lightHaptic();
               onChange(option.id);
@@ -150,7 +158,7 @@ export function SegmentedControl({ options, activeId, onChange }: SegmentedContr
             ]}>
               {option.label}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         );
       })}
     </View>
@@ -160,22 +168,18 @@ export function SegmentedControl({ options, activeId, onChange }: SegmentedContr
 const segmentedStyles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(118, 118, 128, 0.08)',
     borderRadius: 16,
     padding: 3,
     position: 'relative',
     height: 40,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.6)',
   },
   pill: {
     position: 'absolute',
     top: 3,
     bottom: 3,
-    backgroundColor: '#ffffff',
     borderRadius: 13,
-    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 3,
@@ -191,12 +195,7 @@ const segmentedStyles = StyleSheet.create({
   segmentText: {
     fontSize: 12.5,
     fontWeight: '600',
-    color: '#64748B',
     letterSpacing: -0.1,
-  },
-  segmentTextActive: {
-    color: '#0F172A',
-    fontWeight: '700',
   },
 });
 
@@ -213,11 +212,11 @@ export function ScrollDrum({ data, selectedValue, onValueChange }: ScrollDrumPro
   const flatListRef = React.useRef<FlatList<string>>(null);
   const itemHeight = 44; // taller items for premium touch targets
   const paddedData = ['', ...data, ''];
+  const palette = useThemePalette();
 
   React.useEffect(() => {
     const index = data.indexOf(selectedValue);
     if (index !== -1 && flatListRef.current) {
-      // Small timeout to allow FlatList layout to settle
       setTimeout(() => {
         flatListRef.current?.scrollToOffset({
           offset: index * itemHeight,
@@ -247,7 +246,13 @@ export function ScrollDrum({ data, selectedValue, onValueChange }: ScrollDrumPro
           const isSelected = item === selectedValue;
           return (
             <View style={drumStyles.item}>
-              <Text style={[drumStyles.itemText, isSelected && drumStyles.itemTextActive]}>
+              <Text 
+                style={[
+                  drumStyles.itemText, 
+                  { color: palette.textMuted },
+                  isSelected && [drumStyles.itemTextActive, { color: palette.accent }]
+                ]}
+              >
                 {item}
               </Text>
             </View>
@@ -266,7 +271,7 @@ export function ScrollDrum({ data, selectedValue, onValueChange }: ScrollDrumPro
 
 const drumStyles = StyleSheet.create({
   container: {
-    height: 132, // Taller drum: exactly 3 items visible (44 * 3)
+    height: 132,
     width: 65,
     overflow: 'hidden',
     position: 'relative',
@@ -279,12 +284,10 @@ const drumStyles = StyleSheet.create({
   itemText: {
     fontSize: 14.5,
     fontWeight: '600',
-    color: '#94A3B8',
   },
   itemTextActive: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#8B5CF6',
   },
 });
 
@@ -302,6 +305,7 @@ interface TactileTimePickerModalProps {
 export function TactileTimePickerModal({ isOpen, onClose, initialHour, initialMinute, onSave }: TactileTimePickerModalProps) {
   const isPM = initialHour >= 12;
   const initialHour12 = initialHour % 12 || 12;
+  const palette = useThemePalette();
 
   const [selectedHour, setSelectedHour] = useState(String(initialHour12).padStart(2, '0'));
   const [selectedMinute, setSelectedMinute] = useState(String(initialMinute).padStart(2, '0'));
@@ -323,23 +327,44 @@ export function TactileTimePickerModal({ isOpen, onClose, initialHour, initialMi
     onClose();
   };
 
+  const buttonTextColor = palette.isDark ? palette.textPrimary : palette.surface;
+
   return (
     <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={pickerModalStyles.fullscreen}>
+      <View style={[pickerModalStyles.fullscreen, { backgroundColor: palette.overlayBg }]}>
         <View style={pickerModalStyles.backdrop} onTouchStart={onClose} />
-        <View style={pickerModalStyles.card}>
-          <Text style={pickerModalStyles.title}>Set Reminder Time</Text>
+        <View 
+          style={[
+            pickerModalStyles.card,
+            {
+              backgroundColor: palette.dialogBg,
+              borderColor: palette.border,
+              shadowColor: palette.shadow,
+              shadowOpacity: palette.isDark ? 0.20 : 0.1,
+              shadowRadius: palette.isDark ? 30 : 28,
+            }
+          ]}
+        >
+          <Text style={[pickerModalStyles.title, { color: palette.textPrimary }]}>Set Reminder Time</Text>
           
-          <View style={pickerModalStyles.drumContainer}>
+          <View style={[pickerModalStyles.drumContainer, { backgroundColor: palette.inputBg, borderColor: palette.border }]}>
             {/* Highlights selected row in middle */}
-            <View style={pickerModalStyles.highlightOverlay} />
+            <View 
+              style={[
+                pickerModalStyles.highlightOverlay,
+                {
+                  backgroundColor: addAlpha(palette.accent, 0.06),
+                  borderColor: addAlpha(palette.accent, 0.12)
+                }
+              ]} 
+            />
             
             <ScrollDrum 
               data={hoursData} 
               selectedValue={selectedHour} 
               onValueChange={setSelectedHour} 
             />
-            <Text style={pickerModalStyles.colon}>:</Text>
+            <Text style={[pickerModalStyles.colon, { color: palette.accent }]}>:</Text>
             <ScrollDrum 
               data={minutesData} 
               selectedValue={selectedMinute} 
@@ -357,16 +382,16 @@ export function TactileTimePickerModal({ isOpen, onClose, initialHour, initialMi
             <TouchableOpacity 
               onPress={onClose} 
               activeOpacity={0.8}
-              style={[pickerModalStyles.btn, pickerModalStyles.btnCancel]}
+              style={[pickerModalStyles.btn, pickerModalStyles.btnCancel, { backgroundColor: palette.surface, borderColor: palette.border }]}
             >
-              <Text style={pickerModalStyles.btnTextCancel}>Cancel</Text>
+              <Text style={[pickerModalStyles.btnTextCancel, { color: palette.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               onPress={handleConfirm} 
               activeOpacity={0.8}
-              style={[pickerModalStyles.btn, pickerModalStyles.btnSave]}
+              style={[pickerModalStyles.btn, pickerModalStyles.btnSave, { backgroundColor: palette.accent, shadowColor: palette.accentGlow }]}
             >
-              <Text style={pickerModalStyles.btnTextSave}>Apply</Text>
+              <Text style={[pickerModalStyles.btnTextSave, { color: buttonTextColor }]}>Apply</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -378,7 +403,6 @@ export function TactileTimePickerModal({ isOpen, onClose, initialHour, initialMi
 const pickerModalStyles = StyleSheet.create({
   fullscreen: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)', // beautiful premium blur backdrop
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -393,22 +417,16 @@ const pickerModalStyles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 290,
-    backgroundColor: '#ffffff',
     borderRadius: 28,
     padding: 20,
     alignItems: 'center',
-    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.1,
-    shadowRadius: 28,
     elevation: 8,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
   },
   title: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#0F172A',
     marginBottom: 16,
     letterSpacing: -0.2,
   },
@@ -419,10 +437,8 @@ const pickerModalStyles = StyleSheet.create({
     height: 132,
     position: 'relative',
     width: '100%',
-    backgroundColor: 'rgba(248, 250, 252, 0.8)',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.6)',
     paddingHorizontal: 16,
   },
   highlightOverlay: {
@@ -430,15 +446,12 @@ const pickerModalStyles = StyleSheet.create({
     left: 12,
     right: 12,
     height: 40,
-    backgroundColor: 'rgba(139, 92, 246, 0.06)',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.12)',
   },
   colon: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#8B5CF6',
     marginHorizontal: 4,
     paddingBottom: 2,
   },
@@ -456,13 +469,9 @@ const pickerModalStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   btnCancel: {
-    backgroundColor: '#FAF9F7',
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
   },
   btnSave: {
-    backgroundColor: '#8B5CF6',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
@@ -471,14 +480,13 @@ const pickerModalStyles = StyleSheet.create({
   btnTextCancel: {
     fontSize: 12.5,
     fontWeight: '600',
-    color: '#64748B',
   },
   btnTextSave: {
     fontSize: 12.5,
     fontWeight: '700',
-    color: '#ffffff',
   },
 });
+
 
 // -------------------------------------------------------------
 // PREMIUM DYNAMIC THEME SELECTOR GRID
@@ -490,6 +498,7 @@ interface ThemeSelectorProps {
 
 export function ThemeSelector({ activeThemeId, onChange }: ThemeSelectorProps) {
   const themesList = Object.values(themePalettes);
+  const palette = useThemePalette();
   
   // Clean names to fit nicely in horizontal pills
   const getShortName = (name: string) => {
@@ -517,9 +526,9 @@ export function ThemeSelector({ activeThemeId, onChange }: ThemeSelectorProps) {
         const isActive = item.id === activeThemeId;
         
         return (
-          <TouchableOpacity
+          <SpringPressable
             key={item.id}
-            activeOpacity={0.8}
+            activeScale={0.95}
             onPress={() => {
               lightHaptic();
               onChange(item.id);
@@ -537,7 +546,7 @@ export function ThemeSelector({ activeThemeId, onChange }: ThemeSelectorProps) {
               height: 38,
               justifyContent: 'center',
               marginBottom: 6,
-              shadowColor: isActive ? item.accent : '#0F172A',
+              shadowColor: isActive ? item.accent : palette.shadow,
               shadowOffset: { width: 0, height: 2 },
               shadowOpacity: isActive ? 0.06 : 0,
               shadowRadius: 3,
@@ -557,7 +566,7 @@ export function ThemeSelector({ activeThemeId, onChange }: ThemeSelectorProps) {
             >
               {getShortName(item.name)}
             </Text>
-          </TouchableOpacity>
+          </SpringPressable>
         );
       })}
     </View>
@@ -574,12 +583,24 @@ interface MySpaceSettingsOverlayProps {
 
 export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
-  const palette = themePalettes[preferences.theme || 'zen'] || themePalettes.zen;
+  const palette = useThemePalette();
   const { user, login, logout } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const { triggerBackgroundSync } = useSyncEngine();
-  const { latestVersion, updateUrl, shareMessage } = usePlaylistStateStore();
+  const { 
+    latestVersion, 
+    updateUrl, 
+    shareMessage, 
+    notificationsEnabled, 
+    updateNotificationPreferences,
+    notificationHour,
+    notificationMinute,
+    notificationFrequency,
+    notificationCustomDays
+  } = usePlaylistStateStore();
+  const { step: walkthroughStep, setStep: setWalkthroughStep } = useWalkthroughStore();
+  const isWalkthroughActive = walkthroughStep === 'myspace-settings-open';
 
   const [shouldRender, setShouldRender] = useState(isOpen);
   const backdropOpacity = useSharedValue(0);
@@ -612,6 +633,9 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   const handleClose = () => {
     lightHaptic();
     onClose();
+    if (isWalkthroughActive) {
+      setWalkthroughStep('myspace-hard-focus');
+    }
   };
 
   const handleUpdateApp = async () => {
@@ -703,21 +727,29 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   return (
     <Modal visible={shouldRender} animationType="none" transparent onRequestClose={handleClose}>
       <View style={styles.fullscreen}>
-        <Animated.View style={[styles.backdrop, animatedBackdropStyle]} onTouchStart={handleClose} />
+        <Animated.View style={[styles.backdrop, { backgroundColor: palette.overlayBg }, animatedBackdropStyle]} onTouchStart={handleClose} />
         
         <Animated.View style={[
           styles.mySpaceSheet, 
           animatedSheetStyle,
           {
-            backgroundColor: palette.surface,
+            backgroundColor: palette.dialogBg,
             borderColor: palette.border,
+            shadowColor: palette.shadow,
           }
         ]}>
           <View style={styles.header}>
             <Text style={[styles.title, { color: palette.textPrimary }]}>Settings</Text>
-            <TouchableOpacity onPress={handleClose} style={[styles.closeBtn, { backgroundColor: palette.inputBg }]} activeOpacity={0.8}>
-              <X color={palette.textSecondary} size={14} strokeWidth={2.5} />
-            </TouchableOpacity>
+            <Pressable 
+              onPress={handleClose} 
+              style={({ pressed }) => [
+                styles.closeBtn, 
+                { backgroundColor: palette.inputBg },
+                pressed && { opacity: 0.7 }
+              ]}
+            >
+              <X color={palette.textSecondary} size={18} strokeWidth={2.5} />
+            </Pressable>
           </View>
 
           <ScrollView
@@ -730,13 +762,20 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
               <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Themes</Text>
               <ThemeSelector
                 activeThemeId={preferences.theme || 'zen'}
-                onChange={(id) => updatePreference('theme', id)}
+                onChange={(id) => {
+                  updatePreference('theme', id);
+                  if (isWalkthroughActive) {
+                    lightHaptic();
+                    onClose();
+                    setWalkthroughStep('myspace-hard-focus');
+                  }
+                }}
               />
             </View>
 
 
             {/* App Actions Section */}
-            <View style={styles.settingGroup}>
+            <View style={styles.settingGroup} pointerEvents={isWalkthroughActive ? "none" : "auto"}>
               <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>App Actions</Text>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <TouchableOpacity
@@ -768,101 +807,58 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                     }
                   ]}
                 >
-                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#ffffff' }}>
+                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: palette.isDark ? palette.textPrimary : palette.surface }}>
                     Share App
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Sync / Content Control Section */}
-            <View style={styles.settingGroup}>
-              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Sync</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  lightHaptic();
-                  Alert.alert(
-                    "Refresh Content",
-                    "This will refresh all cards and folders from the local seeder.",
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      {
-                        text: "Refresh",
-                        onPress: async () => {
-                          try {
-                            // 1. Wipe all user-derived tables from SQLite
-                            const activeUserId = useAuthStore.getState().user?.id || 'guest-user';
-                            const { clearAllDataFromSQLite } = require('@/utils/sqliteSyncBridge');
-                            clearAllDataFromSQLite(activeUserId);
-                            
-                            // 2. Wipe from Zustand memory cache instantly
-                            usePlaylistStateStore.setState({
-                              foldersById: {},
-                              playlistsById: {},
-                              cardsById: {},
-                              playlistCardOrderMap: {
-                                easy: [],
-                                medium: [],
-                                hard: [],
-                                skipped: [],
-                                likes: [],
-                                'watch-later': [],
-                                all: [],
-                              },
-                              cardDifficultyMap: {},
-                              offlineActionQueue: [],
-                              deadLetterQueue: [],
-                              smartPlaylistDeltaCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
-                              initialSmartCounts: { easy: 0, medium: 0, hard: 0, skipped: 0 },
-                              lastSyncedRevision: 0,
-                              lastSyncedAt: null,
-                              hydratedPlaylists: {},
-                              fullPlaylistCards: {},
-                              hydratedPlaylistCardCounts: {},
-                              selectedRootFolderIds: [],
-                            });
-
-                            // 3. Trigger full background sync and local seed refresh
-                            await triggerBackgroundSync(true);
-
-                            Toast.show({
-                              type: 'success',
-                              text1: 'Content Refreshed',
-                              text2: 'Stale collections cleared and database resynced.',
-                            });
-                            
-                            onClose();
-                          } catch (err) {
-                            console.error('[Manual Refresh Error]', err);
-                            Toast.show({
-                              type: 'error',
-                              text1: 'Refresh Failed',
-                              text2: 'Please restart the app and try again.',
-                            });
-                          }
-                        }
-                      }
-                    ]
-                  );
+            {/* Streak Reminder Section */}
+            <View style={styles.settingGroup} pointerEvents={isWalkthroughActive ? "none" : "auto"}>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Notifications</Text>
+              <View 
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 20,
+                  backgroundColor: palette.inputBg,
+                  borderColor: palette.border,
+                  borderWidth: 1,
+                  marginTop: 4,
                 }}
-                activeOpacity={0.8}
-                style={[
-                  styles.authButton,
-                  {
-                    backgroundColor: palette.inputBg,
-                    borderColor: palette.border,
-                    marginTop: 4,
-                  }
-                ]}
               >
-                <Text style={{ fontSize: 13.5, fontWeight: '700', color: palette.textSecondary }}>
-                  Refresh Content
-                </Text>
-              </TouchableOpacity>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: palette.textPrimary }}>
+                    Streak Reminder
+                  </Text>
+                  <Text style={{ fontSize: 11, fontWeight: '500', color: palette.textSecondary, marginTop: 2 }}>
+                    Get alerted daily when your streak is at risk.
+                  </Text>
+                </View>
+                <Switch 
+                  value={notificationsEnabled}
+                  onValueChange={async (value) => {
+                    lightHaptic();
+                    await updateNotificationPreferences(
+                      value,
+                      notificationHour,
+                      notificationMinute,
+                      notificationFrequency,
+                      notificationCustomDays
+                    );
+                  }}
+                  trackColor={{ false: palette.border, true: palette.accent }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
             </View>
 
             {/* Authentication Section - placed at bottom */}
-            <View style={styles.settingGroup}>
+            <View style={styles.settingGroup} pointerEvents={isWalkthroughActive ? "none" : "auto"}>
               <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Account</Text>
               <TouchableOpacity
                 onPress={handleAuthAction}
@@ -873,22 +869,22 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                   isGuest 
                     ? { backgroundColor: palette.accent, borderColor: palette.accent }
                     : { 
-                        backgroundColor: palette.isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.05)', 
-                        borderColor: palette.isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.15)' 
+                        backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05), 
+                        borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15) 
                       }
                 ]}
               >
                 {isAuthenticating ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color={palette.isDark ? palette.textPrimary : palette.surface} />
                 ) : isGuest ? (
                   <>
-                    <LogIn color="#ffffff" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                    <Text style={styles.authButtonTextSignIn}>Sign In</Text>
+                    <LogIn color={palette.isDark ? palette.textPrimary : palette.surface} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: palette.isDark ? palette.textPrimary : palette.surface }}>Sign In</Text>
                   </>
                 ) : (
                   <>
-                    <LogOut color="#EF4444" size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                    <Text style={styles.authButtonTextSignOut}>Sign Out</Text>
+                    <LogOut color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Sign Out</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -899,6 +895,7 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
     </Modal>
   );
 });
+
 
 // -------------------------------------------------------------
 // REELS SETTINGS OVERLAY (Folder header, session timer, pills)
@@ -921,7 +918,7 @@ export const ReelsSettingsOverlay = React.memo(({
   showReelContentSelect = true,
 }: ReelsSettingsOverlayProps) => {
   const { preferences, updatePreference } = useUserPreferencesStore();
-  const palette = themePalettes[preferences.theme || 'zen'] || themePalettes.zen;
+  const palette = useThemePalette();
   const { currentMode, setMode, totalSwipes, totalScrolls } = useTrackingStore();
   const { user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
@@ -1162,14 +1159,15 @@ export const ReelsSettingsOverlay = React.memo(({
   return (
     <Modal visible={shouldRender} animationType="none" transparent onRequestClose={handleClose}>
       <View style={styles.fullscreen}>
-        <Animated.View style={[styles.backdrop, animatedBackdropStyle]} onTouchStart={handleClose} />
+        <Animated.View style={[styles.backdrop, { backgroundColor: palette.overlayBg }, animatedBackdropStyle]} onTouchStart={handleClose} />
 
         <Animated.View style={[
           styles.reelsSheet, 
           animatedSheetStyle,
           {
-            backgroundColor: palette.surface,
+            backgroundColor: palette.dialogBg,
             borderColor: palette.border,
+            shadowColor: palette.shadow,
           }
         ]}>
           {/* Header */}
@@ -1179,9 +1177,16 @@ export const ReelsSettingsOverlay = React.memo(({
                 {playlistName}
               </Text>
             </View>
-            <TouchableOpacity onPress={handleClose} style={styles.closeBtn} activeOpacity={0.8}>
-              <X color={palette.textSecondary} size={14} strokeWidth={2.5} />
-            </TouchableOpacity>
+            <Pressable 
+              onPress={handleClose} 
+              style={({ pressed }) => [
+                styles.closeBtn,
+                { backgroundColor: palette.inputBg },
+                pressed && { opacity: 0.7 }
+              ]}
+            >
+              <X color={palette.textSecondary} size={18} strokeWidth={2.5} />
+            </Pressable>
           </View>
 
           <ScrollView 
@@ -1190,14 +1195,14 @@ export const ReelsSettingsOverlay = React.memo(({
             {...({ delaysContentTouches: false } as any)}
           >
             {/* Session Stats Section */}
-            <View style={[styles.statsPanel, { backgroundColor: palette.accentBg, borderColor: palette.border }]}>
+            <View style={[styles.statsPanel, { backgroundColor: palette.inputBg, borderColor: palette.border }]}>
               <View style={styles.statBox}>
-                <Text style={styles.statLabel}>This Session</Text>
+                <Text style={[styles.statLabel, { color: palette.textMuted }]}>This Session</Text>
                 <Text style={[styles.statValue, { color: palette.textPrimary }]}>{questionsRevised}</Text>
               </View>
               <View style={[styles.statDivider, { backgroundColor: palette.border }]} />
               <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Total Revised</Text>
+                <Text style={[styles.statLabel, { color: palette.textMuted }]}>Total Revised</Text>
                 <Text style={[styles.statValue, { color: palette.textPrimary }]}>{totalSwipes + totalScrolls}</Text>
               </View>
             </View>
@@ -1252,26 +1257,30 @@ export const ReelsSettingsOverlay = React.memo(({
                         if (!folder || !folder._id) return null;
                         const isChecked = selectedFolderIds.includes(folder._id);
                         return (
-                          <TouchableOpacity
+                          <Pressable
                             key={folder._id}
                             onPress={() => handleToggleFolder(folder._id)}
-                            activeOpacity={0.7}
-                            style={styles.folderRow}
+                            style={({ pressed }) => [
+                              { width: '100%' },
+                              pressed && { opacity: 0.7 }
+                            ]}
                           >
-                            <FolderIcon size={16} color={folder.color || palette.accent} style={{ marginRight: 10 }} />
-                            <Text 
-                              style={{ fontSize: 13, fontWeight: '600', color: palette.textPrimary, flex: 1, marginRight: 16 }}
-                              numberOfLines={1}
-                              ellipsizeMode="tail"
-                            >
-                              {folder.title} ({folder.cardCount ?? 0})
-                            </Text>
-                            {isChecked ? (
-                              <CheckSquare size={18} color={palette.accent} strokeWidth={2.5} />
-                            ) : (
-                              <Square size={18} color={palette.textMuted} strokeWidth={2} />
-                            )}
-                          </TouchableOpacity>
+                            <View style={styles.folderRow}>
+                              <FolderIcon size={16} color={folder.color || palette.accent} style={{ marginRight: 8 }} />
+                              <Text 
+                                style={{ fontSize: 13, fontWeight: '600', color: palette.textPrimary, flex: 1, marginRight: 16 }}
+                                numberOfLines={1}
+                                ellipsizeMode="tail"
+                              >
+                                {folder.title} ({folder.cardCount ?? 0})
+                              </Text>
+                              {isChecked ? (
+                                <CheckSquare size={18} color={palette.accent} strokeWidth={2.5} />
+                              ) : (
+                                <Square size={18} color={palette.textMuted} strokeWidth={2} />
+                              )}
+                            </View>
+                          </Pressable>
                         );
                       })}
 
@@ -1290,7 +1299,7 @@ export const ReelsSettingsOverlay = React.memo(({
                             marginTop: 10,
                             flexDirection: 'row',
                             gap: 8,
-                            shadowColor: palette.accent,
+                            shadowColor: palette.accentGlow,
                             shadowOffset: { width: 0, height: 4 },
                             shadowOpacity: 0.15,
                             shadowRadius: 10,
@@ -1300,13 +1309,13 @@ export const ReelsSettingsOverlay = React.memo(({
                         >
                           {prefSaving ? (
                             <>
-                              <ActivityIndicator color="#ffffff" size="small" />
-                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                              <ActivityIndicator color={palette.isDark ? palette.textPrimary : palette.surface} size="small" />
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: palette.isDark ? palette.textPrimary : palette.surface }}>
                                 Saving...
                               </Text>
                             </>
                           ) : (
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: palette.isDark ? palette.textPrimary : palette.surface }}>
                               Save Preferences
                             </Text>
                           )}
@@ -1326,7 +1335,7 @@ export const ReelsSettingsOverlay = React.memo(({
         <Modal transparent visible={!!customAlert} animationType="fade" onRequestClose={() => setCustomAlert(null)}>
           <View style={{
             flex: 1,
-            backgroundColor: 'rgba(15, 23, 42, 0.45)', // Premium dark blur overlay
+            backgroundColor: palette.overlayBg,
             justifyContent: 'center',
             alignItems: 'center',
             padding: 24,
@@ -1334,13 +1343,13 @@ export const ReelsSettingsOverlay = React.memo(({
             <View style={{
               width: '100%',
               maxWidth: 290,
-              backgroundColor: palette.surface,
+              backgroundColor: palette.dialogBg,
               borderRadius: 24,
               padding: 20,
               alignItems: 'center',
-              shadowColor: palette.isDark ? '#000000' : palette.accent,
+              shadowColor: palette.shadow,
               shadowOffset: { width: 0, height: 12 },
-              shadowOpacity: 0.1,
+              shadowOpacity: palette.isDark ? 0.20 : 0.1,
               shadowRadius: 24,
               elevation: 6,
               borderWidth: 1,
@@ -1380,14 +1389,14 @@ export const ReelsSettingsOverlay = React.memo(({
                   borderRadius: 14,
                   justifyContent: 'center',
                   alignItems: 'center',
-                  shadowColor: palette.accent,
+                  shadowColor: palette.accentGlow,
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.15,
                   shadowRadius: 8,
                   elevation: 1,
                 }}
               >
-                <Text style={{ color: '#ffffff', fontSize: 12.5, fontWeight: '700' }}>
+                <Text style={{ color: palette.isDark ? palette.textPrimary : palette.surface, fontSize: 12.5, fontWeight: '700' }}>
                   Acknowledge
                 </Text>
               </TouchableOpacity>
@@ -1398,6 +1407,7 @@ export const ReelsSettingsOverlay = React.memo(({
     </Modal>
   );
 });
+
 
 // Backward compatible default export mapping to ReelsSettingsOverlay as it was the original
 export default ReelsSettingsOverlay;
@@ -1421,36 +1431,29 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#0F172A',
   },
   mySpaceSheet: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 28,
     width: '100%',
     maxWidth: 320,
     maxHeight: height * 0.8,
-    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.1,
     shadowRadius: 28,
     elevation: 8,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
     overflow: 'hidden',
   },
   reelsSheet: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 32,
     width: '100%',
     maxWidth: 340,
     maxHeight: height * 0.75,
-    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.1,
     shadowRadius: 28,
     elevation: 8,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
     overflow: 'hidden',
   },
   header: {
@@ -1464,20 +1467,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16.5,
     fontWeight: '800',
-    color: '#0F172A',
     letterSpacing: -0.2,
   },
   reelsHeaderTitle: {
     fontSize: 16.5,
     fontWeight: '800',
-    color: '#0F172A',
     letterSpacing: -0.2,
   },
   closeBtn: {
-    backgroundColor: 'rgba(226, 232, 240, 0.5)',
-    borderRadius: 16,
-    width: 26,
-    height: 26,
+    borderRadius: 20,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1496,7 +1496,6 @@ const styles = StyleSheet.create({
   groupLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#94A3B8',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 6,
@@ -1510,30 +1509,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  authButtonSignIn: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
-  },
-  authButtonSignOut: {
-    backgroundColor: 'rgba(239, 68, 68, 0.05)',
-    borderColor: 'rgba(239, 68, 68, 0.15)',
-  },
-  authButtonTextSignIn: {
-    fontSize: 13.5,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  authButtonTextSignOut: {
-    fontSize: 13.5,
-    fontWeight: '700',
-    color: '#EF4444',
-  },
   statsPanel: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(248, 250, 252, 0.8)',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.6)',
     paddingVertical: 12,
     marginVertical: 8,
     alignItems: 'center',
@@ -1545,12 +1524,10 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 28,
-    backgroundColor: 'rgba(226, 232, 240, 0.8)',
   },
   statLabel: {
     fontSize: 9.5,
     fontWeight: '700',
-    color: '#94A3B8',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
@@ -1558,7 +1535,6 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#0F172A',
     letterSpacing: -0.1,
   },
   notificationHeaderRow: {
@@ -1573,38 +1549,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  reminderToggleBtnActive: {
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
-    borderColor: 'rgba(139, 92, 246, 0.2)',
-  },
-  reminderToggleBtnInactive: {
-    backgroundColor: '#FAF9F7',
-    borderColor: 'rgba(148, 163, 184, 0.12)',
-  },
-  reminderToggleTextActive: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#8B5CF6',
-  },
-  reminderToggleTextInactive: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-  },
   notificationStatusSubtext: {
     fontSize: 11.5,
     fontWeight: '500',
-    color: '#64748B',
     lineHeight: 16,
     paddingLeft: 2,
     paddingRight: 8,
     marginTop: 2,
   },
   timeControlsContainer: {
-    backgroundColor: 'rgba(248, 250, 252, 0.6)',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.6)',
     padding: 12,
     marginTop: 2,
   },
@@ -1614,19 +1569,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(226, 232, 240, 0.4)',
     paddingBottom: 10,
   },
   customDaysContainer: {
     marginBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(226, 232, 240, 0.4)',
     paddingBottom: 10,
   },
   customDaysTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#475569',
     marginBottom: 8,
     paddingLeft: 2,
   },
@@ -1643,23 +1595,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  dayBadgeActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
-  },
-  dayBadgeInactive: {
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(226, 232, 240, 0.8)',
-  },
   dayBadgeText: {
     fontSize: 11.5,
     fontWeight: '700',
-  },
-  dayBadgeTextActive: {
-    color: '#ffffff',
-  },
-  dayBadgeTextInactive: {
-    color: '#64748B',
   },
   timeControlRow: {
     flexDirection: 'row',
@@ -1670,15 +1608,12 @@ const styles = StyleSheet.create({
   timeControlLabel: {
     fontSize: 12.5,
     fontWeight: '700',
-    color: '#475569',
   },
   pickerWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
     padding: 2,
   },
   pickerBtn: {
@@ -1690,12 +1625,10 @@ const styles = StyleSheet.create({
   pickerBtnText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#64748B',
   },
   pickerValText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#0F172A',
     width: 36,
     textAlign: 'center',
   },
@@ -1705,7 +1638,6 @@ const styles = StyleSheet.create({
   scrollSelectorLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#64748B',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 6,
@@ -1724,28 +1656,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1.5,
   },
-  hourScrollBadgeActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  hourScrollBadgeInactive: {
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(226, 232, 240, 0.8)',
-  },
   hourScrollText: {
     fontSize: 13.5,
     fontWeight: '700',
-  },
-  hourScrollTextActive: {
-    color: '#ffffff',
-  },
-  hourScrollTextInactive: {
-    color: '#475569',
   },
   minuteScrollBadge: {
     paddingHorizontal: 12,
@@ -1755,33 +1668,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1.5,
   },
-  minuteScrollBadgeActive: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  minuteScrollBadgeInactive: {
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(226, 232, 240, 0.8)',
-  },
   minuteScrollText: {
     fontSize: 13.5,
     fontWeight: '700',
   },
-  minuteScrollTextActive: {
-    color: '#ffffff',
-  },
-  minuteScrollTextInactive: {
-    color: '#475569',
-  },
   customDaysSummary: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#8B5CF6',
     marginTop: 6,
     paddingLeft: 2,
     fontStyle: 'italic',
@@ -1793,20 +1686,16 @@ const styles = StyleSheet.create({
   digitalClockLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#64748B',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 6,
   },
   digitalClockCapsule: {
-    backgroundColor: '#ffffff',
     paddingHorizontal: 28,
     paddingVertical: 10,
     borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: 'rgba(139, 92, 246, 0.12)',
     alignItems: 'center',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
     shadowRadius: 10,
@@ -1815,14 +1704,13 @@ const styles = StyleSheet.create({
   digitalClockText: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#8B5CF6',
     letterSpacing: 0.5,
   },
   digitalClockSubtext: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#94A3B8',
     marginTop: 2,
     textTransform: 'uppercase',
   },
 });
+

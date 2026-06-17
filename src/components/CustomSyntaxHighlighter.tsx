@@ -164,12 +164,25 @@ export function CustomSyntaxHighlighter({
     return () => clearTimeout(timer);
   }, []);
 
+  const processedChildren = React.useMemo(() => {
+    if (!children) return '';
+    // Replace newline characters (\n) inside double quotes with literal "\\n"
+    let res = children.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match) => {
+      return match.replace(/\n/g, '\\n');
+    });
+    // Replace newline characters (\n) inside single quotes with literal "\\n"
+    res = res.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (match) => {
+      return match.replace(/\n/g, '\\n');
+    });
+    return res;
+  }, [children]);
+
   if (!isReady) {
     // Render a super lightweight plain-text monospace preview during swipe transitions
     return (
       <ScrollView horizontal={true} style={{ padding: 10 }}>
         <Text style={{ fontFamily, fontSize, color: '#cbd5e1' }}>
-          {children}
+          {processedChildren}
         </Text>
       </ScrollView>
     );
@@ -191,7 +204,7 @@ export function CustomSyntaxHighlighter({
         fontSize
       })}
     >
-      {children}
+      {processedChildren}
     </SyntaxHighlighter>
   );
 }

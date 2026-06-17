@@ -48,8 +48,8 @@ function TabButton({ focused, icon, onPress, disabled = false, shouldPulse = fal
     if (shouldPulse) {
       pulseAnim.value = withRepeat(
         withSequence(
-          withTiming(0.4, { duration: 1000 }),
-          withTiming(1.0, { duration: 1000 })
+          withTiming(0.4, { duration: 500 }),
+          withTiming(1.0, { duration: 500 })
         ),
         -1,
         true
@@ -63,7 +63,7 @@ function TabButton({ focused, icon, onPress, disabled = false, shouldPulse = fal
 
   const pulseStyle = useAnimatedStyle(() => ({
     opacity: pulseAnim.value,
-    transform: [{ scale: interpolate(pulseAnim.value, [0.4, 1], [0.92, 1.08]) }]
+    transform: [{ scale: interpolate(pulseAnim.value, [0.4, 1], [1.0, 1.25]) }]
   }));
 
   return (

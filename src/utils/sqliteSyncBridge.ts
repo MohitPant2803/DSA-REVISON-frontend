@@ -874,6 +874,17 @@ export async function deletePlaylistFromSQLite(playlistId: string, userId: strin
   });
 }
 
+const mapDifficultyToSQLite = (diff: string | undefined | null): string => {
+  if (!diff) return 'Easy';
+  const lower = diff.toLowerCase().trim();
+  if (lower === 'easy') return 'Easy';
+  if (lower === 'medium') return 'Medium';
+  if (lower === 'hard') return 'Hard';
+  const cap = diff.charAt(0).toUpperCase() + diff.slice(1);
+  if (cap === 'Easy' || cap === 'Medium' || cap === 'Hard') return cap;
+  return 'Easy'; // Fallback to satisfy CHECK constraint
+};
+
 /**
  * Saves a list of populated cards to SQLite asynchronously.
  */
@@ -910,7 +921,7 @@ export async function saveCardsToSQLite(cards: IPopulatedRevisionCard[], userId:
               c.title || '',
               c.topic || '',
               Array.isArray(c.tags) ? JSON.stringify(c.tags) : '[]',
-              c.difficulty || 'Easy',
+              mapDifficultyToSQLite(c.difficulty),
               getFolderIdString(c.folderId),
               getCreatedByString(c.createdBy),
               c.visibility || 'public',
@@ -1290,10 +1301,19 @@ export async function loadStateFromSQLite(userId: string) {
         db.getAllAsync<LocalDeletedEntity>('SELECT userId, entityId, entityType, deletedAt, revision FROM deleted_entities WHERE userId = ?;', [userId]),
         db.getFirstAsync<any>('SELECT lastPulledRevision, updatedAt FROM sync_cursors WHERE userId = ?;', [userId]),
         db.getAllAsync<any>('SELECT * FROM senior_quotes WHERE userId = ?;', [userId]),
-        db.getFirstAsync<any>('SELECT selectedRootFolderIds, currentQuoteIndex FROM reel_sessions WHERE userId = ?;', [userId]),
+        db.getFirstAsync<any>('SELECT * FROM reel_sessions WHERE userId = ?;', [userId]),
         db.getFirstAsync<any>('SELECT * FROM notification_settings WHERE userId = ?;', [userId]),
         db.getAllAsync<any>('SELECT key, value FROM app_config;')
       ]);
+
+      // Query local-only pinned folders
+      let pinnedFolderIds: string[] = [];
+      try {
+        const pinnedRows = await db.getAllAsync<any>('SELECT folderId FROM pinned_folders WHERE userId = ?;', [userId]);
+        pinnedFolderIds = pinnedRows.map((r: any) => r.folderId);
+      } catch (err: any) {
+        console.log('[SQLite Bridge] Pinned folders table not initialized or empty:', err.message);
+      }
 
       // Process Folders
       const foldersById: Record<string, any> = {};
@@ -1400,44 +1420,28 @@ export async function loadStateFromSQLite(userId: string) {
         branch: r.branch,
         yearOfGraduation: r.yearOfGraduation
       }));
-      if (seniorQuotes.length === 0) {
-        const defaultQuote = {
-          id: "6a13357421b348638d89b061",
-          userId,
-          text: "It's a marathon to be endured, not a sprint to be ran.",
-          author: "Mohit Pant",
-          collegeName: "IIT KGP",
-          branch: "Mining",
-          yearOfGraduation: 2027,
-          updatedAt: new Date().toISOString()
-        };
-        try {
-          await db.runAsync(
-            `INSERT OR IGNORE INTO senior_quotes (id, userId, text, author, collegeName, branch, yearOfGraduation, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-            [defaultQuote.id, defaultQuote.userId, defaultQuote.text, defaultQuote.author, defaultQuote.collegeName, defaultQuote.branch, defaultQuote.yearOfGraduation, defaultQuote.updatedAt]
-          );
-          seniorQuotes.push({
-            _id: defaultQuote.id,
-            text: defaultQuote.text,
-            author: defaultQuote.author,
-            collegeName: defaultQuote.collegeName,
-            branch: defaultQuote.branch,
-            yearOfGraduation: defaultQuote.yearOfGraduation
-          });
-        } catch (quoteInsertErr: any) {
-          console.warn('[SQLite Bridge Error] Failed to seed default senior quote:', quoteInsertErr.message);
-        }
-      }
 
-      // Process Reel Preferences Folder IDs and currentQuoteIndex
+
+      // Process Reel Preferences Folder IDs, currentQuoteIndex and reelSession
       let selectedRootFolderIds: string[] = [];
       let currentQuoteIndex = 0;
+      let reelSession: any = null;
       if (sessionRow) {
         if (sessionRow.selectedRootFolderIds) {
           selectedRootFolderIds = JSON.parse(sessionRow.selectedRootFolderIds);
         }
         currentQuoteIndex = sessionRow.currentQuoteIndex || 0;
+
+        reelSession = {
+          userId,
+          currentIndex: sessionRow.currentIndex || 0,
+          deepestIndexReached: sessionRow.deepestIndexReached || 0,
+          queue: typeof sessionRow.queue === 'string' ? JSON.parse(sessionRow.queue) : (sessionRow.queue || []),
+          contentHash: sessionRow.contentHash || '',
+          eligibleCardCount: sessionRow.eligibleCardCount || 0,
+          queueVersion: sessionRow.queueVersion || 1,
+          updatedAt: sessionRow.updatedAt || new Date().toISOString()
+        };
       }
 
       // DEFERRED PATH: Load card metadata asynchronously (600+ cards - heavy!)
@@ -1546,12 +1550,14 @@ export async function loadStateFromSQLite(userId: string) {
         cardTombstones,
         cardsMetaPromise,
         deletedEntities: [],
-        lastSyncedRevision: 0,
-        lastSyncedAt: null,
-        selectedRootFolderIds: [],
-        seniorQuotes: [],
-        currentQuoteIndex: 0,
+        lastSyncedRevision,
+        lastSyncedAt,
+        selectedRootFolderIds,
+        seniorQuotes,
+        currentQuoteIndex,
         notificationSettings,
+        reelSession,
+        pinnedFolderIds,
         appConfig: Object.keys(appConfigObj).length > 0 ? appConfigObj : null,
       };
     } catch (err: any) {
@@ -1573,6 +1579,7 @@ export async function clearAllDataFromSQLite(userId: string): Promise<void> {
       console.log(`[SQLite Bridge] Purging tables asynchronously for user: ${userId}...`);
       await db.withTransactionAsync(async () => {
         await db.runAsync('DELETE FROM folders WHERE userId = ?;', [userId]);
+        await db.runAsync('DELETE FROM pinned_folders WHERE userId = ?;', [userId]);
         await db.runAsync('DELETE FROM playlists WHERE userId = ?;', [userId]);
         await db.runAsync('DELETE FROM card_progress WHERE userId = ?;', [userId]);
         await db.runAsync('DELETE FROM offline_queue WHERE userId = ?;', [userId]);
@@ -1641,19 +1648,31 @@ export async function evictOldAccountsFromSQLite(): Promise<void> {
  */
 export async function saveUserMetricsToSQLite(
   userId: string,
-  metrics: { totalSwipes: number; totalScrolls: number; unsyncedSwipes: number; unsyncedScrolls: number }
+  metrics: { 
+    totalSwipes: number; 
+    totalScrolls: number; 
+    unsyncedSwipes: number; 
+    unsyncedScrolls: number;
+    streakCount?: number;
+    maxStreakCount?: number;
+    lastCompletedDate?: string | null;
+  }
 ): Promise<void> {
   if (!isSQLiteAvailable()) return;
   const db = getDatabase();
+  const release = await sqliteLock.acquire();
   try {
     await db.runAsync(
-      `INSERT INTO user_metrics (userId, totalSwipes, totalScrolls, unsyncedSwipes, unsyncedScrolls, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO user_metrics (userId, totalSwipes, totalScrolls, unsyncedSwipes, unsyncedScrolls, streakCount, maxStreakCount, lastCompletedDate, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(userId) DO UPDATE SET
          totalSwipes=excluded.totalSwipes,
          totalScrolls=excluded.totalScrolls,
          unsyncedSwipes=excluded.unsyncedSwipes,
          unsyncedScrolls=excluded.unsyncedScrolls,
+         streakCount=CASE WHEN excluded.streakCount IS NOT NULL AND excluded.streakCount > 0 THEN excluded.streakCount ELSE user_metrics.streakCount END,
+         maxStreakCount=CASE WHEN excluded.maxStreakCount IS NOT NULL AND excluded.maxStreakCount > 0 THEN excluded.maxStreakCount ELSE user_metrics.maxStreakCount END,
+         lastCompletedDate=COALESCE(excluded.lastCompletedDate, user_metrics.lastCompletedDate),
          updatedAt=excluded.updatedAt;`,
       [
         userId,
@@ -1661,11 +1680,16 @@ export async function saveUserMetricsToSQLite(
         metrics.totalScrolls,
         metrics.unsyncedSwipes,
         metrics.unsyncedScrolls,
+        metrics.streakCount !== undefined && metrics.streakCount !== null ? metrics.streakCount : null,
+        metrics.maxStreakCount !== undefined && metrics.maxStreakCount !== null ? metrics.maxStreakCount : null,
+        metrics.lastCompletedDate !== undefined && metrics.lastCompletedDate !== null ? metrics.lastCompletedDate : null,
         Date.now(),
       ]
     );
   } catch (err: any) {
     console.error('[SQLite Bridge Error] saveUserMetricsToSQLite failed:', err.message);
+  } finally {
+    release();
   }
 }
 
@@ -1676,7 +1700,7 @@ export async function loadUserMetricsFromSQLite(userId: string) {
   if (!isSQLiteAvailable()) return null;
   try {
     return await executeQueryWithRecovery<any>(
-      'SELECT totalSwipes, totalScrolls, unsyncedSwipes, unsyncedScrolls FROM user_metrics WHERE userId = ? LIMIT 1;',
+      'SELECT totalSwipes, totalScrolls, unsyncedSwipes, unsyncedScrolls, streakCount, maxStreakCount, lastCompletedDate FROM user_metrics WHERE userId = ? LIMIT 1;',
       [userId],
       2
     );
@@ -1845,7 +1869,7 @@ export async function flushAllZustandToSQLite(userId: string): Promise<void> {
           c.title || '',
           c.topic || '',
           Array.isArray(c.tags) ? JSON.stringify(c.tags) : '[]',
-          c.difficulty || 'Easy',
+          mapDifficultyToSQLite(c.difficulty),
           getFolderIdString(c.folderId),
           getCreatedByString(c.createdBy),
           c.visibility || 'public',
@@ -2066,28 +2090,39 @@ export async function saveCardProgressToSQLite(
   userId: string
 ): Promise<void> {
   if (!isSQLiteAvailable()) return;
-  const db = getDatabase();
   const cleanId = cardId.split('-loop-')[0];
   const now = new Date().toISOString();
+  const isCompleted = difficultyState === 'skipped' ? 0 : 1;
+
   try {
-    await db.runAsync(`
-      INSERT INTO card_progress (
-        cardId, userId, completed, revisionCount, favorite, difficultyState, seenInReels, revision, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(cardId, userId) DO UPDATE SET
-        difficultyState=excluded.difficultyState,
-        updatedAt=excluded.updatedAt;
-    `, [
-      cleanId,
+    const { sqliteWriteManager } = require('./sqliteWriteManager');
+    await sqliteWriteManager.enqueue({
+      id: `card-progress-${cleanId}-${Date.now()}`,
+      type: 'custom',
       userId,
-      difficultyState === 'skipped' ? 0 : 1, // completed if not skipped
-      0, // loops
-      0, // favorite
-      difficultyState,
-      0, // seenInReels
-      0, // revision
-      now
-    ]);
+      data: {
+        executor: async (db: any) => {
+          await db.runAsync(`
+            INSERT INTO card_progress (
+              cardId, userId, completed, revisionCount, favorite, difficultyState, seenInReels, revision, updatedAt
+            ) VALUES (?, ?, ?, 0, 0, ?, 0, 0, ?)
+            ON CONFLICT(cardId, userId) DO UPDATE SET
+              difficultyState=excluded.difficultyState,
+              completed=excluded.completed,
+              updatedAt=excluded.updatedAt;
+          `, [
+            cleanId,
+            userId,
+            isCompleted,
+            difficultyState,
+            now
+          ]);
+        }
+      },
+      timestamp: Date.now(),
+      priority: 'critical',
+      dedupeKey: `difficulty:${userId}:${cleanId}`, // Coalesce rapid updates to the same card within 300ms
+    });
   } catch (err: any) {
     console.error('[SQLite Bridge Error] saveCardProgressToSQLite failed:', err.message);
   }
@@ -2137,21 +2172,33 @@ export async function saveAppConfigToSQLite(
   shareMessage: string
 ): Promise<void> {
   if (!isSQLiteAvailable()) return;
-  const db = getDatabase();
   try {
-    await db.withTransactionAsync(async () => {
-      await db.runAsync(
-        `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
-        ['latestVersion', latestVersion || '1.0.5']
-      );
-      await db.runAsync(
-        `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
-        ['updateUrl', updateUrl || 'https://ree-wise-download-website.vercel.app/']
-      );
-      await db.runAsync(
-        `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
-        ['shareMessage', shareMessage || '']
-      );
+    const { usePlaylistStateStore } = require('../store/usePlaylistStateStore');
+    const { sqliteWriteManager } = require('./sqliteWriteManager');
+    const activeUserId = usePlaylistStateStore.getState().userId || 'unknown-user';
+
+    await sqliteWriteManager.enqueue({
+      id: `save-app-config-${Date.now()}`,
+      type: 'custom',
+      userId: activeUserId,
+      data: {
+        executor: async (db: any) => {
+          await db.runAsync(
+            `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
+            ['latestVersion', latestVersion || '1.0.5']
+          );
+          await db.runAsync(
+            `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
+            ['updateUrl', updateUrl || 'https://ree-wise-download-website.vercel.app/']
+          );
+          await db.runAsync(
+            `INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`,
+            ['shareMessage', shareMessage || '']
+          );
+        }
+      },
+      timestamp: Date.now(),
+      priority: 'normal'
     });
   } catch (err: any) {
     console.error('[SQLite Bridge Error] saveAppConfigToSQLite failed:', err.message);

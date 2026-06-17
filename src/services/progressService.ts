@@ -1,6 +1,10 @@
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
+import { useResumeStore } from '@/store/useResumeStore';
+import { useAuthStore } from '@/store/useAuthStore';
+import { sqliteWriteManager } from '@/utils/sqliteWriteManager';
+import { isSQLiteAvailable } from '@/utils/sqliteDatabase';
 import { isNetworkConnected } from '@/utils/network';
 import type { DashboardStats, PersonalLibrary, LibraryEntry } from '@/types/progress';
 
@@ -111,55 +115,139 @@ export const updateUserProgress = async (
   action: ProgressAction,
   value: boolean
 ): Promise<{ message: string }> => {
-  const payload: Record<string, unknown> = { revisionCardId: cardId };
-  if (action === 'favorite') payload.favorite = value;
-  if (action === 'difficult') payload.difficult = value;
-  if (action === 'archived') payload.archived = value;
+  const store = usePlaylistStateStore.getState();
 
-  const response = await api.post('/progress/update', payload);
-  return response.data?.data ?? response.data ?? { message: 'Progress updated' };
+  if (action === 'favorite') {
+    await store.toggleFavoriteInStore(cardId, value);
+    await store.enqueueOfflineAction({
+      action: 'TOGGLE_FAVORITE',
+      payload: { cardId, value },
+      timestamp: Date.now(),
+    });
+  }
+
+  if (action === 'difficult') {
+    const card = store.cardsById[cardId.split('-loop-')[0]];
+    if (card) {
+      const newState = value ? 'hard' : null;
+      await store.transferCard(cardId, card, newState);
+      await store.enqueueOfflineAction({
+        action: 'CLASSIFY_CARD',
+        payload: { cardId, state: newState },
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  if (action === 'archived') {
+    const cleanId = cardId.split('-loop-')[0];
+    const existing = store.cardsById[cleanId];
+    if (existing) {
+      usePlaylistStateStore.setState({
+        cardsById: {
+          ...store.cardsById,
+          [cleanId]: { ...existing, isArchived: value },
+        },
+      });
+    }
+    await store.enqueueOfflineAction({
+      action: 'CLASSIFY_CARD',
+      payload: { cardId, archived: value },
+      timestamp: Date.now(),
+    });
+  }
+
+  return { message: 'Progress updated locally' };
 };
 
 export const updateDifficultyState = async (
   cardId: string,
   difficultyState: 'easy' | 'medium' | 'hard' | 'skipped' | null
 ): Promise<{ message: string }> => {
-  const payload = {
-    revisionCardId: cardId,
-    difficultyState,
-  };
-  const response = await api.post('/progress/update', payload);
-  return response.data?.data ?? response.data ?? { message: 'Difficulty state updated' };
+  const store = usePlaylistStateStore.getState();
+  const card = store.cardsById[cardId.split('-loop-')[0]];
+
+  if (card) {
+    await store.transferCard(cardId, card, difficultyState);
+  }
+
+  await store.enqueueOfflineAction({
+    action: 'CLASSIFY_CARD',
+    payload: { cardId, state: difficultyState },
+    timestamp: Date.now(),
+  });
+
+  return { message: 'Difficulty state updated locally' };
 };
 
 export const updatePlaylistMembership = async (
   cardId: string,
   addToPlaylist?: string,
   removeFromPlaylist?: string
-) => {
-  const payload: Record<string, unknown> = { revisionCardId: cardId };
-  if (addToPlaylist) payload.addToPlaylist = addToPlaylist;
-  if (removeFromPlaylist) payload.removeFromPlaylist = removeFromPlaylist;
+): Promise<{ message: string }> => {
+  const store = usePlaylistStateStore.getState();
+  const playlistId = addToPlaylist || removeFromPlaylist;
 
-  const response = await api.post('/progress/update', payload);
-  return response.data?.data ?? response.data ?? { message: 'Playlist membership updated' };
+  if (playlistId) {
+    const isAdding = !!addToPlaylist;
+    await store.toggleCustomPlaylistItemInStore(playlistId, cardId, isAdding);
+    await store.enqueueOfflineAction({
+      action: 'TOGGLE_PLAYLIST_ITEM',
+      payload: { playlistId, cardId, value: isAdding },
+      timestamp: Date.now(),
+    });
+  }
+
+  return { message: 'Playlist membership updated locally' };
 };
 
 export const updateLastViewedCard = async (cardId: string): Promise<void> => {
-  await api.post('/progress/update', {
-    revisionCardId: cardId,
-    timeSpent: 1,
-  });
+  const store = usePlaylistStateStore.getState();
+  const userId = store.userId || 'guest-user';
+  const cleanId = cardId.split('-loop-')[0];
+  const now = new Date().toISOString();
+
+  if (!isSQLiteAvailable()) return;
+
+  sqliteWriteManager.enqueue({
+    id: `last-viewed-${cleanId}-${Date.now()}`,
+    type: 'custom',
+    userId,
+    data: {
+      executor: async (db: any) => {
+        await db.runAsync(`
+          INSERT INTO card_progress (
+            cardId, userId, completed, revisionCount, favorite, difficultyState, seenInReels, revision, updatedAt
+          ) VALUES (?, ?, 0, 0, 0, NULL, 1, 0, ?)
+          ON CONFLICT(cardId, userId) DO UPDATE SET
+            seenInReels=1,
+            updatedAt=excluded.updatedAt;
+        `, [cleanId, userId, now]);
+      }
+    },
+    timestamp: Date.now(),
+    priority: 'low',
+  }).catch((err: any) => console.error('[SQLite updateLastViewedCard Error]', err.message));
 };
 
 export const registerLoop = async (type: 'folder' | 'playlist', id: string, cardsViewed: number) => {
-  const response = await api.post('/progress/loop', { type, id, cardsViewed });
-  return response.data?.data?.loopStats ?? response.data?.loopStats;
-};
+  const store = usePlaylistStateStore.getState();
 
-export const getFolderLoops = async () => {
-  const response = await api.get('/progress/folder-loops');
-  return response.data?.data?.loops ?? response.data?.loops ?? [];
+  // Local write — TrackingStore is AsyncStorage-persisted, no SQLite needed
+  useTrackingStore.getState().registerLoopCompletion(id);
+
+  const isGuest = useAuthStore.getState().user?.id === 'guest-user' || !useAuthStore.getState().isAuthenticated;
+  const isVirtual = type === 'playlist' && ['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].includes(id);
+
+  if (!isGuest && !isVirtual) {
+    await store.enqueueOfflineAction({
+      action: 'REGISTER_LOOP',
+      payload: { type, id, cardsViewed },
+      timestamp: Date.now(),
+    });
+  }
+
+  return { message: 'Loop registered locally' };
 };
 
 export const updateResumeState = async (
@@ -171,8 +259,39 @@ export const updateResumeState = async (
     resumeScrollOffset?: number;
   }
 ) => {
-  const response = await api.post('/progress/resume', { type, id, resumeData });
-  return response.data?.data?.result ?? response.data?.result;
+  const store = usePlaylistStateStore.getState();
+  const resumeStore = useResumeStore.getState();
+
+  // Local write — ResumeStore is AsyncStorage-persisted, no SQLite needed
+  const statePayload = {
+    resumeCardId: resumeData.resumeCardId || '',
+    resumeIndex: resumeData.resumeIndex || 0,
+    resumeScrollOffset: resumeData.resumeScrollOffset || 0,
+  };
+
+  if (type === 'folder') {
+    resumeStore.saveFolderProgress(id, statePayload);
+  } else {
+    resumeStore.savePlaylistProgress(id, statePayload);
+  }
+
+  const isGuest = useAuthStore.getState().user?.id === 'guest-user' || !useAuthStore.getState().isAuthenticated;
+  const isVirtual = type === 'playlist' && ['likes', 'watch-later', 'easy', 'medium', 'hard', 'skipped'].includes(id);
+
+  if (!isGuest && !isVirtual) {
+    await store.enqueueOfflineAction({
+      action: 'UPDATE_RESUME_STATE',
+      payload: { type, id, resumeData },
+      timestamp: Date.now(),
+    });
+  }
+
+  return { message: 'Resume state updated locally' };
+};
+
+export const getFolderLoops = async () => {
+  const response = await api.get('/progress/folder-loops');
+  return response.data?.data?.loops ?? response.data?.loops ?? [];
 };
 
 export const getResumeStates = async () => {

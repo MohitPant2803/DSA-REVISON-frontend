@@ -1,5 +1,7 @@
 import React from 'react';
 import { Text, TextStyle, StyleProp, Platform } from 'react-native';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 /**
  * RichText – lightweight inline markdown bold, code, and italic renderer.
@@ -8,7 +10,7 @@ import { Text, TextStyle, StyleProp, Platform } from 'react-native';
  *   - `**bold**` markers -> bold text
  *   - `` `code` `` markers -> monospace styled inline code block
  *   - `*italic*` markers -> italic text
- * Everything else is rendered as normal text.
+ *   - Everything else is rendered as normal text.
  */
 
 interface RichTextProps {
@@ -19,6 +21,8 @@ interface RichTextProps {
 }
 
 export const RichText = React.memo(({ text, style, boldStyle, numberOfLines }: RichTextProps) => {
+  const palette = useThemePalette();
+
   if (!text) return null;
 
   // Split on **...**, `...`, and *...* patterns, capturing the formatted tokens
@@ -59,8 +63,8 @@ export const RichText = React.memo(({ text, style, boldStyle, numberOfLines }: R
               style={[
                 {
                   fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-                  backgroundColor: '#E2E8F0',
-                  color: '#0F172A',
+                  backgroundColor: addAlpha(palette.textPrimary, 0.08),
+                  color: palette.textPrimary,
                   paddingHorizontal: 4,
                   borderRadius: 4,
                   fontWeight: '700',

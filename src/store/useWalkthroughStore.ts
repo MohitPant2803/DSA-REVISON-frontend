@@ -20,9 +20,11 @@ interface WalkthroughState {
   isComplete: boolean;
   reelsShot: 1 | 2;
   reelsTutorialStep: number;
+  reelsLoadingState: 'idle' | 'loading' | 'ready';
   setStep: (step: WalkthroughStep) => void;
   setReelsShot: (reelsShot: 1 | 2) => void;
   setReelsTutorialStep: (reelsTutorialStep: number) => void;
+  setReelsLoadingState: (state: 'idle' | 'loading' | 'ready') => void;
   initialize: () => Promise<void>;
   completeWalkthrough: () => Promise<void>;
 }
@@ -32,9 +34,11 @@ export const useWalkthroughStore = create<WalkthroughState>((set) => ({
   isComplete: false,
   reelsShot: 1,
   reelsTutorialStep: 0,
+  reelsLoadingState: 'idle',
   setStep: (step) => set({ step, reelsShot: 1 }),
   setReelsShot: (reelsShot) => set({ reelsShot }),
   setReelsTutorialStep: (reelsTutorialStep) => set({ reelsTutorialStep }),
+  setReelsLoadingState: (reelsLoadingState) => set({ reelsLoadingState }),
   initialize: async () => {
     try {
       const { useAuthStore } = require('./useAuthStore');

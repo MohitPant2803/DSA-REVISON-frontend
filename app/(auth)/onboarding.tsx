@@ -709,9 +709,6 @@ function SlideWelcome() {
     opacity: sparkScale.value,
   }));
 
-  // Start spark animation loop
-  sparkScale.value = withDelay(0, withRepeat(withTiming(1, { duration: 800 }), -1, true));
-
   // Typing dots shared values and animations
   const dotScale1 = useSharedValue(0);
   const dotScale2 = useSharedValue(0);
@@ -720,22 +717,26 @@ function SlideWelcome() {
   const animatedDots2 = useAnimatedStyle(() => ({ opacity: dotScale2.value }));
   const animatedDots3 = useAnimatedStyle(() => ({ opacity: dotScale3.value }));
 
-  // Start typing dots animation sequence
-  dotScale1.value = withSequence(
-    withTiming(1, { duration: 300 }),
-    withDelay(300, withTiming(0, { duration: 300 }))
-  );
-  dotScale2.value = withDelay(200, withSequence(
-    withTiming(1, { duration: 300 }),
-    withDelay(300, withTiming(0, { duration: 300 }))
-  ));
-  dotScale3.value = withDelay(400, withSequence(
-    withTiming(1, { duration: 300 }),
-    withDelay(300, withTiming(0, { duration: 300 }))
-  ));
   const glowScale = useSharedValue(0.95);
 
   useEffect(() => {
+    // Start spark animation loop
+    sparkScale.value = withDelay(0, withRepeat(withTiming(1, { duration: 800 }), -1, true));
+
+    // Start typing dots animation sequence
+    dotScale1.value = withSequence(
+      withTiming(1, { duration: 300 }),
+      withDelay(300, withTiming(0, { duration: 300 }))
+    );
+    dotScale2.value = withDelay(200, withSequence(
+      withTiming(1, { duration: 300 }),
+      withDelay(300, withTiming(0, { duration: 300 }))
+    ));
+    dotScale3.value = withDelay(400, withSequence(
+      withTiming(1, { duration: 300 }),
+      withDelay(300, withTiming(0, { duration: 300 }))
+    ));
+
     // 1. Cozy float animation - extremely subtle
     floatAnim.value = withRepeat(
       withSequence(
@@ -857,6 +858,11 @@ function SlideWelcome() {
     );
 
     return () => {
+      cancelAnimation(sparkScale);
+      cancelAnimation(dotScale1);
+      cancelAnimation(dotScale2);
+      cancelAnimation(dotScale3);
+
       cancelAnimation(floatAnim);
       cancelAnimation(blobScale);
       cancelAnimation(particle1X);

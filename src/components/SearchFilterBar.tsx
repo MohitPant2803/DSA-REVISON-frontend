@@ -2,6 +2,8 @@ import React from 'react';
 import { View, TextInput, ScrollView, TouchableOpacity, Text } from 'react-native';
 import { Search, X } from 'lucide-react-native';
 import { DifficultyLevels } from '@/types/revision';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 interface SearchFilterBarProps {
   search: string;
@@ -29,25 +31,31 @@ const Chip = React.memo(({
   label,
   active,
   onPress,
-}: ChipProps) => (
-  <TouchableOpacity
-    onPress={onPress}
-    className="px-4 py-1.5 rounded-[20px] mr-2 mb-2 border"
-    style={{ 
-      backgroundColor: active ? 'rgba(139, 92, 246, 0.04)' : '#FFFFFF', 
-      borderColor: active ? 'rgba(139, 92, 246, 0.12)' : 'rgba(148,163,184,0.08)',
-      shadowColor: '#0F172A',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.015,
-      shadowRadius: 8,
-      elevation: 1,
-    }}
-  >
-    <Text className={`text-[13px] font-semibold ${active ? 'text-[#8B5CF6]' : 'text-[#64748B]'}`}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-), (prev, next) => {
+}: ChipProps) => {
+  const palette = useThemePalette();
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      className="px-4 py-1.5 rounded-[20px] mr-2 mb-2 border"
+      style={{ 
+        backgroundColor: active ? addAlpha(palette.accent, 0.08) : palette.surface, 
+        borderColor: active ? palette.accent : palette.border,
+        shadowColor: palette.shadow,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: palette.isDark ? 0.15 : 0.015,
+        shadowRadius: 8,
+        elevation: 1,
+      }}
+    >
+      <Text 
+        className="text-[13px] font-semibold"
+        style={{ color: active ? palette.accent : palette.textSecondary }}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}, (prev, next) => {
   return prev.label === next.label && prev.active === next.active;
 });
 
@@ -64,34 +72,50 @@ export function SearchFilterBar({
   tags = [],
   placeholder = 'Search...',
 }: SearchFilterBarProps) {
-
+  const palette = useThemePalette();
   const hasFilters = topic || difficulty || tag;
+
+  const [localSearch, setLocalSearch] = React.useState(search);
+
+  React.useEffect(() => {
+    const handler = setTimeout(() => {
+      onSearchChange(localSearch);
+    }, 250);
+    return () => clearTimeout(handler);
+  }, [localSearch, onSearchChange]);
+
+  React.useEffect(() => {
+    if (search !== localSearch) {
+      setLocalSearch(search);
+    }
+  }, [search]);
 
   return (
     <View className="mb-5">
       <View
         className="flex-row items-center rounded-[24px] px-6 py-3 border"
         style={{ 
-          backgroundColor: '#FFFFFF',
-          borderColor: 'rgba(148, 163, 184, 0.08)',
-          shadowColor: '#0F172A',
+          backgroundColor: palette.inputBg,
+          borderColor: palette.border,
+          shadowColor: palette.shadow,
           shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: 0.035,
+          shadowOpacity: palette.isDark ? 0.20 : 0.035,
           shadowRadius: 16,
           elevation: 2,
         }}
       >
-        <Search color="#94A3B8" size={18} strokeWidth={2} />
+        <Search color={palette.textMuted} size={18} strokeWidth={2} />
         <TextInput
-          value={search}
-          onChangeText={onSearchChange}
+          value={localSearch}
+          onChangeText={setLocalSearch}
           placeholder={placeholder}
-          placeholderTextColor="#94A3B8"
-          className="flex-1 ml-3 text-[#0F172A] text-base"
+          placeholderTextColor={palette.textMuted}
+          className="flex-1 ml-3 text-base"
+          style={{ color: palette.textPrimary }}
         />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => onSearchChange('')}>
-            <X color="#94A3B8" size={16} />
+        {localSearch.length > 0 && (
+          <TouchableOpacity onPress={() => setLocalSearch('')}>
+            <X color={palette.textMuted} size={16} />
           </TouchableOpacity>
         )}
       </View>
@@ -135,9 +159,10 @@ export function SearchFilterBar({
                 onDifficultyChange?.(undefined);
                 onTagChange?.(undefined);
               }}
-              className="px-4 py-1.5 rounded-[20px] bg-slate-50 mr-2 border border-slate-100"
+              className="px-4 py-1.5 rounded-[20px] mr-2 border justify-center items-center"
+              style={{ backgroundColor: palette.surface, borderColor: palette.border }}
             >
-              <Text className="text-slate-500 text-xs font-semibold">Clear</Text>
+              <Text className="text-xs font-semibold" style={{ color: palette.textSecondary }}>Clear</Text>
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -145,3 +170,4 @@ export function SearchFilterBar({
     </View>
   );
 }
+

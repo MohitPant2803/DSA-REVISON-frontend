@@ -23,6 +23,8 @@ import { DifficultyLevels, ComplexityLevels } from '@/types/revision';
 import RevisionForm from './RevisionForm';
 import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 const cardFormSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters.'),
@@ -42,6 +44,7 @@ export type CardFormData = z.infer<typeof cardFormSchema>;
 export default function CreateRevisionScreen() {
   useAppBackHandler();
   const router = useRouter();
+  const palette = useThemePalette();
   const params = useLocalSearchParams<{
     cardId?: string;
     folderId?: string;
@@ -168,8 +171,8 @@ export default function CreateRevisionScreen() {
 
   if (cardId && loadingCard) {
     return (
-      <View className="flex-1 bg-[#0c0c0e] justify-center items-center">
-        <ActivityIndicator color="#a78bfa" size="large" />
+      <View className="flex-1 justify-center items-center" style={{ backgroundColor: palette.background }}>
+        <ActivityIndicator color={palette.accent} size="large" />
       </View>
     );
   }
@@ -177,7 +180,8 @@ export default function CreateRevisionScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-[#0c0c0e]"
+      className="flex-1"
+      style={{ backgroundColor: palette.background }}
     >
       <ScrollView
         className="p-5 animate-fade-in"
@@ -185,7 +189,7 @@ export default function CreateRevisionScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text className="text-zinc-100 text-2xl font-black mb-6 pt-12">
+        <Text className="text-2xl font-bold mb-6 pt-12" style={{ color: palette.textPrimary }}>
           {isEditMode ? 'Edit card details' : 'New revision deck'}
         </Text>
         
@@ -196,19 +200,26 @@ export default function CreateRevisionScreen() {
         <TouchableOpacity
           onPress={handleSubmit(onSubmit)}
           disabled={isLoading || folders.length === 0}
-          className="bg-violet-600 py-4 rounded-2xl items-center mt-6 disabled:opacity-50 shadow-md shadow-violet-800/20"
+          className="py-4 rounded-2xl items-center mt-6 disabled:opacity-50"
+          style={{ 
+            backgroundColor: palette.accent,
+            shadowColor: palette.shadow,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8
+          }}
         >
           {isLoading ? (
-            <ActivityIndicator color="#ffffff" />
+            <ActivityIndicator color={palette.isDark ? palette.textPrimary : palette.surface} />
           ) : (
-            <Text className="text-white font-bold text-base">
+            <Text className="font-semibold text-base" style={{ color: palette.isDark ? palette.textPrimary : palette.surface }}>
               {isEditMode ? 'Save changes & compile deck' : 'Create revision card deck'}
             </Text>
           )}
         </TouchableOpacity>
 
         {folders.length === 0 && (
-          <Text className="text-amber-400/90 text-center mt-4 text-xs font-semibold">
+          <Text className="text-center mt-4 text-xs font-semibold" style={{ color: palette.warning }}>
             Create a folder in Learn before adding cards.
           </Text>
         )}

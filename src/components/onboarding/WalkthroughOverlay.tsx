@@ -19,6 +19,8 @@ import { GlassPanel } from '../motion/GlassPanel';
 import { hapticFeedback } from '@/utils/haptics';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
 import { TouchableOpacity } from 'react-native';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha } from '@/theme/themePalettes';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -31,7 +33,8 @@ const lightHaptic = () => {
 };
 
 export function WalkthroughOverlay() {
-  const { step, setStep, completeWalkthrough, reelsShot, setReelsShot } = useWalkthroughStore();
+  const palette = useThemePalette();
+  const { step, setStep, completeWalkthrough, reelsShot, setReelsShot, reelsLoadingState, setReelsLoadingState } = useWalkthroughStore();
   const { isAuthenticated, user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const { hasAppBeenAnimated } = useUIStore();
@@ -62,12 +65,8 @@ export function WalkthroughOverlay() {
   React.useEffect(() => {
     setLocalStep(step);
     setLocalReelsShot(reelsShot);
+    panelOpacity.value = 1;
   }, [step, reelsShot]);
-
-  React.useEffect(() => {
-    panelOpacity.value = 0;
-    panelOpacity.value = withTiming(1, { duration: 400 });
-  }, [localStep, localReelsShot]);
 
   React.useEffect(() => {
     let targetText = '';
@@ -123,6 +122,14 @@ export function WalkthroughOverlay() {
   }));
 
 
+
+  if (reelsLoadingState === 'loading') {
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: addAlpha(palette.background, 0.95), justifyContent: 'center', alignItems: 'center', zIndex: 100000 }]}>
+        <ReeWCharacter state="loading" size={90} />
+      </View>
+    );
+  }
 
   if (
     !hasAppBeenAnimated ||
@@ -202,13 +209,19 @@ export function WalkthroughOverlay() {
 
   // Target tab press handler
   const handleTabPress = () => {
+    const pressTime = Date.now();
+    console.log('[PERF] WalkthroughOverlay: handleTabPress (Reels/MySpace Tab Press) triggered at:', pressTime);
     if (completeTyping()) return;
     lightHaptic();
     hapticFeedback.selection();
 
     if (step === 'point-reels') {
+      const navStartTime = Date.now();
+      console.log('[PERF] WalkthroughOverlay: Step is point-reels. Navigating to Reels at:', navStartTime);
+      setReelsLoadingState('loading');
       setStep('reels-tutorial');
       router.replace('/(protected)/(tabs)/reels');
+      console.log('[PERF] WalkthroughOverlay: router.replace called. Time elapsed since tap:', Date.now() - pressTime, 'ms');
     } else if (step === 'point-myspace') {
       setStep('myspace-theme');
       router.replace('/(protected)/(tabs)/personal');

@@ -13,16 +13,19 @@ import {
   Platform,
   Pressable,
 } from 'react-native';
-import { X, ListMusic, Check, Lock, Plus } from 'lucide-react-native';
+import { X, ListMusic, Check, Lock } from 'lucide-react-native';
 import { usePlaylists, useCreatePlaylist, useTogglePlaylistItem } from '@/hooks/usePlaylists';
 import { useCardPlaylistMembership } from '@/hooks/usePlaylistMembership';
 import { useAuthStore } from '@/store/useAuthStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 import Toast from 'react-native-toast-message';
 import type { IPopulatedRevisionCard } from '@/types/revision';
 import { useQueryClient } from '@tanstack/react-query';
+import { useThemePalette } from '@/hooks/useThemePalette';
+import { addAlpha, ThemePalette } from '@/theme/themePalettes';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -42,12 +45,12 @@ interface CreatePlaylistOverlayProps {
   onPlaylistCreated: (id: string, name: string) => void;
 }
 
-const getCustomTheme = (playlistName: string) => {
+const getCustomTheme = (playlistName: string, palette: ThemePalette) => {
   const tones = [
-    { bg: '#F5F3FF', border: 'rgba(109, 40, 217, 0.15)', text: '#6D28D9', bar: '#8B5CF6', iconBg: '#E8E3FF' }, // soft violet
-    { bg: '#ECFDF5', border: 'rgba(16, 185, 129, 0.15)', text: '#047857', bar: '#10B981', iconBg: '#D1FAE5' }, // soft emerald
-    { bg: '#EFF6FF', border: 'rgba(59, 130, 246, 0.15)', text: '#1D4ED8', bar: '#3B82F6', iconBg: '#DBEAFE' }, // soft blue
-    { bg: '#FFF5F5', border: 'rgba(239, 68, 68, 0.15)', text: '#B91C1C', bar: '#EF4444', iconBg: '#FFE3E3' }, // soft rose
+    { bg: addAlpha(palette.accent, 0.08), border: addAlpha(palette.accent, 0.15), text: palette.accent, iconBg: addAlpha(palette.accent, 0.12) },
+    { bg: addAlpha(palette.success, 0.08), border: addAlpha(palette.success, 0.15), text: palette.success, iconBg: addAlpha(palette.success, 0.12) },
+    { bg: addAlpha(palette.info, 0.08), border: addAlpha(palette.info, 0.15), text: palette.info, iconBg: addAlpha(palette.info, 0.12) },
+    { bg: addAlpha(palette.warning, 0.08), border: addAlpha(palette.warning, 0.15), text: palette.warning, iconBg: addAlpha(palette.warning, 0.12) },
   ];
 
   const hash = (playlistName || '').split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
@@ -57,11 +60,12 @@ const getCustomTheme = (playlistName: string) => {
 const CreatePlaylistOverlay = ({ onClose, onPlaylistCreated }: CreatePlaylistOverlayProps) => {
   const [playlistName, setPlaylistName] = useState('');
   const createPlaylistMutation = useCreatePlaylist();
+  const palette = useThemePalette();
 
   const handleCreate = async () => {
     const trimmed = playlistName.trim();
     if (!trimmed) {
-      Toast.show({ type: 'error', text1: 'Collection name is required' });
+      Toast.show({ type: 'error', text1: 'Playlist name is required' });
       return;
     }
     try {
@@ -69,32 +73,50 @@ const CreatePlaylistOverlay = ({ onClose, onPlaylistCreated }: CreatePlaylistOve
       const newPlaylist = await createPlaylistMutation.mutateAsync(trimmed);
       if (newPlaylist && newPlaylist._id) {
         onPlaylistCreated(newPlaylist._id, trimmed);
-        Toast.show({ type: 'success', text1: `Created collection "${trimmed}"` });
+        Toast.show({ type: 'success', text1: `Created playlist "${trimmed}"` });
       }
     } catch (err: any) {
       console.error('[Playlist Create Error]', err);
       Toast.show({
         type: 'error',
-        text1: 'Could not create collection',
+        text1: 'Could not create playlist',
         text2: err.message || 'Please try again',
       });
     }
   };
 
+  const buttonTextColor = palette.isDark ? palette.textPrimary : palette.surface;
+
   return (
     <Modal visible={true} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+      <Pressable style={[styles.modalBackdrop, { backgroundColor: palette.overlayBg }]} onPress={onClose}>
         <View 
-          style={styles.createModalContent} 
+          style={[
+            styles.createModalContent,
+            {
+              backgroundColor: palette.dialogBg,
+              borderColor: palette.border,
+              shadowColor: palette.shadow,
+              shadowOpacity: palette.isDark ? 0.20 : 0.08,
+              shadowRadius: palette.isDark ? 30 : 24,
+            }
+          ]} 
           onStartShouldSetResponder={() => true}
           onResponderRelease={(e) => e.stopPropagation()}
         >
-          <Text style={styles.createModalTitle}>Create Custom Collection</Text>
+          <Text style={[styles.createModalTitle, { color: palette.textPrimary }]}>Create Custom Playlist</Text>
 
           <TextInput
-            style={styles.createModalInput}
+            style={[
+              styles.createModalInput,
+              {
+                borderColor: palette.border,
+                color: palette.textPrimary,
+                backgroundColor: palette.inputBg,
+              }
+            ]}
             placeholder="e.g. Dynamic Programming, Graph Core"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={palette.textMuted}
             value={playlistName}
             onChangeText={setPlaylistName}
             autoFocus
@@ -106,20 +128,30 @@ const CreatePlaylistOverlay = ({ onClose, onPlaylistCreated }: CreatePlaylistOve
             <TouchableOpacity
               onPress={onClose}
               disabled={createPlaylistMutation.isPending}
-              style={styles.createModalCancelBtn}
+              style={[
+                styles.createModalCancelBtn,
+                {
+                  borderColor: palette.border,
+                  backgroundColor: palette.surface,
+                }
+              ]}
             >
-              <Text style={styles.createModalCancelBtnText}>Cancel</Text>
+              <Text style={[styles.createModalCancelBtnText, { color: palette.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               onPress={handleCreate}
               disabled={createPlaylistMutation.isPending}
-              style={[styles.createModalSaveBtn, createPlaylistMutation.isPending && { opacity: 0.7 }]}
+              style={[
+                styles.createModalSaveBtn,
+                { backgroundColor: palette.accent, shadowColor: palette.accentGlow },
+                createPlaylistMutation.isPending && { opacity: 0.7 }
+              ]}
             >
               {createPlaylistMutation.isPending ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color={buttonTextColor} size="small" />
               ) : (
-                <Text style={styles.createModalSaveBtnText}>Create</Text>
+                <Text style={[styles.createModalSaveBtnText, { color: buttonTextColor }]}>Create</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -136,25 +168,29 @@ interface PlaylistPickerCardProps {
 }
 
 const PlaylistPickerCard = React.memo(({ playlist, isSelected, onPress }: PlaylistPickerCardProps) => {
+  const palette = useThemePalette();
   const displayCount = usePlaylistStateStore(
     React.useCallback((s) => {
       const order = s.playlistCardOrderMap[playlist.id];
       return order === undefined ? (playlist.itemCount ?? 0) : order.length;
     }, [playlist.id, playlist.itemCount])
   );
-  const colors = getCustomTheme(playlist.name);
+  const colors = getCustomTheme(playlist.name, palette);
+  const checkColor = palette.isDark ? palette.textPrimary : palette.surface;
 
   return (
     <TouchableOpacity
       onPress={onPress}
       style={[
         styles.gridCard,
-        { borderColor: isSelected ? '#8B5CF6' : colors.border },
-        isSelected && { backgroundColor: 'rgba(139, 92, 246, 0.02)' }
+        {
+          backgroundColor: palette.surface,
+          borderColor: isSelected ? palette.accent : colors.border,
+        },
+        isSelected && { backgroundColor: addAlpha(palette.accent, 0.02) }
       ]}
       activeOpacity={0.7}
     >
-      {/* Beautiful Playlist Icon Square */}
       <View 
         style={[
           styles.cardIconWrapper, 
@@ -164,24 +200,23 @@ const PlaylistPickerCard = React.memo(({ playlist, isSelected, onPress }: Playli
         <ListMusic color={colors.text} size={13} strokeWidth={2.5} />
       </View>
 
-      {/* Top-right Check badge */}
       {isSelected && (
-        <View style={styles.cardCheckBadge}>
-          <Check color="#fff" size={9} strokeWidth={3.5} />
+        <View style={[styles.cardCheckBadge, { backgroundColor: palette.accent, shadowColor: palette.accentGlow }]}>
+          <Check color={checkColor} size={9} strokeWidth={3.5} />
         </View>
       )}
 
       <View style={{ marginTop: 8 }}>
         <Text 
           numberOfLines={1} 
-          style={styles.playlistName}
+          style={[styles.playlistName, { color: palette.textPrimary }]}
         >
           {playlist.name}
         </Text>
         <Text 
           style={[
             styles.playlistCount,
-            { color: isSelected ? '#8B5CF6' : '#94A3B8' }
+            { color: isSelected ? palette.accent : palette.textMuted }
           ]}
         >
           {displayCount} {displayCount === 1 ? 'card' : 'cards'}
@@ -194,24 +229,25 @@ const PlaylistPickerCard = React.memo(({ playlist, isSelected, onPress }: Playli
 export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps) => {
   const { user } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
-  const queryClient = useQueryClient();
+  const palette = useThemePalette();
+
+  const { step: walkthroughStep, setStep: setWalkthroughStep } = useWalkthroughStore();
+  const isWalkthroughActive = walkthroughStep !== 'none';
+  const showLock = isGuest && !isWalkthroughActive;
 
   const { data: playlists = [] } = usePlaylists();
   const togglePlaylistItem = useTogglePlaylistItem();
 
-  // Local state for checking memberships and quick inputs
   const [tempMembership, setTempMembership] = useState<Record<string, boolean>>({});
   const [isPlaylistSubmitting, setIsPlaylistSubmitting] = useState(false);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
 
   const cleanCardId = card ? card._id.split('-loop-')[0] : '';
-  // Fetch playlist memberships for the current card
   const { data: membership, isPending: membershipLoading } = useCardPlaylistMembership(
     cleanCardId,
     !!card
   );
 
-  // Reset and sync tempMembership whenever the active card or its memberships change
   useEffect(() => {
     if (membership && card) {
       setTempMembership(membership);
@@ -246,23 +282,18 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
         }
       }
 
-      // Close the modal instantly so the transition is fluid, and let mutations resolve in parallel background
       onClose();
 
       if (promises.length > 0) {
-        Promise.all(promises)
-          .then(() => {
-            // Background commits remain completely silent and invisible without heavy list refreshes
-          })
-          .catch((err) => {
-            console.error('[Playlist Async Sync Error]', err);
-            Toast.show({
-              type: 'error',
-              text1: 'Sync Failed',
-              text2: err?.message || 'Some changes failed to sync.',
-              position: 'top',
-            });
+        Promise.all(promises).catch((err) => {
+          console.error('[Playlist Async Sync Error]', err);
+          Toast.show({
+            type: 'error',
+            text1: 'Sync Failed',
+            text2: err?.message || 'Some changes failed to sync.',
+            position: 'top',
           });
+        });
       }
     } catch (err: any) {
       console.error('[PLAYLIST SUBMIT OVERALL ERROR]', err);
@@ -277,14 +308,11 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
     }
   };
 
-  const handleLogout = async () => {
-    onClose();
-    await useAuthStore.getState().logout();
-  };
-
   const customPlaylists = playlists.filter(
     (p) => p.id !== 'likes' && p.id !== 'watch-later' && p.id !== 'easy' && p.id !== 'medium' && p.id !== 'hard' && p.id !== 'skipped'
   );
+
+  const saveBtnTextColor = palette.isDark ? palette.textPrimary : palette.surface;
 
   return (
     <Modal
@@ -294,35 +322,48 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
       onRequestClose={onClose}
     >
       <View style={styles.modalBackdrop}>
-        {/* Backdrop Touch to Dismiss */}
         <TouchableOpacity 
-          style={StyleSheet.absoluteFillObject} 
+          style={{ ...StyleSheet.absoluteFillObject, backgroundColor: palette.overlayBg }}
           activeOpacity={1} 
           onPress={onClose} 
         />
 
-        <View style={[styles.modalContent, isGuest && { height: 210 }]}>
-          {/* Header row */}
+        <View 
+          style={[
+            styles.modalContent,
+            {
+              backgroundColor: palette.dialogBg,
+              borderColor: palette.border,
+              shadowColor: palette.shadow,
+              shadowOpacity: palette.isDark ? 0.20 : 0.15,
+              shadowRadius: palette.isDark ? 30 : 24,
+            },
+            showLock && { height: 210 }
+          ]}
+        >
           <View style={styles.headerRow}>
             <View>
-              <Text style={styles.headerTitle}>Save to Playlist</Text>
-              <Text style={styles.headerSubtitle}>Organize your cards</Text>
+              <Text style={[styles.headerTitle, { color: palette.textPrimary }]}>Save to Playlist</Text>
+              <Text style={[styles.headerSubtitle, { color: palette.textSecondary }]}>Organize your cards</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <X color="#64748B" size={16} strokeWidth={2.5} />
+            <TouchableOpacity 
+              onPress={onClose} 
+              style={[styles.closeBtn, { backgroundColor: palette.inputBg }]}
+            >
+              <X color={palette.textSecondary} size={16} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
 
           {membershipLoading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#8B5CF6" size="small" />
-              <Text style={styles.loadingText}>Loading playlists...</Text>
+              <ActivityIndicator color={palette.accent} size="small" />
+              <Text style={[styles.loadingText, { color: palette.textMuted }]}>Loading playlists...</Text>
             </View>
-          ) : isGuest ? (
+          ) : showLock ? (
             <View style={styles.guestContainer}>
-              <Lock color="#64748B" size={32} strokeWidth={1.5} style={{ opacity: 0.8 }} />
-              <Text style={styles.guestTitle}>Custom Playlists Locked</Text>
-              <Text style={styles.guestSubtitle}>
+              <Lock color={palette.textSecondary} size={32} strokeWidth={1.5} style={{ opacity: 0.8 }} />
+              <Text style={[styles.guestTitle, { color: palette.textPrimary }]}>Custom Playlists Locked</Text>
+              <Text style={[styles.guestSubtitle, { color: palette.textSecondary }]}>
                 Sign in with an account to create custom playlists and sync your revision progress across devices.
               </Text>
             </View>
@@ -336,9 +377,9 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
                 <View style={styles.gridContainer}>
                   {customPlaylists.length === 0 ? (
                     <View style={styles.emptyContainer}>
-                      <Text style={styles.emptyTitle}>No Playlists Yet</Text>
-                      <Text style={styles.emptySubtitle}>
-                        Tap "+ New Playlist" below to create your first collection and organize your DSA revision decks.
+                      <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>No Playlists Yet</Text>
+                      <Text style={[styles.emptySubtitle, { color: palette.textMuted }]}>
+                        Tap "+ New Playlist" below to create your first playlist and organize your revision decks.
                       </Text>
                     </View>
                   ) : (
@@ -350,6 +391,10 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
                           playlist={playlist}
                           isSelected={isSelected}
                           onPress={() => {
+                            if (isWalkthroughActive) {
+                              // Force select the only stack during walkthrough
+                              if (playlist.id !== 'guest-custom-playlist') return;
+                            }
                             lightHaptic();
                             setTempMembership(prev => ({
                               ...prev,
@@ -365,31 +410,44 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
             </View>
           )}
 
-          {/* Dialog Action Buttons */}
-          {!isGuest && (
+          {(!isGuest || isWalkthroughActive) && (
             <View style={styles.actionRow}>
               <TouchableOpacity
                 onPress={() => {
+                  if (isWalkthroughActive) return;
                   lightHaptic();
                   setIsCreatingNew(true);
                 }}
-                style={styles.ctaNewBtn}
+                disabled={isWalkthroughActive}
+                style={[
+                  styles.ctaNewBtn,
+                  {
+                    borderColor: palette.accent,
+                    backgroundColor: palette.surface,
+                  },
+                  isWalkthroughActive && { opacity: 0.4 }
+                ]}
               >
-                <Text style={styles.ctaNewBtnText}>+ New Playlist</Text>
+                <Text style={[styles.ctaNewBtnText, { color: palette.accent }]}>+ New Playlist</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={handleSubmitPlaylists}
+                onPress={isWalkthroughActive ? () => {
+                  lightHaptic();
+                  onClose();
+                  setWalkthroughStep('point-myspace');
+                } : handleSubmitPlaylists}
                 disabled={isPlaylistSubmitting}
                 style={[
                   styles.saveBtn,
+                  { backgroundColor: palette.accent },
                   isPlaylistSubmitting && { opacity: 0.5 }
                 ]}
               >
                 {isPlaylistSubmitting ? (
-                  <ActivityIndicator color="#fff" size="small" />
+                  <ActivityIndicator color={saveBtnTextColor} size="small" />
                 ) : (
-                  <Text style={styles.saveBtnText}>Save</Text>
+                  <Text style={[styles.saveBtnText, { color: saveBtnTextColor }]}>Save</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -397,11 +455,10 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
         </View>
       </View>
 
-      {/* Structured Playlist Creation Overlay (same as myspace tab style, with native StyleSheet stability) */}
       {isCreatingNew && (
         <CreatePlaylistOverlay
           onClose={() => setIsCreatingNew(false)}
-          onPlaylistCreated={(id, name) => {
+          onPlaylistCreated={(id) => {
             setTempMembership(prev => ({
               ...prev,
               [id]: true,
@@ -417,23 +474,16 @@ export const PlaylistPickerModal = ({ card, onClose }: PlaylistPickerModalProps)
 const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 200,
   },
   modalContent: {
     width: width - 24,
-    height: 350, // Fixed premium height ensuring perfect fit, scrollability, and pinned buttons layout
+    height: 350,
     borderRadius: 24,
-    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#F1F5F9',
-    padding: 20, // Tighter padding for smaller look
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.15,
-    shadowRadius: 30,
+    padding: 20,
     elevation: 12,
     flexDirection: 'column',
     justifyContent: 'space-between',
@@ -442,21 +492,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12, // Tighter spacing
+    marginBottom: 12,
   },
   headerTitle: {
-    color: '#0F172A',
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: -0.3,
   },
   headerSubtitle: {
-    color: '#94A3B8',
     fontSize: 12,
     marginTop: 2,
   },
   closeBtn: {
-    backgroundColor: '#F1F5F9',
     padding: 8,
     borderRadius: 999,
   },
@@ -466,7 +513,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#94A3B8',
     fontSize: 12,
     marginTop: 8,
   },
@@ -476,7 +522,6 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   guestTitle: {
-    color: '#0F172A',
     fontWeight: '800',
     fontSize: 15,
     textAlign: 'center',
@@ -484,23 +529,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   guestSubtitle: {
-    color: '#64748B',
     fontSize: 12,
     textAlign: 'center',
     paddingHorizontal: 16,
     marginBottom: 0,
     lineHeight: 18,
-  },
-  guestBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 12,
-  },
-  guestBtnText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
   },
   emptyContainer: {
     paddingVertical: 24,
@@ -510,14 +543,12 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   emptyTitle: {
-    color: '#0F172A',
     fontWeight: '800',
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 6,
   },
   emptySubtitle: {
-    color: '#94A3B8',
     fontSize: 11,
     textAlign: 'center',
     lineHeight: 16,
@@ -528,12 +559,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   gridCard: {
-    width: (width - 24 - 40 - 8) / 2, // Perfect 2-column grid fit with wider container padding
-    height: 94, // Premium vertical card height
+    width: (width - 24 - 40 - 8) / 2,
+    height: 94,
     borderRadius: 18,
     borderWidth: 1.5,
     padding: 12,
-    backgroundColor: '#ffffff',
     position: 'relative',
     flexDirection: 'column',
     justifyContent: 'space-between',
@@ -554,10 +584,8 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#8B5CF6',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
@@ -566,7 +594,6 @@ const styles = StyleSheet.create({
   playlistName: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#0F172A',
   },
   playlistCount: {
     fontSize: 9,
@@ -576,20 +603,17 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 12, // Tighter spacing
+    marginTop: 12,
   },
   ctaNewBtn: {
     flex: 1,
     height: 44,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#8B5CF6',
-    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
   },
   ctaNewBtnText: {
-    color: '#8B5CF6',
     fontWeight: '800',
     fontSize: 13,
   },
@@ -597,30 +621,21 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#8B5CF6',
     justifyContent: 'center',
     alignItems: 'center',
   },
   saveBtnText: {
-    color: '#ffffff',
     fontWeight: '800',
     fontSize: 13,
   },
   createModalContent: {
     width: width - 48,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#F1F5F9',
     padding: 24,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
     elevation: 10,
   },
   createModalTitle: {
-    color: '#0F172A',
     fontSize: 16,
     fontWeight: '800',
     textAlign: 'center',
@@ -629,14 +644,11 @@ const styles = StyleSheet.create({
   },
   createModalInput: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    color: '#0F172A',
     padding: 14,
     borderRadius: 16,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
-    backgroundColor: '#F8FAFC',
     marginBottom: 20,
   },
   createModalBtnRow: {
@@ -647,17 +659,14 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 46,
     borderRadius: 16,
-    backgroundColor: '#8B5CF6',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 3,
   },
   createModalSaveBtnText: {
-    color: '#ffffff',
     fontWeight: '800',
     fontSize: 12,
   },
@@ -666,13 +675,10 @@ const styles = StyleSheet.create({
     height: 46,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
   },
   createModalCancelBtnText: {
-    color: '#64748B',
     fontWeight: '800',
     fontSize: 12,
   },

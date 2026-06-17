@@ -33,7 +33,7 @@ interface Card {
 
 interface WriteOperation {
   id: string;
-  type: 'cards' | 'folders' | 'playlists' | 'deleted' | 'custom';
+  type: 'cards' | 'folders' | 'playlists' | 'deleted' | 'custom' | 'bulk_resync';
   userId: string;
   data: any;
   timestamp: number;

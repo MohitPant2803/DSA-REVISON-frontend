@@ -88,7 +88,7 @@ export async function scheduleDailyReminder(hour: number, minute: number): Promi
 /**
  * Schedules a late evening streak risk warning.
  */
-export async function scheduleStreakWarning(hour = 21, minute = 0): Promise<string | null> {
+export async function scheduleStreakWarning(streakCount: number, hour = 21, minute = 0): Promise<string | null> {
   if (Platform.OS === 'web') return null;
 
   try {
@@ -97,10 +97,15 @@ export async function scheduleStreakWarning(hour = 21, minute = 0): Promise<stri
     const hasPermission = await requestPermissionsAsync();
     if (!hasPermission) return null;
 
+    const title = streakCount > 0 ? `${streakCount} days streak at danger` : 'Streak at Risk';
+    const body = streakCount > 0 
+      ? `Review a card now to save your ${streakCount}-day streak before the day ends!`
+      : 'You haven\'t reviewed any topics today. Take a quick moment now to lock in your progress.';
+
     const identifier = await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Keep your momentum',
-        body: 'You haven\'t reviewed any topics today. Take a quick moment now to lock in your progress.',
+        title,
+        body,
         sound: true,
         priority: Notifications.AndroidNotificationPriority.HIGH,
       },

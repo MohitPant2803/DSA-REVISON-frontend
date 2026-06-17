@@ -17,5 +17,8 @@ export const getMe = async (deviceId?: string, clockEpoch?: string): Promise<Use
     role: raw.role ?? 'user',
     totalSwipes: typeof raw.totalSwipes === 'number' ? raw.totalSwipes : 0,
     totalScrolls: typeof raw.totalScrolls === 'number' ? raw.totalScrolls : 0,
+    streakCount: typeof raw.streakCount === 'number' ? raw.streakCount : 0,
+    maxStreakCount: typeof raw.maxStreakCount === 'number' ? raw.maxStreakCount : 0,
+    lastCompletedDate: raw.lastCompletedDate ? String(raw.lastCompletedDate) : undefined,
   };
 };

@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { isNetworkConnected } from '@/utils/network';
 import api from '@/services/api';
-import offlineSeed from '../constants/offlineSeed.json';
+import offlineSeed from '../components/constants/offlineSeed.json';
 
 export interface User {
   id: string;
@@ -14,6 +14,9 @@ export interface User {
   role?: 'user' | 'admin' | 'superadmin';
   totalSwipes?: number;
   totalScrolls?: number;
+  streakCount?: number;
+  maxStreakCount?: number;
+  lastCompletedDate?: string;
 }
 
 interface AuthState {
@@ -46,6 +49,9 @@ function sanitizeUser(user: Partial<User> | null | undefined): User | null {
     role: user.role || 'user',
     totalSwipes: typeof user.totalSwipes === 'number' ? user.totalSwipes : 0,
     totalScrolls: typeof user.totalScrolls === 'number' ? user.totalScrolls : 0,
+    streakCount: typeof user.streakCount === 'number' ? user.streakCount : 0,
+    maxStreakCount: typeof user.maxStreakCount === 'number' ? user.maxStreakCount : 0,
+    lastCompletedDate: user.lastCompletedDate ? String(user.lastCompletedDate) : undefined,
   };
 }
 
@@ -122,7 +128,14 @@ export async function getOrCreateInstallationUUID(): Promise<string> {
   }
 }
 
-async function alignStoreUserSession(targetUserId: string, serverSwipes: number = 0, serverScrolls: number = 0) {
+async function alignStoreUserSession(
+  targetUserId: string,
+  serverSwipes: number = 0,
+  serverScrolls: number = 0,
+  serverStreak: number = 0,
+  serverMaxStreak: number = 0,
+  serverLastCompletedDate?: string
+) {
   const { usePlaylistStateStore, bootstrapHydrateFromSQLite } = require('./usePlaylistStateStore');
   const currentUserId = usePlaylistStateStore.getState().userId;
   
@@ -144,14 +157,15 @@ async function alignStoreUserSession(targetUserId: string, serverSwipes: number 
       console.warn('[AuthStore] Failed eager encryption key preheat:', err);
     }
     
-    // Trigger bootstrap hydration asynchronously so we don't block
-    bootstrapHydrateFromSQLite(targetUserId, serverSwipes, serverScrolls).catch((err: any) => {
-      console.error('[AuthStore] Failed to bootstrap hydrate aligned session:', err);
-    });
+    // Trigger bootstrap hydration synchronously and await it
+    await bootstrapHydrateFromSQLite(targetUserId, serverSwipes, serverScrolls, serverStreak, serverMaxStreak, serverLastCompletedDate);
     return;
   }
 
   console.log(`[AuthStore] Aligning local stores for user session: ${targetUserId} (Server Swipes: ${serverSwipes}, Scrolls: ${serverScrolls})`);
+  if (typeof (global as any).dumpInstrumentState === 'function') {
+    (global as any).dumpInstrumentState('3. alignStoreUserSession starts');
+  }
   
   // Wipe other store states in-memory synchronously to prevent leakage before new session
   usePlaylistStateStore.getState().hardResetStore();
@@ -181,7 +195,7 @@ async function alignStoreUserSession(targetUserId: string, serverSwipes: number 
   }
 
   // Trigger bootstrap hydration
-  await bootstrapHydrateFromSQLite(targetUserId, serverSwipes, serverScrolls);
+  await bootstrapHydrateFromSQLite(targetUserId, serverSwipes, serverScrolls, serverStreak, serverMaxStreak, serverLastCompletedDate);
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -204,21 +218,46 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       throw new Error('Invalid login payload');
     }
     
-    // Proactive Synchronous Account-Switching and Metrics Hydration Guard
-    await alignStoreUserSession(safeUser.id, safeUser.totalSwipes || 0, safeUser.totalScrolls || 0);
-
-    if (safeUser.id !== 'guest-user') {
-      if (token) {
-        await SecureStorage.setToken(token);
-      } else {
-        await SecureStorage.removeToken();
-      }
-      await SecureStorage.setUser(safeUser);
-    } else {
+    if (safeUser.id === 'guest-user') {
+      // Guest mode: skip all SQLite/Zustand hydration — pure in-memory mock
+      const { usePlaylistStateStore, initializeGuestDemoContent } = require('./usePlaylistStateStore');
+      initializeGuestDemoContent();
+      
+      usePlaylistStateStore.setState({
+        userId: 'guest-user',
+        hasSyncedThisSession: true,
+      });
+      
       await SecureStorage.removeToken();
       await SecureStorage.removeUser();
+      set({ token, user: safeUser, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
+      return;
     }
-    set({ token, user: safeUser, isAuthenticated: safeUser.id !== 'guest-user', isLoading: false, isAuthReady: true, isSessionExpired: false });
+    
+    // Proactive Synchronous Account-Switching and Metrics Hydration Guard
+    await alignStoreUserSession(
+      safeUser.id, 
+      safeUser.totalSwipes || 0, 
+      safeUser.totalScrolls || 0,
+      safeUser.streakCount || 0,
+      safeUser.maxStreakCount || 0,
+      safeUser.lastCompletedDate
+    );
+
+    const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+    const state = usePlaylistStateStore.getState();
+    const hasNoCards = Object.keys(state.cardsById || {}).length === 0;
+    if (hasNoCards) {
+      usePlaylistStateStore.setState({ isFirstTimeSyncInProgress: true });
+    }
+
+    if (token) {
+      await SecureStorage.setToken(token);
+    } else {
+      await SecureStorage.removeToken();
+    }
+    await SecureStorage.setUser(safeUser);
+    set({ token, user: safeUser, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
   },
 
   logout: async () => {
@@ -379,95 +418,101 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   restoreSession: async () => {
     try {
-      // Retrieve cached network state via isNetworkConnected utility
-      const isConnected = await isNetworkConnected();
-      const isOffline = !isConnected;
-
       // Parallelize storage retrievals to resolve startup waterfalls
       const [user, token] = await Promise.all([
         SecureStorage.getUser(),
         SecureStorage.getToken()
       ]);
 
-      if (isOffline) {
-        if (user && token && user.id !== 'guest-user') {
-          await alignStoreUserSession(user.id, user.totalSwipes || 0, user.totalScrolls || 0);
-          console.log('[Session Recovery] Network offline. Instantly recovered cached session locally! (<50ms)');
-          set({ token, user, isAuthenticated: user.id !== 'guest-user', isLoading: false, isAuthReady: true, isSessionExpired: false });
-          return;
+      if (user && token && user.id !== 'guest-user') {
+        // Optimistic local session recovery: enter immediately
+        await alignStoreUserSession(
+          user.id, 
+          user.totalSwipes || 0, 
+          user.totalScrolls || 0,
+          user.streakCount || 0,
+          user.maxStreakCount || 0,
+          user.lastCompletedDate
+        );
+
+        const { usePlaylistStateStore } = require('./usePlaylistStateStore');
+        const playlistState = usePlaylistStateStore.getState();
+        const hasNoCards = Object.keys(playlistState.cardsById || {}).length === 0;
+        if (hasNoCards) {
+          usePlaylistStateStore.setState({ isFirstTimeSyncInProgress: true });
         }
-        // Offline but no credentials or is guest-user, route as guest or logged out
-        if (user?.id === 'guest-user') {
-          await SecureStorage.removeToken();
-          await SecureStorage.removeUser();
-        }
-        set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
+
+        console.log('[Session Recovery] Instantly recovered cached session locally (Optimistic Entry)!');
+        set({ token, user, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
+
+        // Verify the token with the server in the background
+        (async () => {
+          try {
+            const isConnected = await isNetworkConnected();
+            if (!isConnected) {
+              // If completely offline, keep the optimistic local session silently
+              return;
+            }
+
+            const { getMe } = require('@/services/authService');
+            // Race the server verification against a strict 3.5-second timeout for background verification
+            const getMeWithTimeout = Promise.race([
+              getMe(),
+              new Promise<any>((_, reject) => 
+                setTimeout(() => reject(new Error('Connection timeout')), 3500)
+              )
+            ]);
+            const freshUser = await getMeWithTimeout;
+
+            if (freshUser) {
+              await alignStoreUserSession(
+                freshUser.id, 
+                freshUser.totalSwipes || 0, 
+                freshUser.totalScrolls || 0,
+                freshUser.streakCount || 0,
+                freshUser.maxStreakCount || 0,
+                freshUser.lastCompletedDate
+              );
+              await SecureStorage.setUser(freshUser);
+              set({ user: freshUser });
+            } else {
+              // Token is invalid/revoked: clear session
+              console.warn('[Session Recovery Background Check] Session invalid (no freshUser), logging out...');
+              await SecureStorage.removeToken();
+              await SecureStorage.removeUser();
+              set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: true });
+            }
+          } catch (err: any) {
+            console.warn('[Session Recovery Background Check] Error during verification:', err);
+            const isNetworkError = 
+              err.message?.includes('Network request failed') || 
+              err.message?.includes('Network Error') ||
+              err.code === 'ERR_NETWORK' ||
+              err.message === 'Connection timeout';
+
+            if (!isNetworkError) {
+              // Genuine auth failure (e.g. 401 Unauthorized) -> clear session
+              console.warn('[Session Recovery Background Check] Genuine auth failure, logging out...');
+              await SecureStorage.removeToken();
+              await SecureStorage.removeUser();
+              set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: true });
+            }
+          }
+        })();
+
         return;
       }
 
+      // No credentials or is guest-user
       if (user?.id === 'guest-user') {
         await SecureStorage.removeToken();
         await SecureStorage.removeUser();
-        set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
-        return;
       }
-
-      if (!token) {
-        set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
-        return;
-      }
-
-      set({ token, isLoading: true });
-
-      const { getMe } = require('@/services/authService');
-      
-      let freshUser = null;
-      try {
-        // Race the server verification against a strict 3.5-second timeout for rapid startup recovery
-        const getMeWithTimeout = Promise.race([
-          getMe(),
-          new Promise<any>((_, reject) => 
-            setTimeout(() => reject(new Error('Connection timeout')), 3500)
-          )
-        ]);
-        freshUser = await getMeWithTimeout;
-      } catch (err: any) {
-        console.warn('[Session Recovery] Network/Timeout error during restoration:', err);
-        const isNetworkError = 
-          err.message?.includes('Network request failed') || 
-          err.message?.includes('Network Error') ||
-          err.code === 'ERR_NETWORK' ||
-          err.message === 'Connection timeout';
-
-        if (isNetworkError) {
-          // INSTANT local session recovery when completely offline/airplane mode (<50ms local path)
-          const cachedUser = await SecureStorage.getUser();
-          const cachedToken = await SecureStorage.getToken();
-          
-          if (cachedUser && cachedToken && cachedUser.id !== 'guest-user') {
-            await alignStoreUserSession(cachedUser.id, cachedUser.totalSwipes || 0, cachedUser.totalScrolls || 0);
-            console.log('[Session Recovery] Successfully recovered session locally in Offline Mode!');
-            set({ token: cachedToken, user: cachedUser, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
-            return;
-          }
-        }
-        throw err; // Re-throw other genuine auth errors
-      }
-
-      if (!freshUser) {
-        await SecureStorage.removeToken();
-        await SecureStorage.removeUser();
-        set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
-        return;
-      }
-
-      await alignStoreUserSession(freshUser.id, freshUser.totalSwipes || 0, freshUser.totalScrolls || 0);
-      await SecureStorage.setUser(freshUser);
-      set({ token, user: freshUser, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
+      set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
     } catch (error: any) {
       console.warn('[Session Recovery] Failed to restore session:', error);
       
-      // Genuine server/session deletion error: clear and log out
+      // Clear and log out on critical read errors
       await SecureStorage.removeToken();
       await SecureStorage.removeUser();
       set({ token: null, user: null, isAuthenticated: false, isLoading: false, isAuthReady: true, isSessionExpired: false });
@@ -504,9 +549,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           role: rawUser.role,
           totalSwipes: rawUser.totalSwipes || 0,
           totalScrolls: rawUser.totalScrolls || 0,
+          streakCount: rawUser.streakCount || 0,
+          maxStreakCount: rawUser.maxStreakCount || 0,
+          lastCompletedDate: rawUser.lastCompletedDate,
         };
 
-        await alignStoreUserSession(user.id, user.totalSwipes || 0, user.totalScrolls || 0);
+        await alignStoreUserSession(
+          user.id, 
+          user.totalSwipes || 0, 
+          user.totalScrolls || 0,
+          user.streakCount || 0,
+          user.maxStreakCount || 0,
+          user.lastCompletedDate
+        );
         await SecureStorage.setToken(token);
         await SecureStorage.setUser(user);
         set({ token, user, isAuthenticated: true, isSessionExpired: false, isAuthReady: true });

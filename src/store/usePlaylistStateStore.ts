@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import offlineSeed from '../constants/offlineSeed.json';
+import offlineSeed from '../components/constants/offlineSeed.json';
 import { InteractionManager } from 'react-native';
 import { storageEngine } from '../utils/StorageEngine';
 import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
@@ -25,6 +25,30 @@ import { sqliteWriteManager } from '../utils/sqliteWriteManager';
 import { saveDeletedEntityToSQLite } from '../utils/sqliteSyncBridge';
 
 
+(global as any).dumpInstrumentState = (checkpointName: string) => {
+  try {
+    const usePlaylistStateStoreCopy = require('./usePlaylistStateStore').usePlaylistStateStore;
+    const useAuthStoreCopy = require('./useAuthStore').useAuthStore;
+    const state = usePlaylistStateStoreCopy.getState();
+    const auth = useAuthStoreCopy.getState();
+    const cardsCount = Object.keys(state.cardsById || {}).length;
+    const foldersCount = Object.keys(state.foldersById || {}).length;
+    const playlistsCount = Object.keys(state.playlistsById || {}).length;
+    
+    console.log(`[INSTRUMENT CHECKPOINT] ${checkpointName} | ` + JSON.stringify({
+      isFirstTimeSyncInProgress: state.isFirstTimeSyncInProgress,
+      bootstrapStatus: state.bootstrapStatus,
+      cardsCount,
+      foldersCount,
+      playlistsCount,
+      isAuthenticated: auth.isAuthenticated,
+      userId: state.userId
+    }));
+  } catch (e) {
+    console.warn(`[INSTRUMENT CHECKPOINT ERROR] Failed dumping state for: ${checkpointName}`, e);
+  }
+};
+
 export interface OfflineAction {
   id: string;
   action: 
@@ -42,7 +66,9 @@ export interface OfflineAction {
     | 'CREATE_CARD'
     | 'DELETE_CARD'
     | 'UPDATE_CARD'
-    | 'UPDATE_REEL_PREFERENCES';
+    | 'UPDATE_REEL_PREFERENCES'
+    | 'UPDATE_RESUME_STATE'
+    | 'REGISTER_LOOP';
   payload: any;
   timestamp: number;
   retryCount?: number;
@@ -74,43 +100,47 @@ export function compressQueue(queue: OfflineAction[]): OfflineAction[] {
   const folderCreates = new Map<string, OfflineAction>(); // tempFolderId -> CREATE_FOLDER action
   const folderDeletes = new Set<string>(); // folderId deleted
   const playlistCreates = new Map<string, OfflineAction>(); // tempPlaylistId -> CREATE_PLAYLIST action
-  const playlistDeletes = new Set<string>(); // playlistId deleted
-  
-  for (const action of queue) {
-    const act = action.action;
-    const payload = action.payload;
+    const playlistDeletes = new Set<string>(); // playlistId deleted
+    const activeResumeStates = new Map<string, OfflineAction>();
     
-    if (act === 'CLASSIFY_CARD') {
-      activeClassifications.set(payload.cardId, action);
-    } else if (act === 'TOGGLE_FAVORITE') {
-      activeFavorites.set(payload.cardId, action);
-    } else if (act === 'TOGGLE_PLAYLIST_ITEM') {
-      const key = `${payload.playlistId}-${payload.cardId}`;
-      activePlaylistItems.set(key, action);
-    } else if (act === 'REORDER_PLAYLIST') {
-      activePlaylistReorders.set(payload.playlistId, action);
-    } else if (act === 'CREATE_FOLDER') {
-      folderCreates.set(payload.tempId, action);
-    } else if (act === 'DELETE_FOLDER') {
-      const fId = payload.folderId;
-      if (folderCreates.has(fId)) {
-        folderCreates.delete(fId);
+    for (const action of queue) {
+      const act = action.action;
+      const payload = action.payload;
+      
+      if (act === 'CLASSIFY_CARD') {
+        activeClassifications.set(payload.cardId, action);
+      } else if (act === 'TOGGLE_FAVORITE') {
+        activeFavorites.set(payload.cardId, action);
+      } else if (act === 'TOGGLE_PLAYLIST_ITEM') {
+        const key = `${payload.playlistId}-${payload.cardId}`;
+        activePlaylistItems.set(key, action);
+      } else if (act === 'REORDER_PLAYLIST') {
+        activePlaylistReorders.set(payload.playlistId, action);
+      } else if (act === 'CREATE_FOLDER') {
+        folderCreates.set(payload.tempId, action);
+      } else if (act === 'DELETE_FOLDER') {
+        const fId = payload.folderId;
+        if (folderCreates.has(fId)) {
+          folderCreates.delete(fId);
+        } else {
+          folderDeletes.add(fId);
+        }
+      } else if (act === 'CREATE_PLAYLIST') {
+        playlistCreates.set(payload.tempId, action);
+      } else if (act === 'DELETE_PLAYLIST') {
+        const pId = payload.playlistId;
+        if (playlistCreates.has(pId)) {
+          playlistCreates.delete(pId);
+        } else {
+          playlistDeletes.add(pId);
+        }
+      } else if (act === 'UPDATE_RESUME_STATE') {
+        const key = `${payload.type}-${payload.id}`;
+        activeResumeStates.set(key, action);
       } else {
-        folderDeletes.add(fId);
+        output.push(action);
       }
-    } else if (act === 'CREATE_PLAYLIST') {
-      playlistCreates.set(payload.tempId, action);
-    } else if (act === 'DELETE_PLAYLIST') {
-      const pId = payload.playlistId;
-      if (playlistCreates.has(pId)) {
-        playlistCreates.delete(pId);
-      } else {
-        playlistDeletes.add(pId);
-      }
-    } else {
-      output.push(action);
     }
-  }
   
   const finalQueue: OfflineAction[] = [];
   folderCreates.forEach(a => finalQueue.push(a));
@@ -131,6 +161,11 @@ export function compressQueue(queue: OfflineAction[]): OfflineAction[] {
     } else if (act === 'TOGGLE_PLAYLIST_ITEM') {
       const key = `${payload.playlistId}-${payload.cardId}`;
       if (activePlaylistItems.get(key) === action) {
+        finalQueue.push(action);
+      }
+    } else if (act === 'UPDATE_RESUME_STATE') {
+      const key = `${payload.type}-${payload.id}`;
+      if (activeResumeStates.get(key) === action) {
         finalQueue.push(action);
       }
     } else if (act === 'REORDER_PLAYLIST') {
@@ -184,6 +219,8 @@ interface PlaylistState {
   setSyncProgress: (percentage: number, status: string) => void;
   hasSyncedThisSession: boolean;
   setHasSyncedThisSession: (val: boolean) => void;
+  isFirstTimeSyncInProgress: boolean;
+  setIsFirstTimeSyncInProgress: (val: boolean) => void;
 
   // Local-First Sync Coordination flags
   isLiveSyncPaused: boolean;
@@ -204,6 +241,9 @@ interface PlaylistState {
   lastSyncedRevision: number;
   setLastSyncedRevision: (rev: number) => void;
   setRevisionSyncFlags: (flags: { enableRevisionSync: boolean; enableStrictContiguity: boolean }) => void;
+
+  pinnedFolderIds: Set<string>;
+  toggleFolderPin: (folderId: string) => Promise<void>;
 
   // Authoritative Cache Entities
   foldersById: Record<string, IFolder & { dirty?: boolean; localRevision?: number }>;
@@ -245,6 +285,7 @@ interface PlaylistState {
   hydratePlaylistCards: (playlistId: string, cards: IPopulatedRevisionCard[], targetIndex?: number) => Promise<void>;
   hydrateCardContentOnDemand: (cardId: string) => Promise<void>;
   hydrateFolderCardsOnDemand: (folderId: string) => Promise<void>;
+  hydratePlaylistCardsOnDemand: (playlistId: string) => Promise<void>;
   checkAndLoadMorePlaylistCards: (playlistId: string, activeIndex: number) => void;
   hydrateSmartCounts: (counts: Record<string, number>) => void;
   setPlaylistCardOrder: (playlistId: string, cardIds: string[]) => Promise<void>;
@@ -255,6 +296,7 @@ interface PlaylistState {
   
   // Curation Actions
   toggleCustomPlaylistItemInStore: (playlistId: string, cardId: string, value: boolean) => Promise<void>;
+  toggleFavoriteInStore: (cardId: string, value: boolean) => Promise<void>;
   
   // Atomic transactional transfer of a card
   transferCard: (
@@ -325,6 +367,7 @@ const DEFAULT_STATE = {
   syncProgressStatus: 'Idle',
   isLiveSyncPaused: false,
   hasSyncedThisSession: false,
+  isFirstTimeSyncInProgress: false,
   syncGenerationId: 0,
   currentRevisionCounter: 0,
   deadLetterQueue: [],
@@ -337,6 +380,7 @@ const DEFAULT_STATE = {
   lastSyncedRevision: 0,
   deviceId: '',
   logicalClockSequence: 0,
+  pinnedFolderIds: new Set<string>(),
   foldersById: {},
   playlistsById: {},
   cardsById: {},
@@ -348,7 +392,7 @@ const DEFAULT_STATE = {
   fullPlaylistCards: {},
   hydratedPlaylistCardCounts: {},
   selectedRootFolderIds: [],
-  notificationsEnabled: false,
+  notificationsEnabled: true,
   notificationHour: 19,
   notificationMinute: 0,
   notificationFrequency: 'daily' as 'daily' | 'three_days' | 'custom',
@@ -360,16 +404,7 @@ const DEFAULT_STATE = {
   lastCatalogIntegrityCheck: null,
   syncFailureCount: 0,
   pruneStaleCache: () => {},
-  seniorQuotes: [
-    {
-      _id: "6a13357421b348638d89b061",
-      text: "It's a marathon to be endured, not a sprint to be ran.",
-      author: "Mohit Pant",
-      collegeName: "IIT KGP",
-      branch: "Mining",
-      yearOfGraduation: 2027
-    }
-  ],
+  seniorQuotes: [],
   currentQuoteIndex: 0,
   latestVersion: '1.0.5',
   updateUrl: 'https://ree-wise-download-website.vercel.app/',
@@ -418,6 +453,8 @@ export const syncWithSqliteSnapshot = async (userId: string) => {
           }
         });
       }
+
+
 
       const nextPlaylistCardOrderMap = { ...currentState.playlistCardOrderMap };
       const nextHydratedPlaylists = { ...currentState.hydratedPlaylists };
@@ -479,7 +516,8 @@ export const syncWithSqliteSnapshot = async (userId: string) => {
            const { scheduleReminders, scheduleStreakWarning, cancelStreakWarning } = require('../services/notificationService');
            if (ns.enabled) {
              scheduleReminders(true, ns.hour, ns.minute, ns.frequency, ns.customDays).catch(() => {});
-             scheduleStreakWarning(21, 0).catch(() => {});
+             const currentStreak = require('./useAuthStore').useAuthStore.getState().user?.streakCount || 0;
+             scheduleStreakWarning(currentStreak, 21, 0).catch(() => {});
            } else {
              scheduleReminders(false, ns.hour, ns.minute, ns.frequency, ns.customDays).catch(() => {});
              cancelStreakWarning().catch(() => {});
@@ -509,6 +547,7 @@ export const syncWithSqliteSnapshot = async (userId: string) => {
         offlineActionQueue: offlineActionQueue.length > 0 ? offlineActionQueue : currentState.offlineActionQueue,
         seniorQuotes: sqliteData.seniorQuotes || [],
         currentQuoteIndex: sqliteData.currentQuoteIndex || 0,
+        pinnedFolderIds: new Set((sqliteData as any).pinnedFolderIds || []),
       });
     }
   } catch (err: any) {
@@ -516,10 +555,61 @@ export const syncWithSqliteSnapshot = async (userId: string) => {
   }
 };
 
+// Batched card content hydration to prevent cascading re-renders
+let pendingHydrations: Record<string, any> = {};
+let hydrationFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+const flushPendingHydrations = () => {
+  const batch = pendingHydrations;
+  pendingHydrations = {};
+  hydrationFlushTimer = null;
+  if (Object.keys(batch).length === 0) return;
+  
+  usePlaylistStateStore.setState((state) => {
+    const nextCardsById = { ...state.cardsById };
+    let modified = false;
+    Object.entries(batch).forEach(([cardId, content]) => {
+      const existing = nextCardsById[cardId];
+      if (existing) {
+        nextCardsById[cardId] = { ...existing, ...content, isContentFullyHydrated: true };
+        modified = true;
+      }
+    });
+    if (!modified) return {};
+    return { cardsById: nextCardsById };
+  });
+};
+
 export const usePlaylistStateStore = create<PlaylistState>()(
   persist(
-    (set, get) => ({
-      ...DEFAULT_STATE,
+    (originalSet, get) => {
+      const set = (
+        nextState: PlaylistState | Partial<PlaylistState> | ((state: PlaylistState) => PlaylistState | Partial<PlaylistState>),
+        replace?: boolean
+      ) => {
+        const prevVal = get().isFirstTimeSyncInProgress;
+        let newVal = prevVal;
+        if (typeof nextState === 'function') {
+          const nextPartial = (nextState as Function)(get());
+          if (nextPartial && nextPartial.isFirstTimeSyncInProgress !== undefined) {
+            newVal = nextPartial.isFirstTimeSyncInProgress;
+          }
+        } else if (nextState && (nextState as any).isFirstTimeSyncInProgress !== undefined) {
+          newVal = (nextState as any).isFirstTimeSyncInProgress;
+        }
+
+        if (prevVal !== newVal) {
+          const timestamp = Date.now();
+          const stack = new Error().stack || '';
+          const lines = stack.split('\n');
+          const caller = lines[2] || '';
+          console.log(`[INSTRUMENT WRITE] isFirstTimeSyncInProgress | Time: ${timestamp} | Prev: ${prevVal} | New: ${newVal} | Caller: ${caller.trim()}`);
+        }
+        return originalSet(nextState, replace as any);
+      };
+
+      return {
+        ...DEFAULT_STATE,
 
       setHasHydrated: (val) => set({ hasHydrated: val }),
       setBootstrapStatus: (status) => set({ bootstrapStatus: status }),
@@ -528,6 +618,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       setLiveSyncPaused: (val) => set({ isLiveSyncPaused: val }),
       triggerSync: () => set((state) => ({ syncTriggerCount: state.syncTriggerCount + 1 })),
       setHasSyncedThisSession: (val) => set({ hasSyncedThisSession: val }),
+      setIsFirstTimeSyncInProgress: (val) => set({ isFirstTimeSyncInProgress: val }),
       setSeniorQuotes: (quotes) => {
         set({ seniorQuotes: quotes });
         const userId = get().userId || 'guest-user';
@@ -714,7 +805,8 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           const { scheduleReminders, scheduleStreakWarning, cancelStreakWarning } = require('../services/notificationService');
           if (enabled) {
             await scheduleReminders(enabled, hour, minute, currentFrequency, currentCustomDays);
-            await scheduleStreakWarning(21, 0); // 9:00 PM streak preservation warning
+            const currentStreak = require('./useAuthStore').useAuthStore.getState().user?.streakCount || 0;
+            await scheduleStreakWarning(currentStreak, 21, 0); // 9:00 PM streak preservation warning
           } else {
             await scheduleReminders(false, hour, minute, currentFrequency, currentCustomDays);
             await cancelStreakWarning();
@@ -724,9 +816,11 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         }
 
         // 2. Save notification settings to SQLite database
+        const userId = get().userId || 'guest-user';
+        if (userId === 'guest-user') return; // Guest mode skips SQLite persistence
+
         try {
           const { saveNotificationPreferencesToSQLite } = require('../utils/sqliteSyncBridge');
-          const userId = get().userId || 'guest-user';
           await saveNotificationPreferencesToSQLite(userId, enabled, hour, minute, currentFrequency, currentCustomDays);
         } catch (sqliteErr: any) {
           console.error('[Zustand Store] Failed to save notification settings to SQLite:', sqliteErr.message);
@@ -738,29 +832,18 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         const card = get().cardsById[cleanId];
         if (!card || card.isContentFullyHydrated) return;
 
-        if (get().bootstrapStatus === 'completed') {
-          console.warn(`[SQLite Safety-Net Hit] hydrateCardContentOnDemand called after bootstrap for card: ${cleanId}. Content should have been in memory.`);
+        if (__DEV__ && get().bootstrapStatus === 'completed') {
+          console.log(`[Lazy Hydration] Loading content on demand for card: ${cleanId}`);
         }
 
         try {
           const { getCardFullContentFromSQLite } = require('../utils/sqliteSyncBridge');
           const content = await getCardFullContentFromSQLite(cleanId);
           if (content) {
-            set((state) => {
-              const existing = state.cardsById[cleanId];
-              if (!existing) return {};
-              return {
-                cardsById: {
-                  ...state.cardsById,
-                  [cleanId]: {
-                    ...existing,
-                    ...content,
-                    isContentFullyHydrated: true,
-                  },
-                },
-                currentRevisionCounter: state.currentRevisionCounter + 1,
-              };
-            });
+            pendingHydrations[cleanId] = content;
+            if (!hydrationFlushTimer) {
+              hydrationFlushTimer = setTimeout(flushPendingHydrations, 100);
+            }
           }
         } catch (err: any) {
           console.error('[Zustand Store] hydrateCardContentOnDemand failed:', err.message);
@@ -768,6 +851,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
       },
 
       hydrateFolderCardsOnDemand: async (folderId) => {
+        const userId = get().userId || 'guest-user';
+        if (userId === 'guest-user') return; // Guest cards are already fully in-memory and hydrated
+
         const { getDatabase, isSQLiteAvailable } = require('../utils/sqliteDatabase');
         if (!isSQLiteAvailable()) return;
         
@@ -819,6 +905,69 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         }
       },
 
+      hydratePlaylistCardsOnDemand: async (playlistId) => {
+        const userId = get().userId || 'guest-user';
+        if (userId === 'guest-user') return; // Guest cards are already fully in-memory and hydrated
+
+        const { getDatabase, isSQLiteAvailable } = require('../utils/sqliteDatabase');
+        if (!isSQLiteAvailable()) return;
+
+        try {
+          const db = getDatabase();
+          const playlist = get().playlistsById[playlistId];
+          if (!playlist) return;
+
+          const cardIds = playlist.cardIds || playlist.orderedCardIds || [];
+          if (cardIds.length === 0) return;
+
+          const cleanIds = cardIds.map(id => id.split('-loop-')[0]).filter(Boolean);
+          const placeholders = cleanIds.map(() => '?').join(',');
+
+          const rows = await db.getAllAsync(
+            `SELECT c.cardId, c.explanation, c.code, c.imageBlobPath, c.imageHash, c.examples, c.slides 
+             FROM cards_content c 
+             WHERE c.cardId IN (${placeholders});`,
+            cleanIds
+          );
+
+          if (rows && rows.length > 0) {
+            set((state) => {
+              const nextCardsById = { ...state.cardsById };
+              let modified = false;
+
+              rows.forEach((row: any) => {
+                if (!row.cardId) return;
+                const cleanId = row.cardId;
+                const existing = nextCardsById[cleanId];
+                if (existing && !existing.isContentFullyHydrated) {
+                  nextCardsById[cleanId] = {
+                    ...existing,
+                    explanation: row.explanation || '',
+                    code: row.code || '',
+                    imageBlobPath: row.imageBlobPath || undefined,
+                    imageHash: row.imageHash || undefined,
+                    examples: row.examples ? JSON.parse(row.examples) : [],
+                    slides: row.slides ? JSON.parse(row.slides) : undefined,
+                    isContentFullyHydrated: true,
+                  } as any;
+                  modified = true;
+                }
+              });
+
+              if (modified) {
+                return {
+                  cardsById: nextCardsById,
+                  currentRevisionCounter: state.currentRevisionCounter + 1,
+                };
+              }
+              return {};
+            });
+          }
+        } catch (err: any) {
+          console.error('[Zustand Store] hydratePlaylistCardsOnDemand failed:', err.message);
+        }
+      },
+
       hydratePlaylistCards: async (playlistId, cards, targetIndex = 0) => {
         const activeUserId = get().userId || 'guest-user';
         const { getDeletedEntityIdsFromSQLite } = require('../utils/sqliteSyncBridge');
@@ -831,10 +980,11 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         set((state) => {
           const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
           
-          // Define sliding window centered around targetIndex
-          const startIndex = Math.max(0, targetIndex - 10);
-          const endIndex = Math.min(safeCards.length, targetIndex + 20);
-          const initialCards = safeCards.slice(startIndex, endIndex);
+          // Define sliding window centered around targetIndex ONLY for the 'all' playlist (reels player)
+          const isAll = playlistId === 'all';
+          const initialCards = isAll
+            ? safeCards.slice(Math.max(0, targetIndex - 10), Math.min(safeCards.length, targetIndex + 20))
+            : safeCards;
 
           const needsHydration = initialCards.some((c) => {
             const cleanId = c._id.split('-loop-')[0];
@@ -859,7 +1009,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
           if (__DEV__) {
             const playlistName = state.playlistsById[playlistId]?.name || playlistId;
-            console.log(`[Zustand Hydration] hydratePlaylistCards for Playlist: "${playlistName}" | Target index: ${targetIndex} | Hydrating range: ${startIndex} to ${endIndex} of ${cards.length}`);
+            console.log(`[Zustand Hydration] hydratePlaylistCards for Playlist: "${playlistName}" | Target index: ${targetIndex} | Hydrating range: ${isAll ? (targetIndex - 10) + ' to ' + (targetIndex + 20) : 'all'} of ${cards.length}`);
           }
 
           const nextCardsById = { ...state.cardsById };
@@ -870,7 +1020,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             [playlistId]: initialCards.length
           };
 
-          // Hydrate the cards in the window
+          // Hydrate the cards in the window (or all cards for custom playlists)
           initialCards.forEach((card) => {
             if (!card || !card._id) return;
             const cleanId = card._id.split('-loop-')[0];
@@ -927,6 +1077,16 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         const cleanIds = cleanCardIds(cardIds);
         nextPlaylistCardOrderMap[playlistId] = cleanIds;
 
+        const nextFullPlaylistCards = { ...state.fullPlaylistCards };
+        const existingFullList = nextFullPlaylistCards[playlistId];
+        if (existingFullList) {
+          const cardMap = new Map(existingFullList.map(c => [c._id.split('-loop-')[0], c]));
+          const sortedFullList = cleanIds
+            .map(id => cardMap.get(id))
+            .filter(Boolean);
+          nextFullPlaylistCards[playlistId] = sortedFullList as any;
+        }
+
         const nextPlaylists = { ...state.playlistsById };
         let nextRev = state.currentRevisionCounter;
         
@@ -944,6 +1104,7 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         set({
           playlistCardOrderMap: nextPlaylistCardOrderMap,
           playlistsById: nextPlaylists,
+          fullPlaylistCards: nextFullPlaylistCards,
           currentRevisionCounter: nextRev,
         });
 
@@ -1285,6 +1446,46 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         }
       },
 
+      toggleFavoriteInStore: async (cardId: string, value: boolean) => {
+        const state = get();
+        const cleanId = cardId.split('-loop-')[0];
+        const existing = state.cardsById[cleanId];
+        if (!existing) return;
+
+        // 1. Patch Zustand in-memory
+        set({
+          cardsById: {
+            ...state.cardsById,
+            [cleanId]: { ...existing, isFavorite: value },
+          },
+        });
+
+        // 2. Write to SQLite via serialized write manager (same pattern as toggleCustomPlaylistItemInStore)
+        const userId = state.userId || 'guest-user';
+        const isFavNum = value ? 1 : 0;
+        const now = new Date().toISOString();
+
+        sqliteWriteManager.enqueue({
+          id: `toggle-favorite-${cleanId}-${Date.now()}`,
+          type: 'custom',
+          userId,
+          data: {
+            executor: async (db: any) => {
+              await db.runAsync(`
+                INSERT INTO card_progress (
+                  cardId, userId, completed, revisionCount, favorite, difficultyState, seenInReels, revision, updatedAt
+                ) VALUES (?, ?, 0, 0, ?, NULL, 0, 0, ?)
+                ON CONFLICT(cardId, userId) DO UPDATE SET
+                  favorite=excluded.favorite,
+                  updatedAt=excluded.updatedAt;
+              `, [cleanId, userId, isFavNum, now]);
+            }
+          },
+          timestamp: Date.now(),
+          priority: 'normal',
+        }).catch((err: any) => console.error('[SQLite toggleFavoriteInStore Error]', err.message));
+      },
+
       revertTransfer: async (cardId, oldState, failedState, timestamp) => {
         const state = get();
         const cleanId = cardId.split('-loop-')[0];
@@ -1426,10 +1627,14 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
         let compactedQueue = [...state.offlineActionQueue];
 
-        if (action.action === 'CLASSIFY_CARD') {
+         if (action.action === 'CLASSIFY_CARD') {
           const { cardId } = action.payload;
           compactedQueue = compactedQueue.filter(
             (a) => !(a.action === 'CLASSIFY_CARD' && a.payload.cardId === cardId)
+          );
+        } else if (action.action === 'UPDATE_STREAK') {
+          compactedQueue = compactedQueue.filter(
+            (a) => a.action !== 'UPDATE_STREAK'
           );
         } else if (action.action === 'TOGGLE_FAVORITE') {
           const { cardId } = action.payload;
@@ -1460,6 +1665,11 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           );
         } else if (action.action === 'UPDATE_REEL_PREFERENCES') {
           compactedQueue = compactedQueue.filter((a) => a.action !== 'UPDATE_REEL_PREFERENCES');
+        } else if (action.action === 'UPDATE_RESUME_STATE') {
+          const { type, id } = action.payload;
+          compactedQueue = compactedQueue.filter(
+            (a) => !(a.action === 'UPDATE_RESUME_STATE' && a.payload.type === type && a.payload.id === id)
+          );
         }
 
         compactedQueue.push(newAction);
@@ -1875,9 +2085,38 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
       deleteFolderInStore: async (folderId) => {
         const activeUserId = get().userId || 'guest-user';
+        
+        // Find all recursive descendants of the folder in the store
+        const foldersMap = get().foldersById;
+        const childrenMap: Record<string, string[]> = {};
+        Object.values(foldersMap).forEach((f: any) => {
+          if (f && f.parentFolderId) {
+            const pId = f.parentFolderId;
+            if (!childrenMap[pId]) childrenMap[pId] = [];
+            childrenMap[pId].push(f._id);
+          }
+        });
+
+        const descendants: string[] = [];
+        const queue = [folderId];
+        while (queue.length > 0) {
+          const curr = queue.shift()!;
+          descendants.push(curr);
+          const children = childrenMap[curr] || [];
+          children.forEach((childId) => {
+            if (!descendants.includes(childId) && !queue.includes(childId)) {
+              queue.push(childId);
+            }
+          });
+        }
+
+        const descendantsSet = new Set(descendants);
+
         set((state) => {
           const nextFolders = { ...state.foldersById };
-          delete nextFolders[folderId];
+          descendants.forEach((dId) => {
+            delete nextFolders[dId];
+          });
           
           const nextCards = { ...state.cardsById };
           const nextDifficultyMap = { ...state.cardDifficultyMap };
@@ -1887,9 +2126,19 @@ export const usePlaylistStateStore = create<PlaylistState>()(
 
           Object.keys(nextCards).forEach((key) => {
             const card = nextCards[key];
-            if (card && (card.folderId === folderId || card.rootFolderId === folderId || card.subfolderIds?.includes(folderId))) {
-              delete nextCards[key];
-              deletedCardIds.push(key);
+            if (card) {
+              const getFolderIdStr = (fid: any): string => {
+                if (typeof fid === 'object' && fid !== null) return String(fid._id || fid.id || '');
+                return String(fid || '');
+              };
+              const cardFolderId = getFolderIdStr(card.folderId);
+              const cardRootFolderId = getFolderIdStr(card.rootFolderId);
+              const hasSubfolderMatch = card.subfolderIds?.some((id: any) => descendantsSet.has(getFolderIdStr(id))) ?? false;
+
+              if (descendantsSet.has(cardFolderId) || descendantsSet.has(cardRootFolderId) || hasSubfolderMatch) {
+                delete nextCards[key];
+                deletedCardIds.push(key);
+              }
             }
           });
 
@@ -1941,25 +2190,42 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           };
         });
 
-        const cleanId = folderId.split('-loop-')[0];
+        const nowStr = new Date().toISOString();
+        const deletedTombstones = descendants.map((dId) => {
+          const cleanId = dId.split('-loop-')[0];
+          return { entityId: cleanId, entityType: 'folder' as const, deletedAt: nowStr, revision: 0 };
+        });
+
         set((s) => ({
           deletedEntitiesQueue: [
             ...s.deletedEntitiesQueue,
-            { entityId: cleanId, entityType: 'folder', deletedAt: new Date().toISOString(), revision: 0 }
+            ...deletedTombstones
           ]
         }));
 
+        const cleanId = folderId.split('-loop-')[0];
         sqliteWriteManager.enqueue({
-          id: `delete-folder-${cleanId}-${Date.now()}`,
+          id: `delete-folders-${cleanId}-${Date.now()}`,
           type: 'custom',
           userId: activeUserId,
           data: {
             executor: async (db: any) => {
-              await db.runAsync('UPDATE folders SET isDeleted = 1, deletedAt = ?, updatedAt = ? WHERE id = ? AND userId = ?;', [new Date().toISOString(), new Date().toISOString(), cleanId, activeUserId]);
-              await db.runAsync(`
-                INSERT OR REPLACE INTO deleted_entities (userId, entityId, entityType, deletedAt, revision)
-                VALUES (?, ?, 'folder', ?, 0);
-              `, [activeUserId, cleanId, new Date().toISOString()]);
+              const cleanDescendants = descendants.map(dId => dId.split('-loop-')[0]);
+              const placeholders = cleanDescendants.map(() => '?').join(',');
+              
+              // 1. Mark all descendants folders as deleted in SQLite
+              await db.runAsync(`UPDATE folders SET isDeleted = 1, deletedAt = ?, updatedAt = ? WHERE id IN (${placeholders}) AND userId = ?;`, [nowStr, nowStr, ...cleanDescendants, activeUserId]);
+              
+              // 2. Mark all revision cards in these folders as deleted in SQLite
+              await db.runAsync(`UPDATE cards_metadata SET isDeleted = 1, updatedAt = ? WHERE (folderId IN (${placeholders}) OR rootFolderId IN (${placeholders}));`, [nowStr, ...cleanDescendants, ...cleanDescendants]);
+
+              // 3. Write deleted_entities tombstones for all descendants
+              for (const cId of cleanDescendants) {
+                await db.runAsync(`
+                  INSERT OR REPLACE INTO deleted_entities (userId, entityId, entityType, deletedAt, revision)
+                  VALUES (?, ?, 'folder', ?, 0);
+                `, [activeUserId, cId, nowStr]);
+              }
             }
           },
           timestamp: Date.now(),
@@ -2050,6 +2316,32 @@ export const usePlaylistStateStore = create<PlaylistState>()(
         }).catch(err => console.error('[SQLite deleteCardInStore Async Error]', err.message));
       },
 
+      toggleFolderPin: async (folderId: string) => {
+        const { getDatabase, isSQLiteAvailable } = require('../utils/sqliteDatabase');
+        const nextPinned = new Set(get().pinnedFolderIds);
+        let isPinning = false;
+        if (nextPinned.has(folderId)) {
+          nextPinned.delete(folderId);
+        } else {
+          nextPinned.add(folderId);
+          isPinning = true;
+        }
+        set({ pinnedFolderIds: nextPinned });
+        if (isSQLiteAvailable()) {
+          const db = getDatabase();
+          const userId = get().userId || 'guest-user';
+          try {
+            if (isPinning) {
+              await db.runAsync('INSERT OR REPLACE INTO pinned_folders (folderId, userId) VALUES (?, ?);', [folderId, userId]);
+            } else {
+              await db.runAsync('DELETE FROM pinned_folders WHERE folderId = ? AND userId = ?;', [folderId, userId]);
+            }
+          } catch (err: any) {
+            console.warn('[SQLite] Failed to persist pinned folder state:', err.message);
+          }
+        }
+      },
+
       updateFolderInStore: async (folderId, updateData) => {
         const state = get();
         const folder = state.foldersById[folderId];
@@ -2130,8 +2422,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           });
         });
       },
-    }),
-    {
+    };
+  },
+  {
       name: 'dsa-playlist-state',
       storage: createJSONStorage(() => storageEngine),
       version: 3,
@@ -2251,6 +2544,29 @@ export const usePlaylistStateStore = create<PlaylistState>()(
   )
 );
 
+const originalSetState = usePlaylistStateStore.setState;
+usePlaylistStateStore.setState = (nextState: any, replace?: any) => {
+  const prevVal = usePlaylistStateStore.getState().isFirstTimeSyncInProgress;
+  let newVal = prevVal;
+  if (typeof nextState === 'function') {
+    const nextPartial = nextState(usePlaylistStateStore.getState());
+    if (nextPartial && nextPartial.isFirstTimeSyncInProgress !== undefined) {
+      newVal = nextPartial.isFirstTimeSyncInProgress;
+    }
+  } else if (nextState && (nextState as any).isFirstTimeSyncInProgress !== undefined) {
+    newVal = (nextState as any).isFirstTimeSyncInProgress;
+  }
+
+  if (prevVal !== newVal) {
+    const timestamp = Date.now();
+    const stack = new Error().stack || '';
+    const lines = stack.split('\n');
+    const caller = lines[2] || '';
+    console.log(`[INSTRUMENT WRITE] isFirstTimeSyncInProgress | Time: ${timestamp} | Prev: ${prevVal} | New: ${newVal} | Caller: ${caller.trim()}`);
+  }
+  return originalSetState(nextState, replace);
+};
+
 /**
  * bootstrapHydrateFromSQLite — Hydrates the Zustand store partitions from SQLite.
  *
@@ -2259,73 +2575,251 @@ export const usePlaylistStateStore = create<PlaylistState>()(
  * and Phase 2 (auth session is restored), ensuring no query races.
  */
 export function initializeGuestDemoContent() {
-  console.log('initializeGuestDemoContent START');
-  console.log('parsed from offlineSeed.json:', {
-    folders: offlineSeed.folders.length,
-    cards: offlineSeed.revisionCards.length,
-    playlists: offlineSeed.playlists.length
-  });
+  console.log('initializeGuestDemoContent START (Hardcoded Minimal Guest Data)');
 
-  const foldersById: Record<string, any> = {};
-  offlineSeed.folders.forEach((f: any) => {
-    foldersById[f._id] = {
-      _id: f._id,
+  const foldersById: Record<string, any> = {
+    '6a1655fab129b168bb16bb1f': {
+      _id: '6a1655fab129b168bb16bb1f',
       userId: 'guest-user',
-      title: f.title,
-      description: f.description,
-      icon: f.icon,
-      color: f.color,
-      createdBy: f.createdBy,
-      visibility: f.visibility,
-      order: f.order,
-      parentFolderId: f.parentFolderId,
-      cardIds: f.cardIds || [],
-      revision: f.revision || 0,
-      createdAt: f.createdAt,
-      updatedAt: f.updatedAt,
-    };
-  });
-
-  const playlistsById: Record<string, any> = {};
-  offlineSeed.playlists.forEach((p: any) => {
-    playlistsById[p._id] = {
-      _id: p._id,
+      title: 'DSA',
+      description: 'Master Data Structures and Algorithms conceptually.',
+      icon: 'code',
+      color: '#7C3AED',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 0,
+      parentFolderId: null,
+      cardIds: ['guest-card-1'],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-folder-os': {
+      _id: 'guest-folder-os',
       userId: 'guest-user',
-      name: p.name,
-      title: p.title,
-      description: p.description,
-      color1: p.color1,
-      color2: p.color2,
-      itemCount: p.itemCount,
-      cardIds: p.cardIds || [],
-      revision: p.revision || 0,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    };
-  });
+      title: 'OS',
+      description: 'Operating System internals, processes, threads, and memory management.',
+      icon: 'brain',
+      color: '#EC4899',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 1,
+      parentFolderId: null,
+      cardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-folder-cn': {
+      _id: 'guest-folder-cn',
+      userId: 'guest-user',
+      title: 'CN',
+      description: 'Computer Networks, TCP/IP stack, routing protocols, and sockets.',
+      icon: 'graphs',
+      color: '#3B82F6',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 2,
+      parentFolderId: null,
+      cardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-folder-sys': {
+      _id: 'guest-folder-sys',
+      userId: 'guest-user',
+      title: 'System Design',
+      description: 'High-level system architecture, load balancers, caching, and databases.',
+      icon: 'layers',
+      color: '#10B981',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 3,
+      parentFolderId: null,
+      cardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-folder-case': {
+      _id: 'guest-folder-case',
+      userId: 'guest-user',
+      title: 'Case Study',
+      description: 'Interactive business, product, and tech case studies.',
+      icon: 'book',
+      color: '#F59E0B',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 4,
+      parentFolderId: null,
+      cardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-folder-guess': {
+      _id: 'guest-folder-guess',
+      userId: 'guest-user',
+      title: 'Guesstimate',
+      description: 'Structured estimations and quantitative problem solving.',
+      icon: 'dp',
+      color: '#6366F1',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 5,
+      parentFolderId: null,
+      cardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-folder-dbms': {
+      _id: 'guest-folder-dbms',
+      userId: 'guest-user',
+      title: 'DBMS',
+      description: 'Relational databases, SQL querying, transactions, and indexing.',
+      icon: 'database',
+      color: '#14B8A6',
+      createdBy: 'admin',
+      visibility: 'public',
+      order: 6,
+      parentFolderId: null,
+      cardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+  };
 
-  const cardsById: Record<string, any> = {};
-  offlineSeed.revisionCards.forEach((c: any) => {
-    cardsById[c._id] = {
-      ...c,
-      _id: c._id,
-      isDeleted: c.isDeleted === true || c.isDeleted === 1,
+  const playlistsById: Record<string, any> = {
+    'hard': {
+      _id: 'hard',
+      userId: 'guest-user',
+      name: 'Hard Focus',
+      title: 'Hard Focus',
+      description: 'Showcase: Hard focus-area playlist',
+      color1: '#EF4444',
+      color2: '#B91C1C',
+      itemCount: 3,
+      cardIds: ['guest-card-3', 'guest-card-4', 'guest-card-5'],
+      orderedCardIds: ['guest-card-3', 'guest-card-4', 'guest-card-5'],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    'guest-custom-playlist': {
+      _id: 'guest-custom-playlist',
+      userId: 'guest-user',
+      name: 'System Design Stack',
+      title: 'System Design Stack',
+      description: 'Custom learning playlist',
+      color1: '#10B981',
+      color2: '#047857',
+      itemCount: 0,
+      cardIds: [],
+      orderedCardIds: [],
+      revision: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+  };
+
+  const cardsById: Record<string, any> = {
+    'guest-card-1': {
+      _id: 'guest-card-1',
+      title: 'Reverse Linked List',
+      topic: 'LINKED LISTS',
+      explanation: 'Iterate through the list shifting adjacent node links backwards using a temporary pointer.',
+      code: 'ListNode* prev = nullptr;\nwhile (curr) {\n  ListNode* next = curr->next;\n  curr->next = prev;\n  prev = curr;\n  curr = next;\n}',
+      difficulty: 'Easy',
+      complexity: 'O(N) Time • O(1) Space',
+      examples: [],
+      tags: ['Linked List'],
+      createdBy: 'admin',
+      folderId: '6a1655fab129b168bb16bb1f',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDeleted: false,
       isFavorite: false,
       difficultyState: null,
       currentUserQuestionProgress: null,
       isContentFullyHydrated: true,
-    };
-  });
+      slides: [
+        { headline: 'Reverse Linked List', body: 'Intuition: Iterate through the list shifting adjacent node links backwards using a temporary pointer.' },
+        { headline: 'Code Implementation', code: 'ListNode* prev = nullptr;\nwhile (curr) {\n  ListNode* next = curr->next;\n  curr->next = prev;\n  prev = curr;\n  curr = next;\n}' }
+      ]
+    },
+    'guest-card-3': {
+      _id: 'guest-card-3',
+      title: 'Merge K Sorted Lists',
+      topic: 'HEAPS',
+      difficulty: 'Hard',
+      explanation: 'Combine elements of K sorted linked lists by using a min-heap.',
+      examples: [],
+      tags: [],
+      createdBy: 'admin',
+      folderId: '6a1655fab129b168bb16bb1f',
+      visibility: 'public',
+      order: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDeleted: false,
+      isFavorite: false,
+      difficultyState: null,
+      currentUserQuestionProgress: null,
+      isContentFullyHydrated: true,
+    },
+    'guest-card-4': {
+      _id: 'guest-card-4',
+      title: 'Course Schedule II',
+      topic: 'GRAPHS',
+      difficulty: 'Hard',
+      explanation: 'Topological sort using Kahn\'s algorithm (BFS) or DFS to find task order.',
+      examples: [],
+      tags: [],
+      createdBy: 'admin',
+      folderId: '6a1655fab129b168bb16bb1f',
+      visibility: 'public',
+      order: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDeleted: false,
+      isFavorite: false,
+      difficultyState: null,
+      currentUserQuestionProgress: null,
+      isContentFullyHydrated: true,
+    },
+    'guest-card-5': {
+      _id: 'guest-card-5',
+      title: '0/1 Knapsack Core',
+      topic: 'DYNAMIC PROGRAMMING',
+      difficulty: 'Hard',
+      explanation: 'Find maximum subset value for limited weight using bottom-up tabulation.',
+      examples: [],
+      tags: [],
+      createdBy: 'admin',
+      folderId: '6a1655fab129b168bb16bb1f',
+      visibility: 'public',
+      order: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDeleted: false,
+      isFavorite: false,
+      difficultyState: null,
+      currentUserQuestionProgress: null,
+      isContentFullyHydrated: true,
+    }
+  };
 
-  // Rebuild playlistCardOrderMap for smart/default playlists
   const playlistCardOrderMap: Record<string, string[]> = {
     easy: [],
     medium: [],
-    hard: [],
+    hard: ['guest-card-3', 'guest-card-4', 'guest-card-5'],
     skipped: [],
     likes: [],
     'watch-later': [],
-    all: Object.keys(cardsById),
+    all: ['guest-card-1'],
   };
 
   playlistsById['all'] = {
@@ -2334,13 +2828,11 @@ export function initializeGuestDemoContent() {
     name: 'All Cards',
     title: 'All Cards',
     description: 'All seeded revision cards',
-    cardIds: Object.keys(cardsById),
-    itemCount: Object.keys(cardsById).length,
+    cardIds: ['guest-card-1'],
+    itemCount: 1,
   };
 
-  const selectedRootFolderIds = Object.values(foldersById)
-    .filter((f: any) => !f.parentFolderId || f.parentFolderId === null)
-    .map((f: any) => f._id);
+  const selectedRootFolderIds = ['6a1655fab129b168bb16bb1f', 'guest-folder-os', 'guest-folder-cn', 'guest-folder-sys', 'guest-folder-case', 'guest-folder-guess', 'guest-folder-dbms'];
 
   usePlaylistStateStore.setState({
     foldersById,
@@ -2352,35 +2844,25 @@ export function initializeGuestDemoContent() {
     hasHydrated: true,
   });
 
-  console.log({
-    foldersAfterSeed:
-    Object.keys(usePlaylistStateStore.getState().foldersById).length,
-
-    cardsAfterSeed:
-    Object.keys(usePlaylistStateStore.getState().cardsById).length
-  });
-
-  setTimeout(()=>{
-    console.log("2s later", {
-      folders:
-      Object.keys(usePlaylistStateStore.getState().foldersById).length
-    });
-  },2000);
-
   console.log('[Guest Demo Content] Hydrated Zustand memory:', {
     folders: Object.keys(foldersById).length,
     playlists: Object.keys(playlistsById).length,
     cards: Object.keys(cardsById).length,
-    selectedRootFolders: selectedRootFolderIds.length,
   });
 }
 
 export async function bootstrapHydrateFromSQLite(
   activeUserId: string = 'guest-user',
   serverSwipes: number = 0,
-  serverScrolls: number = 0
+  serverScrolls: number = 0,
+  serverStreak: number = 0,
+  serverMaxStreak: number = 0,
+  serverLastCompletedDate?: string
 ): Promise<void> {
-  console.log('bootstrapHydrateFromSQLite INVOCATION', { activeUserId, serverSwipes, serverScrolls });
+  console.log('bootstrapHydrateFromSQLite INVOCATION', { activeUserId, serverSwipes, serverScrolls, serverStreak, serverMaxStreak, serverLastCompletedDate });
+  if (typeof (global as any).dumpInstrumentState === 'function') {
+    (global as any).dumpInstrumentState('4. bootstrapHydrateFromSQLite starts');
+  }
 
   if (activeUserId === 'guest-user') {
     initializeGuestDemoContent();
@@ -2499,29 +2981,99 @@ export async function bootstrapHydrateFromSQLite(
         try {
           const { loadUserMetricsFromSQLite, saveUserMetricsToSQLite } = require('../utils/sqliteSyncBridge');
           const metrics = await loadUserMetricsFromSQLite(activeUserId);
+          
+          let sqliteStreak = 0;
+          let sqliteMaxStreak = 0;
+          let sqliteLastCompletedDate: string | null = null;
+          
           if (metrics) {
-            const mergedSwipes = Math.max(metrics.totalSwipes || 0, serverSwipes);
-            const mergedScrolls = Math.max(metrics.totalScrolls || 0, serverScrolls);
-            const nextMetrics = {
-              totalSwipes: mergedSwipes,
-              totalScrolls: mergedScrolls,
-              unsyncedSwipes: metrics.unsyncedSwipes || 0,
-              unsyncedScrolls: metrics.unsyncedScrolls || 0,
-            };
-            await saveUserMetricsToSQLite(activeUserId, nextMetrics);
-            useTrackingStore.getState().setMetrics(nextMetrics);
-            console.log(`[Zustand Bootstrap] SQLite user metrics loaded & merged: Swipes=${mergedSwipes}, Scrolls=${mergedScrolls}`);
-          } else {
-            const defaultMetrics = {
-              totalSwipes: serverSwipes,
-              totalScrolls: serverScrolls,
-              unsyncedSwipes: 0,
-              unsyncedScrolls: 0,
-            };
-            await saveUserMetricsToSQLite(activeUserId, defaultMetrics);
-            useTrackingStore.getState().setMetrics(defaultMetrics);
-            console.log(`[Zustand Bootstrap] Fresh session. SQLite user metrics initialized from server for: ${activeUserId}`);
+            sqliteStreak = metrics.streakCount || 0;
+            sqliteMaxStreak = metrics.maxStreakCount || 0;
+            sqliteLastCompletedDate = metrics.lastCompletedDate || null;
           }
+          
+          // Merge client-side SQLite stats and server-side MongoDB stats using Max-wins
+          let currentStreak = Math.max(sqliteStreak, serverStreak);
+          let currentMaxStreak = Math.max(sqliteMaxStreak, serverMaxStreak);
+          let lastCompletedDateStr = sqliteLastCompletedDate || serverLastCompletedDate || null;
+          
+          // Perform Visit streak logic
+          const today = new Date();
+          const todayStr = today.toISOString().split('T')[0];
+          
+          let streakChanged = false;
+          if (lastCompletedDateStr) {
+            const lastDate = new Date(lastCompletedDateStr);
+            const lastDateStr = lastDate.toISOString().split('T')[0];
+            
+            const yesterday = new Date();
+            yesterday.setDate(today.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            
+            if (lastDateStr === yesterdayStr) {
+              currentStreak += 1;
+              streakChanged = true;
+            } else if (lastDateStr !== todayStr) {
+              currentStreak = 1;
+              streakChanged = true;
+            }
+          } else {
+            currentStreak = 1;
+            streakChanged = true;
+          }
+          
+          if (currentStreak > currentMaxStreak) {
+            currentMaxStreak = currentStreak;
+            streakChanged = true;
+          }
+          
+          lastCompletedDateStr = today.toISOString();
+          
+          // Update the authStore User object so the UI is hydrated with the correct streak values immediately
+          const authStoreObj = require('./useAuthStore').useAuthStore;
+          const currentUserObj = authStoreObj.getState().user;
+          if (currentUserObj && currentUserObj.id === activeUserId) {
+            authStoreObj.setState({
+              user: {
+                ...currentUserObj,
+                streakCount: currentStreak,
+                maxStreakCount: currentMaxStreak,
+                lastCompletedDate: lastCompletedDateStr,
+              }
+            });
+          }
+          
+          const mergedSwipes = Math.max(metrics?.totalSwipes || 0, serverSwipes);
+          const mergedScrolls = Math.max(metrics?.totalScrolls || 0, serverScrolls);
+          const nextMetrics = {
+            totalSwipes: mergedSwipes,
+            totalScrolls: mergedScrolls,
+            unsyncedSwipes: metrics?.unsyncedSwipes || 0,
+            unsyncedScrolls: metrics?.unsyncedScrolls || 0,
+            streakCount: currentStreak,
+            maxStreakCount: currentMaxStreak,
+            lastCompletedDate: lastCompletedDateStr,
+          };
+          
+          await saveUserMetricsToSQLite(activeUserId, nextMetrics);
+          useTrackingStore.getState().setMetrics(nextMetrics);
+          
+          // If the streak was updated (new day visit), enqueue the offline action to sync it
+          if (streakChanged) {
+            const playlistState = usePlaylistStateStore.getState();
+            playlistState.enqueueOfflineAction({
+              action: 'UPDATE_STREAK',
+              payload: {
+                streakCount: currentStreak,
+                maxStreakCount: currentMaxStreak,
+                lastCompletedDate: lastCompletedDateStr,
+              },
+              timestamp: Date.now()
+            });
+            console.log(`[Zustand Bootstrap] Streak incremented/updated locally to: Current=${currentStreak}, Max=${currentMaxStreak}`);
+          }
+          
+          console.log(`[Zustand Bootstrap] SQLite user metrics loaded & merged: Swipes=${mergedSwipes}, Scrolls=${mergedScrolls}`);
         } catch (metricsErr: any) {
           console.warn('[Zustand Bootstrap] Failed to restore tracking metrics:', metricsErr.message);
         }
@@ -2546,6 +3098,7 @@ export async function bootstrapHydrateFromSQLite(
             : (currentState.selectedRootFolderIds || []),
           seniorQuotes: sqliteData.seniorQuotes || [],
           currentQuoteIndex: nextQuoteIndex,
+          pinnedFolderIds: new Set(sqliteData.pinnedFolderIds || []),
           ...(sqliteData.notificationSettings ? {
             notificationsEnabled: sqliteData.notificationSettings.enabled,
             notificationHour: sqliteData.notificationSettings.hour,
@@ -2555,6 +3108,15 @@ export async function bootstrapHydrateFromSQLite(
           } : {})
         });
         console.log(`[Zustand SQLite Hydration] Canonical relational tables loaded successfully.`);
+
+        if (sqliteData.reelSession) {
+          try {
+            const { setSessionMemoryShadow } = require('../utils/reelsFeedOfflineManager');
+            setSessionMemoryShadow(sqliteData.reelSession);
+          } catch (e: any) {
+            console.warn('[Zustand Bootstrap] Failed to set reels session memory shadow:', e.message);
+          }
+        }
 
         const nextState = usePlaylistStateStore.getState();
         try {
@@ -2567,7 +3129,8 @@ export async function bootstrapHydrateFromSQLite(
               nextState.notificationFrequency || 'daily',
               nextState.notificationCustomDays || [1, 2, 3, 4, 5, 6, 7]
             ).catch(() => {});
-            scheduleStreakWarning(21, 0).catch(() => {});
+            const currentStreak = require('./useAuthStore').useAuthStore.getState().user?.streakCount || 0;
+            scheduleStreakWarning(currentStreak, 21, 0).catch(() => {});
           } else {
             scheduleReminders(
               false,
@@ -2583,36 +3146,38 @@ export async function bootstrapHydrateFromSQLite(
         }
       }
 
-      // Transition to cards loading phase (Phase 3)
-      if (capturedGenId !== authStore.getState().sessionGenerationId) return;
-      usePlaylistStateStore.setState({ bootstrapStatus: 'cards_loading' });
+    }
 
-      // Phase 3: Background card hydration
-      console.log('[Zustand SQLite Hydration] Asynchronously bulk-loading all card content into memory...');
-      const { bulkHydrateAllCardContent } = require('../utils/sqliteSyncBridge');
-      const contentMap = await bulkHydrateAllCardContent();
-      const contentCardCount = Object.keys(contentMap).length;
+    if (capturedGenId !== authStore.getState().sessionGenerationId) return;
 
-      if (capturedGenId !== authStore.getState().sessionGenerationId) return;
+    // Transition to cards loading phase (Phase 3)
+    usePlaylistStateStore.setState({ bootstrapStatus: 'cards_loading' });
 
-      if (contentCardCount > 0) {
-        const latestStoreState = usePlaylistStateStore.getState();
-        const cardsByIdCopy = { ...latestStoreState.cardsById };
+    // Phase 3: Background card hydration
+    console.log('[Zustand SQLite Hydration] Asynchronously bulk-loading all card content into memory...');
+    const { bulkHydrateAllCardContent } = require('../utils/sqliteSyncBridge');
+    const contentMap = await bulkHydrateAllCardContent();
+    const contentCardCount = Object.keys(contentMap).length;
 
-        Object.keys(cardsByIdCopy).forEach((cardId) => {
-          const content = contentMap[cardId];
-          if (content) {
-            cardsByIdCopy[cardId] = {
-              ...cardsByIdCopy[cardId],
-              ...content,
-              isContentFullyHydrated: true,
-            };
-          }
-        });
+    if (capturedGenId !== authStore.getState().sessionGenerationId) return;
 
-        usePlaylistStateStore.setState({ cardsById: cardsByIdCopy });
-        console.log(`[Zustand SQLite Hydration] Fully hydrated ${contentCardCount} cards into memory in background.`);
-      }
+    if (contentCardCount > 0) {
+      const latestStoreState = usePlaylistStateStore.getState();
+      const cardsByIdCopy = { ...latestStoreState.cardsById };
+
+      Object.keys(cardsByIdCopy).forEach((cardId) => {
+        const content = contentMap[cardId];
+        if (content) {
+          cardsByIdCopy[cardId] = {
+            ...cardsByIdCopy[cardId],
+            ...content,
+            isContentFullyHydrated: true,
+          };
+        }
+      });
+
+      usePlaylistStateStore.setState({ cardsById: cardsByIdCopy });
+      console.log(`[Zustand SQLite Hydration] Fully hydrated ${contentCardCount} cards into memory in background.`);
     }
 
     if (capturedGenId !== authStore.getState().sessionGenerationId) return;
@@ -2620,6 +3185,10 @@ export async function bootstrapHydrateFromSQLite(
     // Transition to completed phase
     usePlaylistStateStore.setState({ bootstrapStatus: 'completed' });
     markAppReady();
+
+    if (typeof (global as any).dumpInstrumentState === 'function') {
+      (global as any).dumpInstrumentState('5. bootstrapHydrateFromSQLite completes');
+    }
 
     // Phase 4: Silent sync after interaction settles
     console.log('[Zustand SQLite Hydration] Queueing background sync handshake after startup settles...');
