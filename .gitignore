@@ -44,3 +44,6 @@ yarn-error.*
 temp_diff.txt
 original_reels.tsx
 
+# Credentials
+google-services.json
+

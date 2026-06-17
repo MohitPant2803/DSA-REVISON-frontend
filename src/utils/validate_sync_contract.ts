@@ -215,6 +215,10 @@ function serverHandleSyncActions(req: SyncActionsRequest): SyncActionsResponse {
           processedIds.push(mutationId);
           break;
         }
+        case 'UPDATE_STREAK': {
+          processedIds.push(mutationId);
+          break;
+        }
         default:
           failedIds.push(mutationId);
       }

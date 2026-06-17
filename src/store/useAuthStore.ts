@@ -65,6 +65,20 @@ function safeParseUser(raw: string | null): User | null {
   }
 }
 
+function mergeUserMetrics(localUser: User | null, serverUser: User): User {
+  if (!localUser || localUser.id !== serverUser.id) return serverUser;
+  return {
+    ...serverUser,
+    totalSwipes: Math.max(localUser.totalSwipes || 0, serverUser.totalSwipes || 0),
+    totalScrolls: Math.max(localUser.totalScrolls || 0, serverUser.totalScrolls || 0),
+    streakCount: Math.max(localUser.streakCount || 0, serverUser.streakCount || 0),
+    maxStreakCount: Math.max(localUser.maxStreakCount || 0, serverUser.maxStreakCount || 0),
+    lastCompletedDate: (localUser.lastCompletedDate && (!serverUser.lastCompletedDate || new Date(localUser.lastCompletedDate) >= new Date(serverUser.lastCompletedDate)))
+      ? localUser.lastCompletedDate 
+      : serverUser.lastCompletedDate
+  };
+}
+
 const SecureStorage = {
   getToken: async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -234,14 +248,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
     
+    const merged = mergeUserMetrics(get().user, safeUser);
+
     // Proactive Synchronous Account-Switching and Metrics Hydration Guard
     await alignStoreUserSession(
-      safeUser.id, 
-      safeUser.totalSwipes || 0, 
-      safeUser.totalScrolls || 0,
-      safeUser.streakCount || 0,
-      safeUser.maxStreakCount || 0,
-      safeUser.lastCompletedDate
+      merged.id, 
+      merged.totalSwipes || 0, 
+      merged.totalScrolls || 0,
+      merged.streakCount || 0,
+      merged.maxStreakCount || 0,
+      merged.lastCompletedDate
     );
 
     const { usePlaylistStateStore } = require('./usePlaylistStateStore');
@@ -256,8 +272,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } else {
       await SecureStorage.removeToken();
     }
-    await SecureStorage.setUser(safeUser);
-    set({ token, user: safeUser, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
+    await SecureStorage.setUser(merged);
+    set({ token, user: merged, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
   },
 
   logout: async () => {
@@ -425,6 +441,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       ]);
 
       if (user && token && user.id !== 'guest-user') {
+        // Set user in Zustand state FIRST to prevent boot-time hydration overwrite
+        set({ token, user, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
+
         // Optimistic local session recovery: enter immediately
         await alignStoreUserSession(
           user.id, 
@@ -443,7 +462,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
 
         console.log('[Session Recovery] Instantly recovered cached session locally (Optimistic Entry)!');
-        set({ token, user, isAuthenticated: true, isLoading: false, isAuthReady: true, isSessionExpired: false });
 
         // Verify the token with the server in the background
         (async () => {
@@ -465,16 +483,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             const freshUser = await getMeWithTimeout;
 
             if (freshUser) {
+              const merged = mergeUserMetrics(get().user, freshUser);
+              await SecureStorage.setUser(merged);
+              set({ user: merged });
+
               await alignStoreUserSession(
-                freshUser.id, 
-                freshUser.totalSwipes || 0, 
-                freshUser.totalScrolls || 0,
-                freshUser.streakCount || 0,
-                freshUser.maxStreakCount || 0,
-                freshUser.lastCompletedDate
+                merged.id, 
+                merged.totalSwipes || 0, 
+                merged.totalScrolls || 0,
+                merged.streakCount || 0,
+                merged.maxStreakCount || 0,
+                merged.lastCompletedDate
               );
-              await SecureStorage.setUser(freshUser);
-              set({ user: freshUser });
             } else {
               // Token is invalid/revoked: clear session
               console.warn('[Session Recovery Background Check] Session invalid (no freshUser), logging out...');
@@ -554,17 +574,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           lastCompletedDate: rawUser.lastCompletedDate,
         };
 
+        const merged = mergeUserMetrics(get().user, user);
+
         await alignStoreUserSession(
-          user.id, 
-          user.totalSwipes || 0, 
-          user.totalScrolls || 0,
-          user.streakCount || 0,
-          user.maxStreakCount || 0,
-          user.lastCompletedDate
+          merged.id, 
+          merged.totalSwipes || 0, 
+          merged.totalScrolls || 0,
+          merged.streakCount || 0,
+          merged.maxStreakCount || 0,
+          merged.lastCompletedDate
         );
         await SecureStorage.setToken(token);
-        await SecureStorage.setUser(user);
-        set({ token, user, isAuthenticated: true, isSessionExpired: false, isAuthReady: true });
+        await SecureStorage.setUser(merged);
+        set({ token, user: merged, isAuthenticated: true, isSessionExpired: false, isAuthReady: true });
         console.log('[AuthStore] Proactive silent token refresh successful!');
         return true;
       }

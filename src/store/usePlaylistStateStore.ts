@@ -68,7 +68,8 @@ export interface OfflineAction {
     | 'UPDATE_CARD'
     | 'UPDATE_REEL_PREFERENCES'
     | 'UPDATE_RESUME_STATE'
-    | 'REGISTER_LOOP';
+    | 'REGISTER_LOOP'
+    | 'UPDATE_STREAK';
   payload: any;
   timestamp: number;
   retryCount?: number;
