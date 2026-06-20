@@ -292,6 +292,7 @@ interface PlaylistState {
   setPlaylistCardOrder: (playlistId: string, cardIds: string[]) => Promise<void>;
   hydrateCustomPlaylistOrder: (playlistId: string, cardIds: string[]) => void;
   hydrateAllCustomPlaylistsOrder: (playlists: { id: string; orderedCardIds: string[] }[]) => void;
+  hydratePlaylistsAndCounts: (playlists: { id: string; orderedCardIds: string[] }[], counts: Record<string, number>) => void;
   setSelectedRootFolderIdsInStore: (folderIds: string[]) => Promise<void>;
   updateReelPreferencesInStore: (folderIds: string[]) => Promise<void>;
   
@@ -394,7 +395,7 @@ const DEFAULT_STATE = {
   hydratedPlaylistCardCounts: {},
   selectedRootFolderIds: [],
   notificationsEnabled: true,
-  notificationHour: 19,
+  notificationHour: 11,
   notificationMinute: 0,
   notificationFrequency: 'daily' as 'daily' | 'three_days' | 'custom',
   notificationCustomDays: [1, 2, 3, 4, 5, 6, 7],
@@ -1194,6 +1195,99 @@ export const usePlaylistStateStore = create<PlaylistState>()(
             playlistCardOrderMap: nextPlaylistCardOrderMap,
             hydratedPlaylists: nextHydratedPlaylists,
           };
+        });
+      },
+
+      hydratePlaylistsAndCounts: (playlists, counts) => {
+        set((state) => {
+          // 1. Process custom playlists order hydration
+          const nextPlaylistCardOrderMap = { ...state.playlistCardOrderMap };
+          const nextHydratedPlaylists = { ...state.hydratedPlaylists };
+          let playlistsModified = false;
+
+          playlists.forEach(({ id, orderedCardIds }) => {
+            if (['easy', 'medium', 'hard', 'skipped'].includes(id)) return;
+
+            const isHydrated = state.hydratedPlaylists[id];
+            const isDirty = state.playlistsById[id]?.dirty;
+            const hasPending = state.offlineActionQueue.some(
+              (a) =>
+                (a.action === 'TOGGLE_PLAYLIST_ITEM' && a.payload?.playlistId === id) ||
+                (a.action === 'REORDER_PLAYLIST' && a.payload?.playlistId === id)
+            );
+
+            if (isHydrated || isDirty || hasPending) return;
+
+            const cleanIds = cleanCardIds(orderedCardIds);
+            nextPlaylistCardOrderMap[id] = cleanIds;
+            nextHydratedPlaylists[id] = true;
+            playlistsModified = true;
+          });
+
+          // 2. Process smart counts hydration
+          const adjustedCounts: Record<string, number> = {};
+          let countsChanged = false;
+
+          Object.keys(counts).forEach((key) => {
+            const passedCount = counts[key];
+            const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(key);
+
+            if (isSmart) {
+              const delta = state.smartPlaylistDeltaCounts[key] || 0;
+              const baseCount = Math.max(0, passedCount - delta);
+              adjustedCounts[key] = baseCount;
+
+              if (state.initialSmartCounts[key] !== baseCount) {
+                countsChanged = true;
+              }
+            } else {
+              adjustedCounts[key] = passedCount;
+              if (state.initialSmartCounts[key] !== passedCount) {
+                countsChanged = true;
+              }
+            }
+          });
+
+          if (!playlistsModified && !countsChanged) {
+            return {};
+          }
+
+          const nextState: any = {};
+          if (playlistsModified) {
+            nextState.playlistCardOrderMap = nextPlaylistCardOrderMap;
+            nextState.hydratedPlaylists = nextHydratedPlaylists;
+          }
+          if (countsChanged) {
+            const nextCounts = { ...state.initialSmartCounts, ...adjustedCounts };
+            const nextDifficultyMap = { ...state.cardDifficultyMap };
+            
+            Object.keys(nextDifficultyMap).forEach((cardId) => {
+              const entry = nextDifficultyMap[cardId];
+              if (entry && !entry.optimistic) {
+                delete nextDifficultyMap[cardId];
+              }
+            });
+
+            const nextDeltas: Record<string, number> = { easy: 0, medium: 0, hard: 0, skipped: 0 };
+            Object.keys(nextDifficultyMap).forEach((cardId) => {
+              const entry = nextDifficultyMap[cardId];
+              const orig = entry.originalDifficulty;
+              const curr = entry.difficulty;
+              
+              if (orig && ['easy', 'medium', 'hard', 'skipped'].includes(orig)) {
+                nextDeltas[orig] = (nextDeltas[orig] || 0) - 1;
+              }
+              if (curr && ['easy', 'medium', 'hard', 'skipped'].includes(curr)) {
+                nextDeltas[curr] = (nextDeltas[curr] || 0) + 1;
+              }
+            });
+
+            nextState.initialSmartCounts = nextCounts;
+            nextState.cardDifficultyMap = nextDifficultyMap;
+            nextState.smartPlaylistDeltaCounts = nextDeltas;
+          }
+
+          return nextState;
         });
       },
 

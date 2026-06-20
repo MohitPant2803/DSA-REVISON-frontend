@@ -420,12 +420,12 @@ export default function OnboardingCoordinator() {
     
     const hasAccess = isAuthenticated || user?.id === 'guest-user';
 
-    // Smooth fade-out + gentle scale before navigating
-    exitOpacity.value = withTiming(0, { duration: 300 });
-    exitScale.value = withTiming(0.98, { duration: 300 });
+    // Gentle scale-down exit (keep opacity visible to avoid black flash)
+    exitScale.value = withTiming(0.97, { duration: 280 });
+    exitOpacity.value = withTiming(0.3, { duration: 280 });
 
     setTimeout(() => {
-      // Navigate FIRST — then clean up state
+      // Navigate FIRST — isGeneratingSystem stays true so _layout guard won't race
       if (hasAccess) {
         (globalThis as any).__hasPlayedLearnAnimation = true;
         router.replace('/(protected)/(tabs)/learn');
@@ -433,10 +433,12 @@ export default function OnboardingCoordinator() {
         router.replace('/(auth)/login');
       }
 
-      // Clean up after navigation is queued
-      setIsGeneratingSystem(false);
-      setIsLoading(false);
-    }, 320);
+      // Clean up AFTER navigation has had time to mount the new screen
+      setTimeout(() => {
+        setIsGeneratingSystem(false);
+        setIsLoading(false);
+      }, 500);
+    }, 300);
   };
 
   const finishGuestLogin = () => {

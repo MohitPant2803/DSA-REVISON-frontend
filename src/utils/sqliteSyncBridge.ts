@@ -1272,9 +1272,60 @@ export async function clearOfflineActionsInSQLite(userId: string): Promise<void>
  */
 export async function loadStateFromSQLite(userId: string) {
   if (!isSQLiteAvailable()) return null;
+
+  // Pre-flight: Ensure database is initialized
+  try {
+    getDatabase();
+  } catch (e) {
+    console.warn('[SQLite Bridge] Database not initialized in loadStateFromSQLite. Initializing...');
+    const { initializeDatabaseAsync } = require('./sqliteDatabase');
+    await initializeDatabaseAsync();
+  }
+
+  // Pre-flight: Ensure connection is fully recovered and active before firing parallel queries
+  await executeQueryWithRecovery<any>('SELECT 1;', []);
+
   const db = getDatabase();
   return profiler.profileAsync('Load Entire Database Snapshot Async', async () => {
     try {
+      try {
+        const releaseSelfHealing = await sqliteLock.acquire();
+        try {
+          const pruned = await db.runAsync(`
+            DELETE FROM cards_metadata
+            WHERE id IN (
+              SELECT id FROM (
+                SELECT id,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY title, folderId
+                    ORDER BY CASE WHEN substr(id, 15, 1) = '5' THEN 0 ELSE 1 END, updatedAt DESC
+                  ) AS rn
+                FROM cards_metadata
+                WHERE topic IN ('Operating Systems', 'Computer Networks', 'Quant')
+                   OR folderId IN (SELECT id FROM folders WHERE parentFolderId IN ('f4944c6e-f81a-52d5-ac46-c2d04056462e', '38ecba9d-004b-58eb-93b6-323767a4f3e9', '3ac92035-d04e-5d30-a358-9197846728e5'))
+              )
+              WHERE rn > 1
+            );
+          `);
+          // Also clean orphaned content and progress rows
+          await db.runAsync(`DELETE FROM cards_content WHERE cardId NOT IN (SELECT id FROM cards_metadata);`);
+          await db.runAsync(`DELETE FROM card_progress WHERE cardId NOT IN (SELECT id FROM cards_metadata);`);
+          
+          // Self-healing: Remove deprecated Trial 2 folder and its cards
+          const trialFolderId = '78f25ebf-e82b-428c-afd9-06ba11a78248';
+          await db.runAsync('DELETE FROM folders WHERE id = ?;', [trialFolderId]);
+          await db.runAsync('DELETE FROM cards_metadata WHERE folderId = ?;', [trialFolderId]);
+          await db.runAsync('DELETE FROM cards_content WHERE cardId NOT IN (SELECT id FROM cards_metadata);');
+          await db.runAsync('DELETE FROM card_progress WHERE cardId NOT IN (SELECT id FROM cards_metadata);');
+
+          console.log('[SQLite Self-Healing] Pruned duplicate OS/CN/Quant cards and deprecated Trial 2 folder/cards on startup.');
+        } finally {
+          releaseSelfHealing();
+        }
+      } catch (err: any) {
+        console.warn('[SQLite Self-Healing Warning] Pruning duplicates failed:', err.message);
+      }
+
       // CRITICAL PATH: Load essential layout/seeder data in parallel
       const [
         foldersRows,

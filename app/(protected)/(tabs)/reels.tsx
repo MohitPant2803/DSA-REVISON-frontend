@@ -74,7 +74,7 @@ import { useRole } from '@/hooks/useRole';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import * as reelsFeedService from '@/services/reelsFeedService';
 import * as revisionService from '@/services/revisionService';
-import { GestureHandlerRootView, GestureDetector, Gesture, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, GestureDetector, Gesture, TouchableOpacity as GHTouchableOpacity, ScrollView as RNGHScrollView } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -174,7 +174,7 @@ const PULL_BACK_CONFIG = {
   easing: Easing.out(Easing.quad),
 };
 
-const OFFSCREEN_X = -width - 120;
+const OFFSCREEN_X = -width - 20;
 
 const lightHaptic = () => {
   if (Platform.OS === 'android') {
@@ -408,7 +408,7 @@ const ClassificationButton = React.memo(({
   const displayColor = isActive ? activeColor : (isMidnight ? '#FFFFFF' : 'rgba(15, 23, 42, 0.22)');
 
   return (
-    <GHTouchableOpacity
+    <TouchableOpacity
       onPress={handlePress}
       onPressIn={handlePressIn}
       activeOpacity={0.65}
@@ -437,7 +437,7 @@ const ClassificationButton = React.memo(({
           />
         </View>
       </View>
-    </GHTouchableOpacity>
+    </TouchableOpacity>
   );
 });
 
@@ -592,8 +592,7 @@ interface ReelItemProps {
   isActiveCardClassified?: boolean;
   shadowProgress?: SharedValue<number>;
   scrollY?: SharedValue<number>;
-  scrollEnabled?: boolean;
-  onScrollEnabledChange?: (enabled: boolean) => void;
+  rnghScrollViewRef: React.RefObject<any>;
 }
 
 interface ActiveReelItemProps extends Omit<ReelItemProps, 'item'> {
@@ -832,8 +831,7 @@ const ActiveReelItem = React.memo(({
   onMoreOptionsTrigger,
   onDifficultyStateUpdate,
   shadowProgress = { value: 1 } as any,
-  scrollEnabled = true,
-  onScrollEnabledChange,
+  rnghScrollViewRef,
   isActiveCardClassified = true,
 }: ActiveReelItemProps) => {
   const isActiveReel = index === activeIndex;
@@ -1058,10 +1056,11 @@ const ActiveReelItem = React.memo(({
 
   const horizontalGesture = Gesture.Pan()
     .enabled(isActiveReel)
-    // Optimized horizontal engagement window to prevent vertical swipe hijacking
-    .activeOffsetX([-5, 5])
-    .failOffsetY([-150, 150])
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-15, 15])
+    .simultaneousWithExternalGesture(rnghScrollViewRef)
     .onStart((event) => {
+      if (isTransitioning.value) return;
       // Reset active snap-back/cancel animations so consecutive flicks aren't ignored
       cancelAnimation(slideDragX);
       cancelAnimation(prevSlideDragX);
@@ -1069,10 +1068,6 @@ const ActiveReelItem = React.memo(({
       // Set horizontal gesture lock early
       gestureLock.value = 'horizontal';
       swipeIncrementedForGesture.current = false;
-
-      if (onScrollEnabledChange) {
-        runOnJS(onScrollEnabledChange)(false);
-      }
     })
     .onUpdate((event) => {
       if (isTransitioning.value) return;
@@ -1126,8 +1121,8 @@ const ActiveReelItem = React.memo(({
           slideDragX.value = withTiming(
             -width - 100, 
             FLICK_EXIT_CONFIG, 
-            (finished) => {
-              if (finished) runOnJS(handleSwipeComplete)();
+            () => {
+              runOnJS(handleSwipeComplete)();
             }
           );
         } else {
@@ -1145,25 +1140,22 @@ const ActiveReelItem = React.memo(({
           prevSlideDragX.value = withTiming(
             0, 
             PULL_BACK_CONFIG, 
-            (finished) => {
-              if (finished) runOnJS(handleSwipePrevComplete)();
+            () => {
+              runOnJS(handleSwipePrevComplete)();
             }
           );
         } else {
-          prevSlideDragX.value = withSpring(-width - 100, CANCEL_SPRING);
+          prevSlideDragX.value = withSpring(OFFSCREEN_X, CANCEL_SPRING);
           slideDragX.value = withSpring(0, CANCEL_SPRING);
         }
 
       } else {
         slideDragX.value = withSpring(0, CANCEL_SPRING);
-        prevSlideDragX.value = withSpring(-width - 100, CANCEL_SPRING);
+        prevSlideDragX.value = withSpring(OFFSCREEN_X, CANCEL_SPRING);
       }
     })
     .onFinalize(() => {
       gestureLock.value = 'undecided';
-      if (onScrollEnabledChange) {
-        runOnJS(onScrollEnabledChange)(true);
-      }
     });
 
   const renderSlideContent = (slide: typeof slides[0], indexInDeck: number) => {
@@ -1177,7 +1169,7 @@ const ActiveReelItem = React.memo(({
         }}
         currentIndex={indexInDeck}
         totalCount={slides.length}
-        scrollEnabled={scrollEnabled}
+        scrollEnabled={true}
       />
     );
   };
@@ -1279,7 +1271,7 @@ const ActiveReelItem = React.memo(({
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.canEdit === nextProps.canEdit &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
-    prevProps.scrollEnabled === nextProps.scrollEnabled &&
+    prevProps.rnghScrollViewRef === nextProps.rnghScrollViewRef &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
   );
 });
@@ -1352,7 +1344,7 @@ const ReelItem = React.memo((props: ReelItemProps) => {
     prevProps.width === nextProps.width &&
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
-    prevProps.scrollEnabled === nextProps.scrollEnabled &&
+    prevProps.rnghScrollViewRef === nextProps.rnghScrollViewRef &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified
   );
 });
@@ -1373,8 +1365,7 @@ const ReelsRenderItem = React.memo(({
   handleMoreOptionsTrigger,
   handleDifficultyStateUpdateInReels,
   scrollY,
-  scrollEnabled,
-  handleScrollEnabledChange,
+  rnghScrollViewRef,
   isActiveCardClassified,
   feedSessionId,
 }: {
@@ -1393,8 +1384,7 @@ const ReelsRenderItem = React.memo(({
   handleMoreOptionsTrigger: (card: IPopulatedRevisionCard, scrollHorizontal: (idx: number) => void) => void;
   handleDifficultyStateUpdateInReels: (cardId: string, state: 'easy' | 'medium' | 'hard' | 'skipped') => void;
   scrollY: SharedValue<number>;
-  scrollEnabled: boolean;
-  handleScrollEnabledChange: (enabled: boolean) => void;
+  rnghScrollViewRef: React.RefObject<any>;
   isActiveCardClassified: boolean;
   feedSessionId: string;
 }) => {
@@ -1435,8 +1425,7 @@ const ReelsRenderItem = React.memo(({
           onMoreOptionsTrigger={handleMoreOptionsTrigger}
           onDifficultyStateUpdate={handleDifficultyStateUpdateInReels}
           scrollY={scrollY}
-          scrollEnabled={scrollEnabled}
-          onScrollEnabledChange={handleScrollEnabledChange}
+          rnghScrollViewRef={rnghScrollViewRef}
         />
       )}
     </View>
@@ -1450,7 +1439,7 @@ const ReelsRenderItem = React.memo(({
     prevProps.width === nextProps.width &&
     prevProps.isGuest === nextProps.isGuest &&
     prevProps.activePlaylistId === nextProps.activePlaylistId &&
-    prevProps.scrollEnabled === nextProps.scrollEnabled &&
+    prevProps.rnghScrollViewRef === nextProps.rnghScrollViewRef &&
     prevProps.isActiveCardClassified === nextProps.isActiveCardClassified &&
     prevProps.feedSessionId === nextProps.feedSessionId
   );
@@ -1524,19 +1513,20 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     };
   }, []);
 
+  const isScreenFocusedRef = useRef(true);
+
   useFocusEffect(
     useCallback(() => {
-      const focusTime = Date.now();
-      console.log('[PERF] ReelsScreenContent: Focused at:', focusTime);
-      // Bypassed InteractionManager.runAfterInteractions with a minimal 16ms timeout
-      const timer = setTimeout(() => {
-        const execTime = Date.now();
-        console.log('[PERF] ReelsScreenContent: Focus task executed (via setTimeout) at:', execTime, '| Delay since focus:', execTime - focusTime, 'ms');
-        setIsTransitionReady(true);
-        useWalkthroughStore.getState().setReelsLoadingState('ready');
-      }, 16);
+      isScreenFocusedRef.current = true;
+      const task = InteractionManager.runAfterInteractions(() => {
+        if (isScreenFocusedRef.current) {
+          setIsTransitionReady(true);
+          useWalkthroughStore.getState().setReelsLoadingState('ready');
+        }
+      });
       return () => {
-        clearTimeout(timer);
+        isScreenFocusedRef.current = false;
+        task.cancel();
       };
     }, [])
   );
@@ -1558,7 +1548,6 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
   const [showTutorial, setShowTutorial] = useState(false);
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
   const [isStudySessionFinished, setIsStudySessionFinished] = useState(false);
-  const [scrollEnabled, setScrollEnabled] = useState(true);
   const [showPrefetchingPause, setShowPrefetchingPause] = useState(false);
   const lastPausedIndexRef = useRef(-1);
   const scrollsSinceLastPauseRef = useRef(0);
@@ -1729,7 +1718,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
   const cardsCount = usePlaylistStateStore((s) => Object.keys(s.cardsById).length);
   const sessionSeed = useRef(Date.now() % 997).current; // prime modulo for distribution
 
-  const [allCardsState, setAllCardsState] = useState<string[]>(() => {
+  const computeInitialCards = useCallback((): string[] => {
     if (isReusedSession) return reelsSessionCards;
     if (activePlaylistId) return [];
 
@@ -1797,7 +1786,21 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     } catch (e) {
       return [];
     }
-  });
+  }, [isReusedSession, reelsSessionCards, activePlaylistId, isCustomPlayer, folderIdParam, selectedRootFolderIds, isGeneralFeed, sessionSeed]);
+
+  // Start empty — mascot shows instantly
+  const [allCardsState, setAllCardsState] = useState<string[]>(
+    isReusedSession ? reelsSessionCards : []
+  );
+
+  // Populate after first frame
+  useEffect(() => {
+    if (isReusedSession) return; // already set above
+    const id = requestAnimationFrame(() => {
+      setAllCardsState(computeInitialCards());
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isReusedSession, computeInitialCards]);
 
   const allCards = allCardsState;
 
@@ -1822,19 +1825,28 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
 
   const shuffledOrderRef = useRef<string[]>([]);
   const flatListRef = useRef<any>(null);
+  const rnghScrollViewRef = useRef<any>(null);
+
+  const renderScrollComponent = useCallback((props: any) => (
+    <RNGHScrollView ref={rnghScrollViewRef} {...props} />
+  ), []);
 
   // Pre-warm card detailed contents and prefetch assets in the background on mount
   useEffect(() => {
     if (isGuest) return; // Disable card prewarming, prefetching, and next-card preparation in guest mode
-    if (allCards.length > 0) {
+    if (allCards.length === 0) return;
+
+    const prefetchCards = async () => {
       const store = usePlaylistStateStore.getState();
       // If we are in folder or playlist session, we proactively hydrate ALL cards
       // in the session immediately in the background so that subsequent swiping is 100% instant.
       // Otherwise in general feed, we pre-warm the first 15 cards.
       const isFolderOrPlaylist = isCustomPlayer || !!folderIdParam || !!activePlaylistId;
       const prewarmCount = isFolderOrPlaylist ? allCards.length : Math.min(allCards.length, 15);
-      
+
       for (let i = 0; i < prewarmCount; i++) {
+        if (!isScreenFocusedRef.current) break; // STOP if user navigated away
+
         const cardId = allCards[i];
         if (cardId) {
           const cleanId = cardId.split('-loop-')[0];
@@ -1842,16 +1854,24 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
           if (card) {
             // Hydrate text contents/slides immediately
             if (!card.isContentFullyHydrated) {
-              store.hydrateCardContentOnDemand(cleanId).catch(() => {});
+              try {
+                await store.hydrateCardContentOnDemand(cleanId);
+              } catch (e) {}
             }
+            if (!isScreenFocusedRef.current) break; // check again after await
+
             // Prefetch image content immediately for zero-latency presentation
             if (card.image) {
-              ExpoImage.prefetch(card.image).catch(() => {});
+              try {
+                await ExpoImage.prefetch(card.image);
+              } catch (e) {}
             }
           }
         }
       }
-    }
+    };
+
+    prefetchCards();
   }, [allCards, isCustomPlayer, folderIdParam, activePlaylistId, isGuest]);
 
   // Read saved position synchronously on mount
@@ -1936,9 +1956,6 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
   const { data: playlists = [] } = usePlaylists();
   const { data: foldersData } = useGetFolders({ limit: 100 });
 
-  const handleScrollEnabledChange = useCallback((enabled: boolean) => {
-    setScrollEnabled(enabled);
-  }, []);
   const sessionStartCardId = useRef<string | null>(null);
   const recentCardIdsRef = useRef<string[]>([]);
 
@@ -2206,9 +2223,8 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     }
 
     // Map back to corresponding listIds to preserve loop suffixes
-    return cardOrderIds.filter(id => 
-      list.some(c => c._id === id.split('-loop-')[0])
-    );
+    const activeCleanIds = new Set(list.map(c => c._id));
+    return cardOrderIds.filter(id => activeCleanIds.has(id.split('-loop-')[0]));
   }, [cardOrderIds, activePlaylistId, currentMode, difficultyStatesParam]);
 
   const cardsList = visibleCardsList;
@@ -2910,12 +2926,8 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
       // A. Initial boot pause on mount to pre-warm the first card's assets perfectly
       if (!hasShownInitialPauseRef.current) {
         hasShownInitialPauseRef.current = true;
-        setShowPrefetchingPause(true);
         lightHaptic();
-        setTimeout(() => {
-          setShowPrefetchingPause(false);
-          lightHaptic();
-        }, 1000);
+        // No pause on boot — cards are already in memory, no pre-warming needed
       }
 
       // B. Track active index to maintain swipe history anchors and show prefetching pause modal every 10 cards
@@ -3064,8 +3076,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
         handleMoreOptionsTrigger={handleMoreOptionsTrigger}
         handleDifficultyStateUpdateInReels={handleDifficultyStateUpdateInReels}
         scrollY={scrollY}
-        scrollEnabled={scrollEnabled}
-        handleScrollEnabledChange={handleScrollEnabledChange}
+        rnghScrollViewRef={rnghScrollViewRef}
         isActiveCardClassified={isActiveCardClassified}
         feedSessionId={feedSessionIdRef.current}
       />
@@ -3084,8 +3095,7 @@ function ReelsScreenContent({ isCustomPlayer = false }: { isCustomPlayer?: boole
     handleMoreOptionsTrigger,
     handleDifficultyStateUpdateInReels,
     scrollY,
-    scrollEnabled,
-    handleScrollEnabledChange,
+    rnghScrollViewRef,
     isActiveCardClassified,
   ]);
 
@@ -3271,7 +3281,13 @@ Start now by asking Question 1.
 ${slidesText}`;
             } else {
               // ── EXPLAIN THIS MODE: Teach me like a peer ──
-              prompt = `Act as a highly skilled peer (a student who has got an exceptional, deep grasp of the topic) trying to teach their juniors in terms they easily understand, keeping all technical terms intact so the explanation is both completely intuitive and academically complete.
+              prompt = `The student has already read these slides.
+
+1. Summarize the key concepts in 3-5 bullets.
+2. Mention a few common confusion points.
+3. Ask the student what specific doubt they have.
+
+Do not rate, critique, improve, or teach the slides unless the student asks a question.
 
 ## ${currentCard?.title || 'Unknown Card'}
 - **Topic**: ${currentCard?.topic || 'N/A'}
@@ -3325,7 +3341,8 @@ ${slidesText}`;
           <FlashListElement
             ref={flatListRef}
             data={visibleCardsList}
-            scrollEnabled={scrollEnabled && !showPrefetchingPause && !showFetchingOverlay}
+            renderScrollComponent={renderScrollComponent}
+            scrollEnabled={!showPrefetchingPause && !showFetchingOverlay}
             initialScrollIndex={
               initialScrollIndex !== undefined &&
               initialScrollIndex > 0 &&
@@ -3346,11 +3363,9 @@ ${slidesText}`;
             removeClippedSubviews={false}
             getItemType={(item: any) => {
               if (!item) return 'LOADING';
-              const isActive = cardsList.indexOf(item) === activeIndex;
               const card = usePlaylistStateStore.getState()
                 .cardsById[item.split('-loop-')[0]];
-              if (isActive) return 'ACTIVE_CARD';
-              return card?.code ? 'INACTIVE_CODE' : 'INACTIVE_TEXT';
+              return card?.code ? 'CODE_CARD' : 'TEXT_CARD';
             }}
             onScroll={handleScroll}
             scrollEventThrottle={16}
@@ -3668,15 +3683,12 @@ export default function ReelsScreen({ isCustomPlayer = false }: { isCustomPlayer
   const [mountContent, setMountContent] = React.useState(false);
 
   React.useEffect(() => {
-    const mountTime = Date.now();
-    console.log('[PERF] ReelsScreen: Component mounted at:', mountTime);
-    // Bypassed InteractionManager.runAfterInteractions with a minimal 16ms timeout
-    const timer = setTimeout(() => {
-      const execTime = Date.now();
-      console.log('[PERF] ReelsScreen: Mount task executed (via setTimeout) at:', execTime, '| Delay since mount:', execTime - mountTime, 'ms');
+    // Wait for the tab switch animation to fully complete before mounting
+    // the heavy ReelsScreenContent — prevents JS thread contention
+    const task = InteractionManager.runAfterInteractions(() => {
       setMountContent(true);
-    }, 16);
-    return () => clearTimeout(timer);
+    });
+    return () => task.cancel();
   }, []);
 
   if (!mountContent) {

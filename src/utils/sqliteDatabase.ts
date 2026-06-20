@@ -554,7 +554,7 @@ export async function setupDatabaseTables(): Promise<void> {
           CREATE TABLE IF NOT EXISTS notification_settings (
             userId TEXT PRIMARY KEY NOT NULL,
             enabled INTEGER CHECK(enabled IN (0, 1)) NOT NULL DEFAULT 0,
-            hour INTEGER NOT NULL DEFAULT 19,
+            hour INTEGER NOT NULL DEFAULT 11,
             minute INTEGER NOT NULL DEFAULT 0,
             frequency TEXT NOT NULL DEFAULT 'daily',
             customDays TEXT NOT NULL DEFAULT '[]',

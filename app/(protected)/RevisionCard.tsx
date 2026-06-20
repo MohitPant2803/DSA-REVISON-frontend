@@ -208,14 +208,16 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
 
   const [isCodeLoaded, setIsCodeLoaded] = useState(false);
   React.useEffect(() => {
-    if (slide.type === 'code') {
-      const delay = lowEndDeviceMode ? 500 : 250;
+    if (slide.type === 'code' && slide.slideIndex === currentIndex) {
+      const delay = lowEndDeviceMode ? 300 : 150;
       const timeout = setTimeout(() => {
         setIsCodeLoaded(true);
       }, delay);
       return () => clearTimeout(timeout);
+    } else if (slide.type === 'code' && slide.slideIndex !== currentIndex) {
+      setIsCodeLoaded(false);
     }
-  }, [slide.type, lowEndDeviceMode]);
+  }, [slide.type, currentIndex, lowEndDeviceMode]);
 
   const folderId =
     typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;
@@ -469,13 +471,11 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
                           </>
                         ) : (
                           <StyledView className="flex-row items-center gap-2">
-                            <StyledTouchableOpacity 
-                              onPress={() => setIsEditingCode(true)}
+                            <StyledView 
                               className="flex-row items-center gap-1 px-2.5 py-1 rounded bg-zinc-800/80 border border-zinc-700/60"
                             >
-                              <Edit size={10} color="#94A3B8" />
                               <StyledText className="text-[10px] font-semibold font-mono" style={{ color: '#94A3B8' }}>{codeLang.toUpperCase()}</StyledText>
-                            </StyledTouchableOpacity>
+                            </StyledView>
                             <StyledTouchableOpacity 
                               onPress={() => setIsFullscreenCodeOpen(true)}
                               className="flex-row items-center justify-center p-1 rounded bg-zinc-800/80 border border-zinc-700/60"

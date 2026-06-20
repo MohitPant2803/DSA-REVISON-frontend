@@ -53,6 +53,7 @@ import { MySpaceSettingsOverlay } from '@/components/SettingsOverlay';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import api from '@/services/api';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { useWalkthroughStore } from '@/store/useWalkthroughStore';
 import { SyncPauseGate } from '@/components/SyncPauseGate';
@@ -607,7 +608,7 @@ const getGreeting = () => {
 // -------------------------------------------------------------
 // PRIMARY REVISION BRAIN DASHBOARD
 // -------------------------------------------------------------
-export default function PersonalScreen() {
+function PersonalScreenContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const palette = useThemePalette();
@@ -654,12 +655,16 @@ export default function PersonalScreen() {
   const deletePlaylistMutation = useDeletePlaylist();
   const updatePlaylistMutation = useUpdatePlaylist();
 
-  const easyCount = usePlaylistCount('easy');
-  const mediumCount = usePlaylistCount('medium');
-  const hardCount = usePlaylistCount('hard');
-  const skippedCount = usePlaylistCount('skipped');
+  const { easyCount, mediumCount, hardCount, skippedCount } = usePlaylistStateStore(
+    useShallow((state) => ({
+      easyCount: Math.max(0, (state.initialSmartCounts['easy'] || 0) + (state.smartPlaylistDeltaCounts['easy'] || 0)),
+      mediumCount: Math.max(0, (state.initialSmartCounts['medium'] || 0) + (state.smartPlaylistDeltaCounts['medium'] || 0)),
+      hardCount: Math.max(0, (state.initialSmartCounts['hard'] || 0) + (state.smartPlaylistDeltaCounts['hard'] || 0)),
+      skippedCount: Math.max(0, (state.initialSmartCounts['skipped'] || 0) + (state.smartPlaylistDeltaCounts['skipped'] || 0)),
+    }))
+  );
 
-  const hydrateSmartCounts = usePlaylistStateStore((state) => state.hydrateSmartCounts);
+  const hydratePlaylistsAndCounts = usePlaylistStateStore((state) => state.hydratePlaylistsAndCounts);
 
   useEffect(() => {
     if (playlists && playlists.length > 0) {
@@ -673,12 +678,9 @@ export default function PersonalScreen() {
         }
       });
 
-      if (customPlaylistsToHydrate.length > 0) {
-        usePlaylistStateStore.getState().hydrateAllCustomPlaylistsOrder(customPlaylistsToHydrate);
-      }
-      hydrateSmartCounts(initialCounts);
+      hydratePlaylistsAndCounts(customPlaylistsToHydrate, initialCounts);
     }
-  }, [playlists, hydrateSmartCounts]);
+  }, [playlists, hydratePlaylistsAndCounts]);
 
   const [isCreating, setIsCreating] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -1480,4 +1482,24 @@ export default function PersonalScreen() {
     </SafeAreaView>
   </ThemeBackground>
   );
+}
+
+export default function PersonalScreen() {
+  const palette = useThemePalette();
+  const [mountContent, setMountContent] = useState(false);
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setMountContent(true);
+    });
+    return () => task.cancel();
+  }, []);
+
+  if (!mountContent) {
+    return (
+      <View style={{ flex: 1, backgroundColor: palette.background }} />
+    );
+  }
+
+  return <PersonalScreenContent />;
 }

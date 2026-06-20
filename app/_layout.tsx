@@ -278,8 +278,8 @@ export default function RootLayout() {
     const inAuthGroup = segments[0] === '(auth)';
     const inOnboarding = (segments as string[])[1] === 'onboarding';
 
-    // Only block navigation during onboarding generation — not globally
-    if (isGeneratingSystem && inOnboarding) return;
+    // Block all automatic redirects while onboarding exit transition is in-flight
+    if (isGeneratingSystem) return;
 
     // 1. If not logged in, they must go to onboarding or login page
     if (!hasAccess && !inAuthGroup) {

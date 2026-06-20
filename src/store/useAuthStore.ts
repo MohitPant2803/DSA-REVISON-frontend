@@ -316,6 +316,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       await SecureStorage.removeToken();
       await SecureStorage.removeUser();
+
+      try {
+        const { cancelAllNotifications } = require('../services/notificationService');
+        await cancelAllNotifications();
+      } catch (err: any) {
+        console.warn('[AuthStore] Failed to cancel notifications on guest logout:', err.message);
+      }
+
       set((state) => ({
         token: null,
         user: null,
@@ -420,6 +428,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     await SecureStorage.removeToken();
     await SecureStorage.removeUser();
+
+    try {
+      const { cancelAllNotifications } = require('../services/notificationService');
+      await cancelAllNotifications();
+    } catch (err: any) {
+      console.warn('[AuthStore] Failed to cancel notifications on user logout:', err.message);
+    }
+
     set((state) => ({
       token: null,
       user: null,

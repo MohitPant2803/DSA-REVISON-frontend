@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReeWise",
     "slug": "dsa-revision-app",
-    "version": "1.0.5",
+    "version": "1.0.8",
     "scheme": "dsareels",
     "orientation": "portrait",
     "icon": "./assets/icon213.png",

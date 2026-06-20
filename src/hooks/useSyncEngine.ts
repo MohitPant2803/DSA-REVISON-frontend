@@ -678,32 +678,38 @@ export function useSyncEngine() {
             (global as any).dumpInstrumentState('10. commitStateSwap starts');
           }
           setSyncProgress(100, 'Completed');
-          const nextHydratedPlaylists: Record<string, boolean> = {};
-          Object.keys(shadowPlaylists).forEach((pId) => {
-            nextHydratedPlaylists[pId] = true;
-          });
 
-          const nextState: any = {
-            cardsById: shadowCards,
-            foldersById: shadowFolders,
-            playlistsById: shadowPlaylists,
-            playlistCardOrderMap: shadowOrderMap,
-            cardDifficultyMap: shadowDifficultyMap,
-            hydratedPlaylists: nextHydratedPlaylists,
-            lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
-            lastSyncedAt: payload.timestamp || new Date().toISOString(),
-            lastSuccessfulSyncAt: Date.now(),
-            syncFailureCount: 0,
-            isFirstTimeSyncInProgress: false,
-          };
-          if (fullPlaylistCardsChanged) {
-            nextState.fullPlaylistCards = nextFullPlaylistCards;
-            nextState.hydratedPlaylistCardCounts = nextHydratedPlaylistCardCounts;
-          }
-          usePlaylistStateStore.setState(nextState);
-          if (typeof (global as any).dumpInstrumentState === 'function') {
-            (global as any).dumpInstrumentState('11. commitStateSwap completes');
-          }
+          // Dismiss first-time sync gate overlay immediately so layout navigation triggers
+          usePlaylistStateStore.setState({ isFirstTimeSyncInProgress: false });
+
+          // Yield massive data swap to the interaction manager to allow layout transition to render cleanly
+          InteractionManager.runAfterInteractions(() => {
+            const nextHydratedPlaylists: Record<string, boolean> = {};
+            Object.keys(shadowPlaylists).forEach((pId) => {
+              nextHydratedPlaylists[pId] = true;
+            });
+
+            const nextState: any = {
+              cardsById: shadowCards,
+              foldersById: shadowFolders,
+              playlistsById: shadowPlaylists,
+              playlistCardOrderMap: shadowOrderMap,
+              cardDifficultyMap: shadowDifficultyMap,
+              hydratedPlaylists: nextHydratedPlaylists,
+              lastSyncedRevision: payload.toRevision || payload.currentRevision || 0,
+              lastSyncedAt: payload.timestamp || new Date().toISOString(),
+              lastSuccessfulSyncAt: Date.now(),
+              syncFailureCount: 0,
+            };
+            if (fullPlaylistCardsChanged) {
+              nextState.fullPlaylistCards = nextFullPlaylistCards;
+              nextState.hydratedPlaylistCardCounts = nextHydratedPlaylistCardCounts;
+            }
+            usePlaylistStateStore.setState(nextState);
+            if (typeof (global as any).dumpInstrumentState === 'function') {
+              (global as any).dumpInstrumentState('11. commitStateSwap completes');
+            }
+          });
         };
  
         if (interactionScheduler.isInteracting()) {

@@ -80,6 +80,7 @@ export default function LoginScreen() {
       }, 10000);
     } else {
       if (syncTimerRef.current) {
+        console.log('[LoginScreen] Clearing fail-safe sync timeout timer (successful completion)');
         clearTimeout(syncTimerRef.current);
         syncTimerRef.current = null;
       }
@@ -88,7 +89,9 @@ export default function LoginScreen() {
 
     return () => {
       if (syncTimerRef.current) {
+        console.log('[LoginScreen] Cleaning up/Clearing fail-safe sync timeout timer on unmount');
         clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
       }
     };
   }, [isFirstTimeSyncInProgress]);

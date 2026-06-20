@@ -210,12 +210,20 @@ export default function DevReplayInspector() {
           onPress={async () => {
             try {
               const { getDatabase } = require('@/utils/sqliteDatabase');
+              const { invalidateDeletedEntitiesCache } = require('@/utils/sqliteSyncBridge');
               const db = getDatabase();
+              
+              // 1. Wipe all local SQLite content tables, tombstones, and cursors to force a clean full resync
+              await db.runAsync('DELETE FROM cards_metadata;');
+              await db.runAsync('DELETE FROM cards_content;');
               await db.runAsync('DELETE FROM deleted_entities;');
+              await db.runAsync('DELETE FROM sync_cursors;');
               await db.runAsync("DELETE FROM playlists WHERE id IN ('easy', 'medium', 'hard', 'skipped') OR LOWER(name) IN ('easy', 'medium', 'hard', 'skipped', 'dp', 'yus', 'testing', 'lesgoooo', 'lessgoooo');");
+              
+              invalidateDeletedEntitiesCache();
               console.log('[Dev Tools] Successfully cleared SQLite database tables.');
               
-              // Wipe from Zustand memory cache instantly
+              // 2. Wipe from Zustand memory cache instantly
               const store = usePlaylistStateStore.getState();
               const playlistsById = { ...store.playlistsById };
               const orderMap = { ...store.playlistCardOrderMap };
@@ -233,7 +241,9 @@ export default function DevReplayInspector() {
               usePlaylistStateStore.setState({
                 playlistsById,
                 playlistCardOrderMap: orderMap,
+                cardsById: {},
                 lastSyncedRevision: 0,
+                lastSyncedAt: null,
               });
               
               syncManager.sync(true);

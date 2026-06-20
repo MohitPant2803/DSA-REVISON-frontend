@@ -59,13 +59,13 @@ interface CardItemProps {
   drag: () => void;
   isActive: boolean;
   startRevising: (shuffle?: boolean, resume?: boolean, startCardId?: string) => void;
+  palette: any;
+  step: string;
+  isWalkthroughActive: boolean;
 }
 
-const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemProps) => {
+const CardItem = React.memo(({ card, drag, isActive, startRevising, palette, step, isWalkthroughActive }: CardItemProps) => {
   if (!card || !card._id) return null;
-  const palette = useThemePalette();
-  const step = useWalkthroughStore(s => s.step);
-  const isWalkthroughActive = step !== 'none';
 
   return (
     <ScaleDecorator activeScale={1.0}>
@@ -120,7 +120,9 @@ const CardItem = React.memo(({ card, drag, isActive, startRevising }: CardItemPr
     prevProps.card._id === nextProps.card._id &&
     prevProps.card.title === nextProps.card.title &&
     prevProps.card.topic === nextProps.card.topic &&
-    prevProps.card.difficulty === nextProps.card.difficulty
+    prevProps.card.difficulty === nextProps.card.difficulty &&
+    prevProps.palette === nextProps.palette &&
+    prevProps.step === nextProps.step
   );
 });
 
@@ -839,6 +841,9 @@ export default function PlaylistCardsScreen() {
           drag={drag}
           isActive={isActive}
           startRevising={startRevising}
+          palette={palette}
+          step={step}
+          isWalkthroughActive={isWalkthroughActive}
         />
       </Swipeable>
     );

@@ -155,7 +155,7 @@ const FolderCardSkeleton = () => {
   );
 };
 
-export default function LearnScreen() {
+function LearnScreenContent() {
   useAppBackHandler();
   const palette = useThemePalette();
   
@@ -988,6 +988,26 @@ export default function LearnScreen() {
     </View>
   </ThemeBackground>
   );
+}
+
+export default function LearnScreen() {
+  const palette = useThemePalette();
+  const [mountContent, setMountContent] = useState(false);
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setMountContent(true);
+    });
+    return () => task.cancel();
+  }, []);
+
+  if (!mountContent) {
+    return (
+      <View style={{ flex: 1, backgroundColor: palette.background }} />
+    );
+  }
+
+  return <LearnScreenContent />;
 }
 
 const styles = StyleSheet.create({
