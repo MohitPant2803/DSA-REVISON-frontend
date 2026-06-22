@@ -22,3 +22,7 @@ export const getMe = async (deviceId?: string, clockEpoch?: string): Promise<Use
     lastCompletedDate: raw.lastCompletedDate ? String(raw.lastCompletedDate) : undefined,
   };
 };
+
+export const deleteAccount = async (): Promise<void> => {
+  await api.delete('/auth/delete-account');
+};

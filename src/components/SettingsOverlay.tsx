@@ -20,7 +20,7 @@ import {
 import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, LogOut, LogIn, Moon, Sun, CheckSquare, Square, Folder as FolderIcon } from 'lucide-react-native';
+import { X, LogOut, LogIn, Moon, Sun, CheckSquare, Square, Folder as FolderIcon, Trash2 } from 'lucide-react-native';
 import { useUserPreferencesStore } from '@/store/useUserPreferencesStore';
 import { themePalettes, addAlpha } from '@/theme/themePalettes';
 import { useThemePalette } from '@/hooks/useThemePalette';
@@ -641,16 +641,54 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   const handleUpdateApp = async () => {
     lightHaptic();
     try {
-      const canOpen = await Linking.canOpenURL(updateUrl);
+      const supportUrl = 'https://ree-wise-download-website.vercel.app/support';
+      const canOpen = await Linking.canOpenURL(supportUrl);
       if (canOpen) {
-        await Linking.openURL(updateUrl);
+        await Linking.openURL(supportUrl);
       } else {
-        Alert.alert("Error", "Unable to open update link.");
+        Alert.alert("Error", "Unable to open support link.");
       }
     } catch (err: any) {
-      console.error('[SettingsOverlay] Update app linking error:', err.message);
-      Alert.alert("Error", "Failed to open update link.");
+      console.error('[SettingsOverlay] Support linking error:', err.message);
+      Alert.alert("Error", "Failed to open support link.");
     }
+  };
+
+  const handleDeleteAccount = async () => {
+    lightHaptic();
+    Alert.alert(
+      "Delete Account",
+      "Are you sure you want to permanently delete your account? This will erase all your progress, custom playlists, folders, streaks, and account details. This action cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsAuthenticating(true);
+              const { deleteAccount: apiDeleteAccount } = require('@/services/authService');
+              await apiDeleteAccount();
+              onClose();
+              await logout();
+              Toast.show({
+                type: 'success',
+                text1: 'Account Deleted',
+                text2: 'Your account has been successfully removed.',
+              });
+            } catch (err: any) {
+              console.error('[SettingsOverlay] Delete account error:', err.message);
+              Alert.alert("Error", "Failed to delete account. Please try again later.");
+            } finally {
+              setIsAuthenticating(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleShareApp = async () => {
@@ -791,7 +829,7 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                   ]}
                 >
                   <Text style={{ fontSize: 13.5, fontWeight: '700', color: palette.textSecondary }}>
-                    Update App
+                    Support & Help
                   </Text>
                 </TouchableOpacity>
 
@@ -888,6 +926,26 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
                   </>
                 )}
               </TouchableOpacity>
+
+              {!isGuest && (
+                <TouchableOpacity
+                  onPress={handleDeleteAccount}
+                  activeOpacity={0.8}
+                  disabled={isAuthenticating}
+                  style={[
+                    styles.authButton,
+                    {
+                      marginTop: 10,
+                      backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05),
+                      borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15),
+                      borderWidth: 1,
+                    }
+                  ]}
+                >
+                  <Trash2 color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Delete Account</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </ScrollView>
         </Animated.View>

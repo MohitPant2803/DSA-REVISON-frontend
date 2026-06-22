@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, ActivityIndicator, TouchableOpacity, Platform, DevSettings } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, ActivityIndicator, TouchableOpacity, Platform, DevSettings, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { ReeWCharacter } from '@/components/ReeWCharacter';
@@ -336,7 +336,28 @@ export default function LoginScreen() {
               <Square size={20} color={palette.textMuted} strokeWidth={2} />
             )}
             <Text style={{ fontSize: 12, fontWeight: '600', color: palette.textSecondary, marginLeft: 10, flex: 1, lineHeight: 16 }}>
-              I agree to the Terms of Service and Privacy Policy
+              I agree to the{' '}
+              <Text
+                style={{ color: palette.accent, textDecorationLine: 'underline' }}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  hapticFeedback.selection();
+                  Linking.openURL('https://ree-wise-download-website.vercel.app/terms').catch(() => {});
+                }}
+              >
+                Terms of Service
+              </Text>
+              {' '}and{' '}
+              <Text
+                style={{ color: palette.accent, textDecorationLine: 'underline' }}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  hapticFeedback.selection();
+                  Linking.openURL('https://ree-wise-download-website.vercel.app/privacy').catch(() => {});
+                }}
+              >
+                Privacy Policy
+              </Text>
             </Text>
           </TouchableOpacity>
 
