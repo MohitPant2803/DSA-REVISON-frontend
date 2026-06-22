@@ -44,7 +44,13 @@
       "expo-secure-store",
       "@react-native-google-signin/google-signin",
       "expo-sqlite",
-      "expo-notifications"
+      "expo-notifications",
+      ["expo-build-properties", {
+        "android": {
+          "compileSdkVersion": 35,
+          "targetSdkVersion": 35
+        }
+      }]
     ],
     "extra": {
       "router": {},
