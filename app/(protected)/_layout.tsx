@@ -7,7 +7,7 @@ function StackWithBack() {
   useAppBackHandler();
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'fade', animationTypeForReplace: 'pop' }}>
-      <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+      <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
       <Stack.Screen name="admin" />
       <Stack.Screen name="playlist/[playlistId]" />
       <Stack.Screen name="folder/[folderId]" />

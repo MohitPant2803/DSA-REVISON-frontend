@@ -801,11 +801,18 @@ export function useSyncEngine() {
 
     if (isSyncInFlight.current) return;
 
+    const currentBootstrap = usePlaylistStateStore.getState().bootstrapStatus;
+    if (currentBootstrap === 'metadata_loading' || currentBootstrap === 'cards_loading') {
+      if (__DEV__) {
+        console.log('[Sync Trigger] Aborting background sync: SQLite hydration is actively running.');
+      }
+      return;
+    }
+
     isSyncInFlight.current = true;
     setSyncStatus('syncing');
     
     // Only transition bootstrapStatus if we haven't successfully bootstrapped the app yet
-    const currentBootstrap = usePlaylistStateStore.getState().bootstrapStatus;
     const shouldUpdateBootstrap = currentBootstrap !== 'completed';
     if (shouldUpdateBootstrap) {
       setBootstrapStatus('in_progress');

@@ -2557,7 +2557,6 @@ export const usePlaylistStateStore = create<PlaylistState>()(
           lastSyncedRevision: state.lastSyncedRevision,
           deviceId: state.deviceId,
           logicalClockSequence: state.logicalClockSequence,
-          fullPlaylistCards: state.fullPlaylistCards,
           hydratedPlaylistCardCounts: state.hydratedPlaylistCardCounts,
           selectedRootFolderIds: state.selectedRootFolderIds,
           notificationsEnabled: state.notificationsEnabled,
@@ -2616,6 +2615,9 @@ export const usePlaylistStateStore = create<PlaylistState>()(
                 console.log(`[Zustand Rehydration Completed] Local Zustand hydrated in ${duration.toFixed(2)}ms.`);
               }
 
+              // Reset bootstrap status on rehydration to prevent premature startup sync loop race conditions
+              rehydratedState.setBootstrapStatus('not_started');
+              
               // Phase 1: Mount UI shell instantly (Zustand storage rehydrated)
               rehydratedState.setHasHydrated(true);
 

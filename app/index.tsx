@@ -244,28 +244,27 @@ export default function StartupCoordinator() {
     const performCinematicExit = () => {
       clearTimeoutTimer();
       // Set exit state
-      isExiting.value = withTiming(1, { duration: 600, easing: easings.easeOutExpo });
+      isExiting.value = withTiming(1, { duration: 280, easing: easings.easeOutExpo });
       
       // Animate logo flying upward out of view
       logoScale.value = withSpring(0.7, springPresets.stiff);
-      logoTranslateY.value = withTiming(-280, { duration: 550, easing: easings.easeInExpo });
-      logoOpacity.value = withTiming(0, { duration: 450 });
+      logoTranslateY.value = withTiming(-280, { duration: 250, easing: easings.easeInExpo });
+      logoOpacity.value = withTiming(0, { duration: 180 }, (finished) => {
+        if (finished) {
+          runOnJS(handleNavigation)();
+        }
+      });
 
       // Animate text sliding downward out of view
-      textTranslateY.value = withTiming(120, { duration: 550, easing: easings.easeInExpo });
-      textOpacity.value = withTiming(0, { duration: 450 });
+      textTranslateY.value = withTiming(120, { duration: 250, easing: easings.easeInExpo });
+      textOpacity.value = withTiming(0, { duration: 180 });
 
       // Animate background portal expanding dynamically
-      glowScale.value = withTiming(3.2, { duration: 600, easing: easings.easeOutExpo });
-      glowOpacity.value = withTiming(0, { duration: 600 });
+      glowScale.value = withTiming(3.2, { duration: 280, easing: easings.easeOutExpo });
+      glowOpacity.value = withTiming(0, { duration: 280 });
 
       // Tactile notification sweep at handoff transition
       hapticFeedback.selection();
-
-      // Trigger routing immediately at the peak of the portal expansion (550ms)
-      setTimeout(() => {
-        runOnJS(handleNavigation)();
-      }, 550);
     };
 
     const handleNavigation = () => {
@@ -567,7 +566,7 @@ export default function StartupCoordinator() {
         {/* Cinematic Typographic Sequence */}
         <Animated.View style={[styles.textContainer, textAnimatedStyle]}>
           <Text style={[styles.title, { color: palette.textPrimary }]}>ReeWise</Text>
-          <Text style={[styles.subtitle, { color: palette.textSecondary }]}>Making revision convinient...</Text>
+          <Text style={[styles.subtitle, { color: palette.textSecondary }]}>Making revision convenient...</Text>
         </Animated.View>
       </View>
 

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useScreenProfiler } from '@/hooks/useScreenProfiler';
 import {
   View,
   Text,
@@ -155,7 +156,94 @@ const FolderCardSkeleton = () => {
   );
 };
 
+const TypewriterText = React.memo(({
+  text,
+  onComplete,
+  timelineProgress,
+}: {
+  text: string;
+  onComplete: () => void;
+  timelineProgress: SharedValue<number>;
+}) => {
+  const [displayedMessage, setDisplayedMessage] = useState('');
+  const [isTypingComplete, setIsTypingComplete] = useState(globalHasPlayedLearnAnimation);
+  const cursorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 0 : 1);
+  const palette = useThemePalette();
+
+  useEffect(() => {
+    if (!text) return;
+
+    if (globalHasPlayedLearnAnimation) {
+      setDisplayedMessage(text);
+      setIsTypingComplete(true);
+      onComplete();
+      return;
+    }
+
+    let isActive = true;
+    let index = 0;
+    setDisplayedMessage('');
+    setIsTypingComplete(false);
+
+    cursorOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0, { duration: 300 }),
+        withTiming(1, { duration: 300 })
+      ),
+      -1,
+      true
+    );
+
+    let timer: NodeJS.Timeout;
+
+    const typeNextChar = () => {
+      if (!isActive) return;
+
+      if (index < text.length) {
+        const nextIdx = Math.min(text.length, index + 2);
+        setDisplayedMessage(text.substring(0, nextIdx));
+        index = nextIdx;
+        
+        timelineProgress.value = (index / text.length) * 30;
+        
+        const randomDelay = 35 + Math.random() * 15;
+        timer = setTimeout(typeNextChar, randomDelay);
+      } else {
+        timelineProgress.value = 30;
+        setIsTypingComplete(true);
+        onComplete();
+      }
+    };
+
+    // Start typing immediately on mount without setTimeout tick delay
+    typeNextChar();
+
+    return () => {
+      isActive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [text]);
+
+  const cursorAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: cursorOpacity.value,
+  }));
+
+  return (
+    <Text style={[styles.greetingSub, { color: palette.textSecondary }]}>
+      {displayedMessage}
+      {!isTypingComplete && (
+        <Animated.Text style={[styles.cursor, cursorAnimatedStyle, { color: palette.accent }]}>|</Animated.Text>
+      )}
+    </Text>
+  );
+});
+
 function LearnScreenContent() {
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log("[RENDER] Learn.Content", renderCount.current);
+
+  useScreenProfiler('Learn.Content');
   useAppBackHandler();
   const palette = useThemePalette();
   
@@ -187,16 +275,17 @@ function LearnScreenContent() {
 
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { preferences } = useOnboardingStore();
+  const userId = useAuthStore(s => s.user?.id);
+  const userName = useAuthStore(s => s.user?.name);
+  const preferences = useOnboardingStore(s => s.preferences);
   const { canManageContent, role } = useRole();
-  const { setHasAppBeenAnimated } = useUIStore();
+  const setHasAppBeenAnimated = useUIStore(s => s.setHasAppBeenAnimated);
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
   const pinnedFolderIds = usePlaylistStateStore((s) => s.pinnedFolderIds);
   const toggleFolderPin = usePlaylistStateStore((s) => s.toggleFolderPin);
 
   const { data: stats, refetch: refetchStats, isRefetching: isStatsRefetching } = useDashboard();
-  const { setActivePlaylistId } = useBookmarkStore();
+  const setActivePlaylistId = useBookmarkStore(s => s.setActivePlaylistId);
   const { data: playlists = [] } = usePlaylists();
 
   const [search, setSearch] = useState('');
@@ -204,7 +293,7 @@ function LearnScreenContent() {
   const [editingFolder, setEditingFolder] = useState<IFolder | null>(null);
   const [selectedActionFolder, setSelectedActionFolder] = useState<IFolder | null>(null);
   const [isActionsModalVisible, setIsActionsModalVisible] = useState(false);
-  const isGuest = user?.id === 'guest-user';
+  const isGuest = userId === 'guest-user';
 
   const { data, isLoading: queryLoading, isError: queryIsError, error: queryError, refetch, isRefetching } = useGetFolders({
     limit: 100,
@@ -341,56 +430,47 @@ function LearnScreenContent() {
   const [phase, setPhase] = useState<'typing' | 'authorReveal' | 'contentReady' | 'settled'>(globalHasPlayedLearnAnimation ? 'settled' : 'typing');
   const [showAuthor, setShowAuthor] = useState(globalHasPlayedLearnAnimation);
   const [isTypingComplete, setIsTypingComplete] = useState(globalHasPlayedLearnAnimation);
-  const [displayedMessage, setDisplayedMessage] = useState('');
   const [seniorModalVisible, setSeniorModalVisible] = useState(false);
 
   // Dynamic MongoDB Quote integration with Zustand Local-First Persistence
   const cachedQuotes = usePlaylistStateStore((s) => s.seniorQuotes);
-  const [quotesList, setQuotesList] = useState<any[]>(cachedQuotes || []);
-
-  // Sync state with cached quotes once they are loaded from SQLite
-  useEffect(() => {
-    if (cachedQuotes && cachedQuotes.length > 0) {
-      setQuotesList(cachedQuotes);
-    }
-  }, [cachedQuotes]);
 
   // Selected Quote Selection for Ghost Typing - sequential rotation per user entry
-  const [selectedQuote, setSelectedQuote] = useState<any>(null);
-  useEffect(() => {
+  const [selectedQuote, setSelectedQuote] = useState<any>(() => {
     if (isGuest) {
-      if (selectedQuote) return;
-      setSelectedQuote({
+      return {
         _id: "6a13357421b348638d89b061",
         text: "Family is the most important thing, be it real one or in kgp. live here don't just survive. study hard party harder. Be passionate about something and be extremely skillfull in one domain or another. CDC won't define your worth, people have gone through 0 interviews in internships to getting day1 day2 placements, it's never too late, just stay relentless and believe in yourself",
         author: "Mohit Pant",
         collegeName: "IIT KGP",
         branch: "Mining",
         yearOfGraduation: 2027
-      });
-      return;
-    }
-
-    if (!quotesList || quotesList.length === 0) {
-      if (!selectedQuote) {
-        setSelectedQuote({
-          _id: "6a13357421b348638d89b061",
-          text: "Family is the most important thing, be it real one or in kgp. live here don't just survive. study hard party harder. Be passionate about something and be extremely skillfull in one domain or another. CDC won't define your worth, people have gone through 0 interviews in internships to getting day1 day2 placements, it's never too late, just stay relentless and believe in yourself",
-          author: "Mohit Pant",
-          collegeName: "IIT KGP",
-          branch: "Mining",
-          yearOfGraduation: 2027
-        });
-      }
-      return;
+      };
     }
 
     const store = usePlaylistStateStore.getState();
+    const quotes = store.seniorQuotes || [];
+    let index = store.currentQuoteIndex;
+    if (index >= quotes.length || index < 0) {
+      index = 0;
+    }
+    return quotes[index] || {
+      _id: "6a13357421b348638d89b061",
+      text: "Family is the most important thing, be it real one or in kgp. live here don't just survive. study hard party harder. Be passionate about something and be extremely skillfull in one domain or another. CDC won't define your worth, people have gone through 0 interviews in internships to getting day1 day2 placements, it's never too late, just stay relentless and believe in yourself",
+      author: "Mohit Pant",
+      collegeName: "IIT KGP",
+      branch: "Mining",
+      yearOfGraduation: 2027
+    };
+  });
 
-    // If we have already selected a quote in this mount, keep it, but reactively
-    // update the reference if its author or text has changed in the refreshed list.
+  // Sync state with cached quotes if they are updated or loaded reactively
+  useEffect(() => {
+    if (isGuest || !cachedQuotes || cachedQuotes.length === 0) return;
+    const store = usePlaylistStateStore.getState();
+
     if (selectedQuote) {
-      const updatedQuote = quotesList.find((q) => q._id === selectedQuote._id);
+      const updatedQuote = cachedQuotes.find((q) => q._id === selectedQuote._id);
       if (updatedQuote && (updatedQuote.author !== selectedQuote.author || updatedQuote.text !== selectedQuote.text)) {
         setSelectedQuote(updatedQuote);
       }
@@ -398,16 +478,14 @@ function LearnScreenContent() {
     }
 
     let index = store.currentQuoteIndex;
-
-    // Safety bounds check: if out of bounds, reset back to 0th index
-    if (index >= quotesList.length || index < 0) {
+    if (index >= cachedQuotes.length || index < 0) {
       index = 0;
-      usePlaylistStateStore.setState({ currentQuoteIndex: 0 });
     }
-
-    const quote = quotesList[index];
-    setSelectedQuote(quote);
-  }, [quotesList, selectedQuote]);
+    const currentQ = cachedQuotes[index];
+    if (currentQ) {
+      setSelectedQuote(currentQ);
+    }
+  }, [cachedQuotes, selectedQuote]);
 
   // Compute normalized and truncated dashboard quote text
   const dashboardQuoteText = useMemo(() => {
@@ -421,13 +499,16 @@ function LearnScreenContent() {
 
   const authorName = selectedQuote?.author || selectedQuote?.name || selectedQuote?.studentName || "Senior Author";
 
+  const handleTypewriterComplete = useCallback(() => {
+    setIsTypingComplete(true);
+  }, []);
+
   // Master timeline progress representation (0% to 100%)
   const timelineProgress = useSharedValue(globalHasPlayedLearnAnimation ? 100 : 0);
 
   // Math-calibrated center offset so the quote is drawn exactly in the vertical center of the screen
   const quoteInitialY = 245;
 
-  const cursorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 0 : 1);
   const authorOpacity = useSharedValue(globalHasPlayedLearnAnimation ? 1 : 0);
 
   // ReeW wobbly 3-jump entry animation values
@@ -526,76 +607,6 @@ function LearnScreenContent() {
     }
   }, [phase]);
 
-  // 1. Initial Soft Entry & Ambient Variable Typing Engine
-  useEffect(() => {
-    // If quotes are not yet loaded from DB, remain completely quiet, clean, and empty
-    if (!selectedQuote || !selectedQuote.text) {
-      return;
-    }
-
-    // If we have already animated once this session, snap to the finished layout instantly
-    if (globalHasPlayedLearnAnimation) {
-      setDisplayedMessage(dashboardQuoteText);
-      setIsTypingComplete(true);
-      timelineProgress.value = 100;
-      cursorOpacity.value = 0;
-      return;
-    }
-
-    let isActive = true;
-    
-    // Reset timeline progress on quote change
-    timelineProgress.value = 0;
-
-    cursorOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0, { duration: 300 }),
-        withTiming(1, { duration: 300 })
-      ),
-      -1,
-      true
-    );
-
-    let index = 0;
-    setDisplayedMessage('');
-    setIsTypingComplete(false);
-
-    let timer: NodeJS.Timeout;
-
-    // Recursive variable typing pace generator for realistic human pacing
-    const typeNextChar = () => {
-      if (!isActive) return;
-
-      if (index < dashboardQuoteText.length) {
-        // Type 2 characters at a time to reduce CPU re-render storms during boot
-        const nextIdx = Math.min(dashboardQuoteText.length, index + 2);
-        setDisplayedMessage(dashboardQuoteText.substring(0, nextIdx));
-        index = nextIdx;
-        
-        // Calculate typing progress and assign to master timeline (0% to 30%)
-        const currentProgress = (index / dashboardQuoteText.length) * 30;
-        timelineProgress.value = currentProgress;
-        
-        // Pacing irregularity (timing variation) for natural human typing feel
-        const randomDelay = 35 + Math.random() * 15;
-        timer = setTimeout(typeNextChar, randomDelay);
-      } else {
-        timelineProgress.value = 30;
-        setIsTypingComplete(true);
-      }
-    };
-
-    // Soft delay before start typing
-    const startDelay = setTimeout(() => {
-      if (isActive) typeNextChar();
-    }, 0);
-
-    return () => {
-      isActive = false;
-      clearTimeout(startDelay);
-      if (timer) clearTimeout(timer);
-    };
-  }, [selectedQuote, dashboardQuoteText]);
 
   // 3. State-Driven Loading Check
   useEffect(() => {
@@ -706,9 +717,7 @@ function LearnScreenContent() {
 
 
 
-  const cursorAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: cursorOpacity.value,
-  }));
+
 
   const authorAnimatedStyle = useAnimatedStyle(() => ({
     opacity: authorOpacity.value,
@@ -755,7 +764,7 @@ function LearnScreenContent() {
     }
   };
 
-  const firstName = isGuest ? 'Guest' : (user?.name?.split(' ')[0] || 'there');
+  const firstName = isGuest ? 'Guest' : (userName?.split(' ')[0] || 'there');
   const streak = stats?.streakCount ?? 4;
   const cardsRevised = stats?.totalRevisions ?? 24;
 
@@ -765,6 +774,38 @@ function LearnScreenContent() {
     }
     return ['Dynamic Programming', 'Graphs', 'Trees'];
   }, [preferences.weakTopics]);
+
+  const prevRef = useRef<any>({});
+  if (__DEV__) {
+    const current = {
+      userId,
+      userName,
+      preferences,
+      role,
+      syncStatus,
+      pinnedFolderIds,
+      stats,
+      playlists,
+      queryLoading,
+      isTypingComplete,
+      phase,
+      isTransitionReady,
+      search,
+      quotesListLength: quotesList?.length,
+      selectedQuoteId: selectedQuote?._id,
+      showAuthor,
+      seniorModalVisible,
+      modalVisible,
+      isActionsModalVisible,
+      cachedQuotesLength: cachedQuotes?.length,
+    };
+    Object.keys(current).forEach(k => {
+      if ((current as any)[k] !== prevRef.current[k]) {
+        console.log(`[RENDER CAUSE] Learn.Content: "${k}" changed from`, prevRef.current[k], 'to', (current as any)[k]);
+      }
+    });
+    prevRef.current = current;
+  }
 
   if (!isTransitionReady) {
     return (
@@ -813,12 +854,11 @@ function LearnScreenContent() {
           {/* ONE Persistent, continuous Quote block that slides upward with 100% object permanence */}
           {selectedQuote && (
             <Animated.View style={[styles.headerQuoteContainer, quoteAnimatedStyle]}>
-              <Text style={[styles.greetingSub, { color: palette.textSecondary }]}>
-                {displayedMessage}
-                {!isTypingComplete && (
-                  <Animated.Text style={[styles.cursor, cursorAnimatedStyle, { color: palette.accent }]}>|</Animated.Text>
-                )}
-              </Text>
+              <TypewriterText
+                text={dashboardQuoteText}
+                onComplete={handleTypewriterComplete}
+                timelineProgress={timelineProgress}
+              />
               
               {/* Senior Attribution rendered gently to occupy layout space permanently, avoiding folder layout displacement */}
               <Animated.View 
@@ -909,7 +949,7 @@ function LearnScreenContent() {
         visible={isActionsModalVisible}
         folder={selectedActionFolder}
         isPinned={selectedActionFolder ? pinnedFolderIds.has(selectedActionFolder._id) : false}
-        canModify={selectedActionFolder ? (!!user?.id && canModifyItem(role, user.id, selectedActionFolder.createdBy)) : false}
+        canModify={selectedActionFolder ? (!!userId && canModifyItem(role, userId, selectedActionFolder.createdBy)) : false}
         onClose={() => {
           setIsActionsModalVisible(false);
           setSelectedActionFolder(null);
@@ -991,15 +1031,28 @@ function LearnScreenContent() {
 }
 
 export default function LearnScreen() {
-  const palette = useThemePalette();
-  const [mountContent, setMountContent] = useState(false);
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log("[RENDER] Learn.Shell", renderCount.current);
 
-  useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
-      setMountContent(true);
+  useScreenProfiler('Learn.Shell');
+  const palette = useThemePalette();
+  // Initialize to true to mount content instantly and eliminate the 1-second startup delay
+  const [mountContent] = useState(true);
+
+  const prevRef = useRef<any>({});
+  if (__DEV__) {
+    const current = {
+      palette,
+      mountContent,
+    };
+    Object.keys(current).forEach(k => {
+      if ((current as any)[k] !== prevRef.current[k]) {
+        console.log(`[RENDER CAUSE] Learn.Shell: "${k}" changed from`, prevRef.current[k], 'to', (current as any)[k]);
+      }
     });
-    return () => task.cancel();
-  }, []);
+    prevRef.current = current;
+  }
 
   if (!mountContent) {
     return (

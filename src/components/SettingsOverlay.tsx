@@ -898,53 +898,72 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
             {/* Authentication Section - placed at bottom */}
             <View style={styles.settingGroup} pointerEvents={isWalkthroughActive ? "none" : "auto"}>
               <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>Account</Text>
-              <TouchableOpacity
-                onPress={handleAuthAction}
-                activeOpacity={0.8}
-                disabled={isAuthenticating}
-                style={[
-                  styles.authButton,
-                  isGuest 
-                    ? { backgroundColor: palette.accent, borderColor: palette.accent }
-                    : { 
-                        backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05), 
-                        borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15) 
-                      }
-                ]}
-              >
-                {isAuthenticating ? (
-                  <ActivityIndicator color={palette.isDark ? palette.textPrimary : palette.surface} />
-                ) : isGuest ? (
-                  <>
-                    <LogIn color={palette.isDark ? palette.textPrimary : palette.surface} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: palette.isDark ? palette.textPrimary : palette.surface }}>Sign In</Text>
-                  </>
-                ) : (
-                  <>
-                    <LogOut color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Sign Out</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {!isGuest && (
+              
+              {isGuest ? (
                 <TouchableOpacity
-                  onPress={handleDeleteAccount}
+                  onPress={handleAuthAction}
                   activeOpacity={0.8}
                   disabled={isAuthenticating}
                   style={[
                     styles.authButton,
-                    {
-                      marginTop: 10,
-                      backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05),
-                      borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15),
-                      borderWidth: 1,
-                    }
+                    { backgroundColor: palette.accent, borderColor: palette.accent }
                   ]}
                 >
-                  <Trash2 color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Delete Account</Text>
+                  {isAuthenticating ? (
+                    <ActivityIndicator color={palette.isDark ? palette.textPrimary : palette.surface} />
+                  ) : (
+                    <>
+                      <LogIn color={palette.isDark ? palette.textPrimary : palette.surface} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: palette.isDark ? palette.textPrimary : palette.surface }}>Sign In</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
+              ) : (
+                <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+                  {/* Delete Account on the Left */}
+                  <TouchableOpacity
+                    onPress={handleDeleteAccount}
+                    activeOpacity={0.8}
+                    disabled={isAuthenticating}
+                    style={[
+                      styles.authButton,
+                      {
+                        flex: 1,
+                        backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05),
+                        borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15),
+                        borderWidth: 1,
+                      }
+                    ]}
+                  >
+                    <Trash2 color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Delete Account</Text>
+                  </TouchableOpacity>
+
+                  {/* Sign Out on the Right */}
+                  <TouchableOpacity
+                    onPress={handleAuthAction}
+                    activeOpacity={0.8}
+                    disabled={isAuthenticating}
+                    style={[
+                      styles.authButton,
+                      {
+                        flex: 1,
+                        backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05),
+                        borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15),
+                        borderWidth: 1,
+                      }
+                    ]}
+                  >
+                    {isAuthenticating ? (
+                      <ActivityIndicator color={palette.error} />
+                    ) : (
+                      <>
+                        <LogOut color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Sign Out</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </ScrollView>
@@ -1286,9 +1305,9 @@ export const ReelsSettingsOverlay = React.memo(({
               />
             </View>
 
-            {/* AI Assistant Mode */}
+            {/* GPT Prompt Mode */}
             <View style={styles.settingGroup}>
-              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>AI Assistant Mode</Text>
+              <Text style={[styles.groupLabel, { color: palette.textSecondary }]}>GPT Prompt Mode</Text>
               <SegmentedControl
                 options={[
                   { id: 'explanation', label: 'Explain This' },

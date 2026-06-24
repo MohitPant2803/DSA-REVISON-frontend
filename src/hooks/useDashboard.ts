@@ -8,7 +8,7 @@ export const DASHBOARD_QUERY_KEY = 'dashboardStats';
 export const useDashboard = () => {
   // Stable selector: only triggers when total revision count or top 10 active cards list changes
   const dashboardKey = usePlaylistStateStore(
-    useShallow((s) => {
+    (s) => {
       const cards = Object.values(s.cardsById);
       const revCount = cards.filter(
         (c) => c.difficultyState != null && c.difficultyState !== 'skipped'
@@ -20,7 +20,7 @@ export const useDashboard = () => {
         .map((c) => c._id)
         .join(',');
       return `${revCount}-${recent}`;
-    })
+    }
   );
 
   return useQuery({

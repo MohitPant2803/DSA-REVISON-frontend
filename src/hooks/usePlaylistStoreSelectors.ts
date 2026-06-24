@@ -126,7 +126,7 @@ const playlistCardsCache = new Map<string, {
  * Returns a stable reference resolved card array from the local-first cache.
  */
 export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
-  const selector = useCallback((state: ReturnType<typeof usePlaylistStateStore.getState>) => {
+  const selectorBody = useCallback((state: ReturnType<typeof usePlaylistStateStore.getState>) => {
     const isSmart = ['easy', 'medium', 'hard', 'skipped'].includes(playlistId);
     const cardDifficultyMap = state.cardDifficultyMap;
     const cacheKey = `${playlistId}:${isSmart ? 'smart' : 'custom'}`;
@@ -231,6 +231,13 @@ export function usePlaylistCards(playlistId: string): IPopulatedRevisionCard[] {
       return uniqueResolved;
     }
   }, [playlistId]);
+
+  const selector = useCallback((state: any) => {
+    console.time(`usePlaylistCards [${playlistId || "empty"}]`);
+    const res = selectorBody(state);
+    console.timeEnd(`usePlaylistCards [${playlistId || "empty"}]`);
+    return res;
+  }, [selectorBody, playlistId]);
 
   return useFocusAwareSelector(selector, (a, b) => {
     if (!a || !b) return a === b;

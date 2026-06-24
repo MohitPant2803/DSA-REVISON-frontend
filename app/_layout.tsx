@@ -382,7 +382,7 @@ export default function RootLayout() {
           <View style={{ flex: 1, position: 'relative', backgroundColor: palette.background }}>
             <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: palette.background } }}>
               <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(protected)" options={{ animation: 'fade' }} />
+              <Stack.Screen name="(protected)" options={{ animation: 'none' }} />
             </Stack>
           </View>
           <ToastWrapper />

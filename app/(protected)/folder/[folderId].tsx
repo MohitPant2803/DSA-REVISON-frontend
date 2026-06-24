@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { useScreenProfiler } from '@/hooks/useScreenProfiler';
 import {
   View,
   Text,
@@ -130,6 +131,7 @@ const FolderCardListItem = React.memo(({ card, canEdit, startRevising, handleCar
 });
 
 export default function FolderCardsScreen() {
+  useScreenProfiler('Folder');
   const router = useRouter();
   const palette = useThemePalette();
   const params = useLocalSearchParams<{
@@ -138,9 +140,9 @@ export default function FolderCardsScreen() {
   }>();
   const folderId = normalizeParam(params.folderId) ?? '';
   const paramTitle = normalizeParam(params.title);
-  const { user } = useAuthStore();
+  const user = useAuthStore(s => s.user);
   const { canManageContent, role } = useRole();
-  const { setActiveFolderId } = useBookmarkStore();
+  const setActiveFolderId = useBookmarkStore(s => s.setActiveFolderId);
 
   useFocusEffect(
     useCallback(() => {

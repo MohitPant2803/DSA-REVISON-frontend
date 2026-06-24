@@ -21,7 +21,6 @@ export type { QueryRevisionCardsInput } from '@/services/revisionService';
 
 // 1. Local-First Hybrid Read hooks for Revision Cards
 export const useGetRevisionCards = (query?: QueryRevisionCardsInput) => {
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
   const cardIds = usePlaylistStateStore(
     useShallow((s) => {
@@ -130,8 +129,6 @@ export const useGetCardsByFolder = (
   query?: QueryRevisionCardsInput
 ) => {
   const cardsById = usePlaylistStateStore((s) => s.cardsById);
-  const hydratePlaylistCards = usePlaylistStateStore((s) => s.hydratePlaylistCards);
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const filteredCards = useMemo(() => {

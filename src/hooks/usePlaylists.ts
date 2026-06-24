@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
 import * as playlistService from '@/services/playlistService';
@@ -7,6 +7,7 @@ import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useTrackingStore } from '@/store/useTrackingStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useShallow } from 'zustand/react/shallow';
 import { usePlaylistCards as useStorePlaylistCards } from '@/hooks/usePlaylistStoreSelectors';
 import type { ApiPlaylist } from '@/services/playlistService';
 import { resolveCardState } from '@/utils/resolveCardState';
@@ -87,11 +88,11 @@ export function buildSystemPlaylists() {
 
 // 1. Authoritative Local-First Hybrid Reads for Playlists
 export const usePlaylists = () => {
-  const playlistsById = usePlaylistStateStore((s) => s.playlistsById);
-  const hydratePlaylists = usePlaylistStateStore((s) => s.hydratePlaylists);
+  const playlistsById = usePlaylistStateStore(useShallow((s) => s.playlistsById));
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
+
+  const lastUiPlaylistsRef = useRef<UIPlaylist[]>([]);
 
   const uiPlaylists = useMemo(() => {
     const smart = buildSystemPlaylists();
@@ -107,7 +108,31 @@ export const usePlaylists = () => {
       (p) => !['easy', 'medium', 'hard', 'skipped'].includes(p.id)
     );
 
-    return [...smart, ...customPlaylists];
+    const nextPlaylists = [...smart, ...customPlaylists];
+    
+    // Stabilize reference by doing a deep primitive check of playlist objects
+    const prevPlaylists = lastUiPlaylistsRef.current;
+    const isShallowEqual =
+      prevPlaylists.length === nextPlaylists.length &&
+      prevPlaylists.every((p, idx) => {
+        const np = nextPlaylists[idx];
+        return (
+          p.id === np.id &&
+          p.name === np.name &&
+          p.color1 === np.color1 &&
+          p.color2 === np.color2 &&
+          p.itemCount === np.itemCount &&
+          p.completedLoops === np.completedLoops &&
+          (p.orderedCardIds?.length === np.orderedCardIds?.length &&
+            (p.orderedCardIds || []).every((id, i) => id === np.orderedCardIds?.[i]))
+        );
+      });
+
+    if (isShallowEqual) {
+      return prevPlaylists;
+    }
+    lastUiPlaylistsRef.current = nextPlaylists;
+    return nextPlaylists;
   }, [playlistsById, isAuthenticated, isGuest]);
 
   const queryResult = useQuery({

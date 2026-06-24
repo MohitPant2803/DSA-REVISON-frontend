@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useScreenProfiler } from '@/hooks/useScreenProfiler';
 import {
   View,
   Text,
@@ -433,7 +434,7 @@ interface SignInPromptModalProps {
 }
 
 const SignInPromptModal = React.memo(({ isOpen, onClose }: SignInPromptModalProps) => {
-  const { login } = useAuthStore();
+  const login = useAuthStore(s => s.login);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const palette = useThemePalette();
 
@@ -609,10 +610,17 @@ const getGreeting = () => {
 // PRIMARY REVISION BRAIN DASHBOARD
 // -------------------------------------------------------------
 function PersonalScreenContent() {
+  const renderCount = useRef(0);
+  renderCount.current++;
+  console.log("[RENDER] Personal.Content", renderCount.current);
+
+  useScreenProfiler('Personal.Content');
   const router = useRouter();
   const queryClient = useQueryClient();
   const palette = useThemePalette();
-  const { user, logout, isSessionExpired } = useAuthStore();
+  const user = useAuthStore(s => s.user);
+  const logout = useAuthStore(s => s.logout);
+  const isSessionExpired = useAuthStore(s => s.isSessionExpired);
   const { triggerBiometricReauth } = useBiometricReauth();
   const syncStatus = usePlaylistStateStore((s) => s.syncStatus);
 
@@ -687,7 +695,9 @@ function PersonalScreenContent() {
   const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false);
   const [isAnalyticsOverlayOpen, setIsAnalyticsOverlayOpen] = useState(false);
 
-  const { step, setStep, isComplete } = useWalkthroughStore();
+  const step = useWalkthroughStore(s => s.step);
+  const setStep = useWalkthroughStore(s => s.setStep);
+  const isComplete = useWalkthroughStore(s => s.isComplete);
   const prevSettingsOpen = React.useRef(isSettingsOpen);
 
   useEffect(() => {
@@ -1485,6 +1495,7 @@ function PersonalScreenContent() {
 }
 
 export default function PersonalScreen() {
+  useScreenProfiler('Personal.Shell');
   const palette = useThemePalette();
   const [mountContent, setMountContent] = useState(false);
 

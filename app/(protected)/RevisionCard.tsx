@@ -95,6 +95,8 @@ interface RevisionCardProps {
   totalCount: number;
   onContinuePress?: () => void;
   scrollEnabled?: boolean;
+  isActiveCard?: boolean;
+  isActiveSlide?: boolean;
 }
 
 interface ActionButtonProps {
@@ -142,7 +144,15 @@ const TopicBadge = ({ topic }: { topic: string }) => {
   );
 };
 
-export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress, scrollEnabled = true }: RevisionCardProps) => {
+export const RevisionCard = ({
+  slide,
+  currentIndex,
+  totalCount,
+  onContinuePress,
+  scrollEnabled = true,
+  isActiveCard = true,
+  isActiveSlide = true,
+}: RevisionCardProps) => {
   const { card } = slide;
   const router = useRouter();
   const palette = useThemePalette();
@@ -201,23 +211,30 @@ export const RevisionCard = ({ slide, currentIndex, totalCount, onContinuePress,
   };
 
 
-  const { user } = useAuthStore();
+  const user = useAuthStore(s => s.user);
   const { role } = useRole();
-  const { preferences } = useUserPreferencesStore();
+  const preferences = useUserPreferencesStore(s => s.preferences);
   const lowEndDeviceMode = !!preferences.lowEndDeviceMode;
 
   const [isCodeLoaded, setIsCodeLoaded] = useState(false);
   React.useEffect(() => {
+    let timeout: NodeJS.Timeout;
     if (slide.type === 'code' && slide.slideIndex === currentIndex) {
-      const delay = lowEndDeviceMode ? 300 : 150;
-      const timeout = setTimeout(() => {
-        setIsCodeLoaded(true);
-      }, delay);
-      return () => clearTimeout(timeout);
+      if (isActiveCard && isActiveSlide) {
+        const delay = lowEndDeviceMode ? 300 : 150;
+        timeout = setTimeout(() => {
+          setIsCodeLoaded(true);
+        }, delay);
+      } else {
+        // Cancel pending timer if it hasn't loaded yet
+      }
     } else if (slide.type === 'code' && slide.slideIndex !== currentIndex) {
       setIsCodeLoaded(false);
     }
-  }, [slide.type, currentIndex, lowEndDeviceMode]);
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [slide.type, currentIndex, lowEndDeviceMode, isActiveCard, isActiveSlide]);
 
   const folderId =
     typeof card.folderId === 'object' && card.folderId !== null ? card.folderId._id : card.folderId;

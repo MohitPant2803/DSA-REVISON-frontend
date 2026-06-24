@@ -13,6 +13,7 @@ const lightHaptic = () => {
 import { Tabs, useSegments, useRouter } from 'expo-router';
 import { Home, Layers, Bookmark } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { preloadReelsCore } from './reels';
 
 import { BottomTabBar } from '@react-navigation/bottom-tabs';
 import Animated, {
@@ -118,6 +119,11 @@ function TabLayoutInner() {
       initializeWalkthrough();
     }
   }, [hasAppBeenAnimated]);
+
+  useEffect(() => {
+    // Preload Reels Core in the background to ensure instant tab switching in both debug and release
+    preloadReelsCore();
+  }, []);
 
   const cameFromPlaylist = React.useRef(false);
   const cameFromFolder = React.useRef(false);

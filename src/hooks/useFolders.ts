@@ -4,14 +4,13 @@ import * as Crypto from 'expo-crypto';
 import * as folderService from '@/services/folderService';
 import { useAuthStore } from '@/store/useAuthStore';
 import { usePlaylistStateStore } from '@/store/usePlaylistStateStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { CreateFolderDTO, IFolder, PaginatedFolders, UpdateFolderDTO } from '@/types/folder';
 import type { QueryFoldersInput } from '@/services/folderService';
 
 // 1. Local-First Hybrid Read hook for Folders
 export const useGetFolders = (query?: QueryFoldersInput) => {
-  const foldersById = usePlaylistStateStore((s) => s.foldersById);
-  const hydrateFolders = usePlaylistStateStore((s) => s.hydrateFolders);
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
+  const foldersById = usePlaylistStateStore(useShallow((s) => s.foldersById));
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const folderList = useMemo(() => {
@@ -80,8 +79,6 @@ export const useGetFolders = (query?: QueryFoldersInput) => {
 
 export const useGetFolder = (folderId: string | undefined) => {
   const folder = usePlaylistStateStore((s) => folderId ? s.foldersById[folderId] : undefined);
-  const hydrateFolders = usePlaylistStateStore((s) => s.hydrateFolders);
-  const hasSyncedThisSession = usePlaylistStateStore((s) => s.hasSyncedThisSession);
   const isGuest = useAuthStore((s) => s.user?.id === 'guest-user');
 
   const queryResult = useQuery({

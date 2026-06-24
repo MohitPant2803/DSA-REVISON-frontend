@@ -1310,8 +1310,8 @@ export const ReeWCharacter = React.memo(({ state = 'idle', size = 80, disableIdl
                 {/* Bag strap */}
                 <Path d="M 32,65 Q 45,74 58,82" fill="none" stroke="#4A3B32" strokeWidth={3} />
                 {/* Yellow Messenger Side Bag */}
-                <Rect x="30" y="74" width="10" height="9" rx="3.5" fill="#EAB308" stroke="#4A3B32" strokeWidth={2} />
-                <Path d="M 30,76 L 40,76" stroke="#4A3B32" strokeWidth={1.8} />
+                <Rect x="60" y="74" width="10" height="9" rx="3.5" fill="#EAB308" stroke="#4A3B32" strokeWidth={2} />
+                <Path d="M 60,76 L 70,76" stroke="#4A3B32" strokeWidth={1.8} />
               </G>
             )}
 

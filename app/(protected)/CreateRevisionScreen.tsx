@@ -25,6 +25,7 @@ import { useAppBackHandler } from '@/hooks/useAppBackHandler';
 import { normalizeParam } from '@/utils/routeParams';
 import { useThemePalette } from '@/hooks/useThemePalette';
 import { addAlpha } from '@/theme/themePalettes';
+import { useRole } from '@/hooks/useRole';
 
 const cardFormSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters.'),
@@ -45,6 +46,7 @@ export default function CreateRevisionScreen() {
   useAppBackHandler();
   const router = useRouter();
   const palette = useThemePalette();
+  const { canManageContent } = useRole();
   const params = useLocalSearchParams<{
     cardId?: string;
     folderId?: string;
@@ -168,6 +170,25 @@ export default function CreateRevisionScreen() {
 
   const isLoading =
     createMutation.isPending || updateMutation.isPending || isSubmitting || loadingCard;
+
+  if (!canManageContent) {
+    return (
+      <View className="flex-1 justify-center items-center p-8" style={{ backgroundColor: palette.background }}>
+        <Text className="text-center mb-4" style={{ color: palette.textSecondary }}>Admin access required to compile or edit cards.</Text>
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(protected)/(tabs)/learn');
+            }
+          }}
+        >
+          <Text style={{ color: palette.accent, fontWeight: '600' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (cardId && loadingCard) {
     return (

@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { useScreenProfiler } from '@/hooks/useScreenProfiler';
 import {
   View,
   Text,
@@ -218,6 +219,7 @@ const ConfettiBlast = () => {
 };
 
 export default function PlaylistCardsScreen() {
+  useScreenProfiler('Playlist');
   const router = useRouter();
   const palette = useThemePalette();
   const insets = useSafeAreaInsets();
@@ -232,7 +234,8 @@ export default function PlaylistCardsScreen() {
 
 
   
-  const { user, logout } = useAuthStore();
+  const user = useAuthStore(s => s.user);
+  const logout = useAuthStore(s => s.logout);
   const isGuest = user?.id === 'guest-user';
   
   const GUEST_PLAYLIST_CARDS: IPopulatedRevisionCard[] = useMemo(() => [
@@ -283,7 +286,7 @@ export default function PlaylistCardsScreen() {
     }
   ], []);
 
-  const { setActivePlaylistId } = useBookmarkStore();
+  const setActivePlaylistId = useBookmarkStore(s => s.setActivePlaylistId);
   const { data: playlists } = usePlaylists();
   
 
@@ -381,7 +384,10 @@ export default function PlaylistCardsScreen() {
 
   const [undoVisible, setUndoVisible] = useState(false);
 
-  const { step, setStep, completeWalkthrough, isComplete } = useWalkthroughStore();
+  const step = useWalkthroughStore(s => s.step);
+  const setStep = useWalkthroughStore(s => s.setStep);
+  const completeWalkthrough = useWalkthroughStore(s => s.completeWalkthrough);
+  const isComplete = useWalkthroughStore(s => s.isComplete);
   const isWalkthroughActive = step !== 'none';
 
   const handleBack = useCallback(() => {

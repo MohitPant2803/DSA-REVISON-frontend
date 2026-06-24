@@ -7,6 +7,9 @@ import { sqliteWriteManager } from '@/utils/sqliteWriteManager';
 import { syncPerformanceTracker } from '@/utils/syncPerformanceTracker';
 
 export default function DevReplayInspector() {
+  if (!__DEV__) {
+    return null;
+  }
   const { offlineActionQueue, poisonActionIds, logicalClockSequence, removeProcessedActions } = usePlaylistStateStore();
   const { sessionGenerationId, user } = useAuthStore();
   const syncState = syncManager.getSyncState();

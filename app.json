@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReeWise",
     "slug": "dsa-revision-app",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "scheme": "dsareels",
     "orientation": "portrait",
     "icon": "./assets/icon213.png",
@@ -13,7 +13,11 @@
     },
     "android": {
       "package": "com.mohit.dsareels",
+      "versionCode": 2,
       "googleServicesFile": "./google-services.json",
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon213.png",
         "backgroundColor": "#FAF9F7"
@@ -21,7 +25,6 @@
       "intentFilters": [
         {
           "action": "VIEW",
-          "autoVerify": true,
           "data": [
             {
               "scheme": "dsareels",
@@ -47,7 +50,7 @@
       "expo-notifications",
       ["expo-build-properties", {
         "android": {
-          "compileSdkVersion": 35,
+          "compileSdkVersion": 36,
           "targetSdkVersion": 35
         }
       }]

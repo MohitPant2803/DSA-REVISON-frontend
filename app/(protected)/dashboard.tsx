@@ -58,7 +58,7 @@ export default function DashboardScreen() {
   useAppBackHandler();
   const router = useRouter();
   const palette = useThemePalette();
-  const { user } = useAuthStore();
+  const user = useAuthStore(s => s.user);
   const { data: stats, isLoading, isError, refetch } = useDashboard();
   const { data: foldersData } = useGetFolders({ limit: 20 });
   const sheets = foldersData?.results ?? [];
