@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "806893507042",
+    "project_id": "reewise-push",
+    "storage_bucket": "reewise-push.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:806893507042:android:bf59a5c3bc18cbae7ee9bb",
+        "android_client_info": {
+          "package_name": "com.mohit.dsareels"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAf1E8jQSy8zJRbw6WsBVSWiEiJmR3hpA8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
