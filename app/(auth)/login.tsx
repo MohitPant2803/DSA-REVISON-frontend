@@ -167,10 +167,6 @@ export default function LoginScreen() {
         return;
       }
 
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-
       if (userInfo.type === 'success') {
         const { idToken } = userInfo.data;
         if (!idToken) {
@@ -181,12 +177,15 @@ export default function LoginScreen() {
         const { deviceId, logicalClockSequence } = usePlaylistStateStore.getState();
         const clockEpoch = String(logicalClockSequence || 0);
         const res = await api.post('/auth/google', { idToken, deviceId, clockEpoch });
+        
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+
         const { token, user: rawUser } = res.data.data;
         if (typeof (global as any).dumpInstrumentState === 'function') {
           (global as any).dumpInstrumentState('2. Google token exchange succeeds');
         }
-
-
 
         const user = {
           id: rawUser._id,
@@ -214,6 +213,7 @@ export default function LoginScreen() {
           }
         }
       } else {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
         setIsAuthenticating(false);
       }
     } catch (error: any) {
