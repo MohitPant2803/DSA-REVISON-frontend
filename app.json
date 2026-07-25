@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReeWise",
     "slug": "dsa-revision-app",
-    "version": "1.0.15",
+    "version": "1.0.16",
     "scheme": "dsareels",
     "orientation": "portrait",
     "icon": "./assets/icon213.png",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.mohit.dsareels",
-      "versionCode": 9,
+      "versionCode": 10,
       "googleServicesFile": "./google-services.json",
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW"
