@@ -230,7 +230,12 @@ export default function LoginScreen() {
       } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         friendlyMessage = 'Google Play Services are not available or outdated.';
       } else if (error.message) {
-        friendlyMessage = error.message;
+        const msg = String(error.message).toLowerCase();
+        if (msg.includes('network') || msg.includes('timeout') || error.isAxiosError) {
+          friendlyMessage = 'Network connection blocked. Try switching to mobile data, a different Wi-Fi network, or using a VPN.';
+        } else {
+          friendlyMessage = error.message;
+        }
       }
       
       setAuthError(friendlyMessage);
@@ -433,7 +438,7 @@ export default function LoginScreen() {
             <View style={styles.overlayTextContainer}>
               <Text style={[styles.overlayTitle, { color: palette.textPrimary }]}>Connection is Weak</Text>
               <Text style={[styles.overlaySubtitle, { color: palette.textSecondary }]}>
-                We couldn't download the syllabus contents. Please check your internet connection and restart the app.
+                We couldn't download the syllabus contents due to network restrictions. Try switching to mobile data or another Wi-Fi network and restart the app.
               </Text>
               
               <SuperchargedPressable
