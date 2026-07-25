@@ -6,6 +6,10 @@ import type { IPopulatedRevisionCard } from '@/hooks/useRevisionCards';
 import * as SecureStore from 'expo-secure-store';
 import { profiler } from './profiler';
 
+const deterministicYield = () => new Promise<void>((resolve) => {
+  setTimeout(resolve, 0);
+});
+
 const ENCRYPTION_KEY_STORE_KEY = 'offline_queue_encryption_key';
 export type DeletedEntityType = 'folder' | 'playlist' | 'card';
 
@@ -578,90 +582,89 @@ export async function getCardFullContentFromSQLite(cardId: string): Promise<any>
 export async function bulkHydrateAllCardContent(): Promise<Record<string, any>> {
   if (!isSQLiteAvailable()) return {};
   
-  return profiler.profileAsync('Bulk Hydrate All Card Content', async () => {
-    let retries = 0;
-    const maxRetries = 2;
-    const BATCH_SIZE = 300; // Process 300 cards per batch — fewer round-trips for 547 cards (2 batches vs 6)
-    
-    while (retries < maxRetries) {
-      try {
-        const release = await sqliteLock.acquire();
+  console.time('[SQLite Bridge] bulkHydrateAllCardContent');
+  try {
+    return await profiler.profileAsync('Bulk Hydrate All Card Content', async () => {
+      let retries = 0;
+      const maxRetries = 2;
+      const BATCH_SIZE = 300; // Process 300 cards per batch — fewer round-trips for 547 cards (2 batches vs 6)
+      
+      while (retries < maxRetries) {
         try {
-          const db = getDatabase();
-          const rows = await db.getAllAsync<any>(
-            'SELECT cardId, explanation, code, imageBlobPath, imageHash, examples, slides FROM cards_content;'
-          );
-          
-          const contentMap: Record<string, any> = {};
-          
-          // Process rows in batches to avoid frame blocking
-          for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-            const batch = rows.slice(i, i + BATCH_SIZE);
+          const release = await sqliteLock.acquire();
+          try {
+            const db = getDatabase();
+            const rows = await db.getAllAsync<any>(
+              'SELECT cardId, explanation, code, imageBlobPath, imageHash, examples, slides FROM cards_content;'
+            );
             
-            // Process this batch synchronously
-            for (const row of batch) {
-              if (!row.cardId) continue;
-              contentMap[row.cardId] = {
-                explanation: row.explanation || '',
-                code: row.code || '',
-                imageBlobPath: row.imageBlobPath || undefined,
-                imageHash: row.imageHash || undefined,
-                examples: row.examples ? JSON.parse(row.examples) : [],
-                slides: row.slides ? JSON.parse(row.slides) : undefined,
-              };
+            const contentMap: Record<string, any> = {};
+            
+            // Process rows in batches to avoid frame blocking
+            for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+              const batch = rows.slice(i, i + BATCH_SIZE);
+              
+              // Process this batch synchronously
+              for (const row of batch) {
+                if (!row.cardId) continue;
+                contentMap[row.cardId] = {
+                  explanation: row.explanation || '',
+                  code: row.code || '',
+                  imageBlobPath: row.imageBlobPath || undefined,
+                  imageHash: row.imageHash || undefined,
+                  examples: row.examples ? JSON.parse(row.examples) : [],
+                  slides: row.slides ? JSON.parse(row.slides) : undefined,
+                };
+              }
+              
+              // Yield to allow other work (requestIdleCallback or setTimeout 0)
+              await deterministicYield();
             }
             
-            // Yield to allow other work (requestIdleCallback or setTimeout 0)
-            await new Promise(resolve => {
-              if (typeof requestIdleCallback !== 'undefined') {
-                requestIdleCallback(() => resolve(undefined), { timeout: 50 });
-              } else {
-                setTimeout(() => resolve(undefined), 0);
-              }
-            });
-          }
-          
-          if (__DEV__) {
-            console.log(`[SQLite Bulk Hydration] Loaded full content for ${Object.keys(contentMap).length} cards in batches of ${BATCH_SIZE}`);
-          }
-          return contentMap;
-        } finally {
-          release();
-        }
-      } catch (err: any) {
-        console.error(`[SQLite Bridge Error] bulkHydrateAllCardContent failed (attempt ${retries + 1}/${maxRetries}):`, err.message);
-        
-        // Check if it's a released connection error
-        const isReleasedError = err.message && (
-          err.message.includes('released') || 
-          err.message.includes('NativeDatabase') ||
-          err.message.includes('NativeStatement')
-        );
-        
-        if (isReleasedError && retries < maxRetries - 1) {
-          console.warn('[SQLite Bridge] Detected released connection during bulk hydration. Attempting recovery...');
-          const release2 = await sqliteLock.acquire();
-          try {
-            const { resetDatabaseInstance, initializeDatabaseAsync } = require('./sqliteDatabase');
-            await resetDatabaseInstance();
-            await initializeDatabaseAsync();
-            console.warn('[SQLite Bridge] Recovery complete for bulk hydration. Retrying...');
-          } catch (recoveryErr: any) {
-            console.error('[SQLite Bridge Recovery] Bulk hydration recovery failed:', recoveryErr.message);
-            break;
+            if (__DEV__) {
+              console.log(`[SQLite Bulk Hydration] Loaded full content for ${Object.keys(contentMap).length} cards in batches of ${BATCH_SIZE}`);
+            }
+            return contentMap;
           } finally {
-            release2();
+            release();
           }
-          retries++;
-        } else {
-          // Not a recoverable error or max retries reached
-          break;
+        } catch (err: any) {
+          console.error(`[SQLite Bridge Error] bulkHydrateAllCardContent failed (attempt ${retries + 1}/${maxRetries}):`, err.message);
+          
+          // Check if it's a released connection error
+          const isReleasedError = err.message && (
+            err.message.includes('released') || 
+            err.message.includes('NativeDatabase') ||
+            err.message.includes('NativeStatement')
+          );
+          
+          if (isReleasedError && retries < maxRetries - 1) {
+            console.warn('[SQLite Bridge] Detected released connection during bulk hydration. Attempting recovery...');
+            const release2 = await sqliteLock.acquire();
+            try {
+              const { resetDatabaseInstance, initializeDatabaseAsync } = require('./sqliteDatabase');
+              await resetDatabaseInstance();
+              await initializeDatabaseAsync();
+              console.warn('[SQLite Bridge] Recovery complete for bulk hydration. Retrying...');
+            } catch (recoveryErr: any) {
+              console.error('[SQLite Bridge Recovery] Bulk hydration recovery failed:', recoveryErr.message);
+              break;
+            } finally {
+              release2();
+            }
+            retries++;
+          } else {
+            // Not a recoverable error or max retries reached
+            break;
+          }
         }
       }
-    }
-    
-    return {};
-  });
+      
+      return {};
+    });
+  } finally {
+    console.timeEnd('[SQLite Bridge] bulkHydrateAllCardContent');
+  }
 }
 
 /**
@@ -1288,44 +1291,6 @@ export async function loadStateFromSQLite(userId: string) {
   const db = getDatabase();
   return profiler.profileAsync('Load Entire Database Snapshot Async', async () => {
     try {
-      try {
-        const releaseSelfHealing = await sqliteLock.acquire();
-        try {
-          const pruned = await db.runAsync(`
-            DELETE FROM cards_metadata
-            WHERE id IN (
-              SELECT id FROM (
-                SELECT id,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY title, folderId
-                    ORDER BY CASE WHEN substr(id, 15, 1) = '5' THEN 0 ELSE 1 END, updatedAt DESC
-                  ) AS rn
-                FROM cards_metadata
-                WHERE topic IN ('Operating Systems', 'Computer Networks', 'Quant')
-                   OR folderId IN (SELECT id FROM folders WHERE parentFolderId IN ('f4944c6e-f81a-52d5-ac46-c2d04056462e', '38ecba9d-004b-58eb-93b6-323767a4f3e9', '3ac92035-d04e-5d30-a358-9197846728e5'))
-              )
-              WHERE rn > 1
-            );
-          `);
-          // Also clean orphaned content and progress rows
-          await db.runAsync(`DELETE FROM cards_content WHERE cardId NOT IN (SELECT id FROM cards_metadata);`);
-          await db.runAsync(`DELETE FROM card_progress WHERE cardId NOT IN (SELECT id FROM cards_metadata);`);
-          
-          // Self-healing: Remove deprecated Trial 2 folder and its cards
-          const trialFolderId = '78f25ebf-e82b-428c-afd9-06ba11a78248';
-          await db.runAsync('DELETE FROM folders WHERE id = ?;', [trialFolderId]);
-          await db.runAsync('DELETE FROM cards_metadata WHERE folderId = ?;', [trialFolderId]);
-          await db.runAsync('DELETE FROM cards_content WHERE cardId NOT IN (SELECT id FROM cards_metadata);');
-          await db.runAsync('DELETE FROM card_progress WHERE cardId NOT IN (SELECT id FROM cards_metadata);');
-
-          console.log('[SQLite Self-Healing] Pruned duplicate OS/CN/Quant cards and deprecated Trial 2 folder/cards on startup.');
-        } finally {
-          releaseSelfHealing();
-        }
-      } catch (err: any) {
-        console.warn('[SQLite Self-Healing Warning] Pruning duplicates failed:', err.message);
-      }
-
       // CRITICAL PATH: Load essential layout/seeder data in parallel
       const [
         foldersRows,
@@ -1356,6 +1321,45 @@ export async function loadStateFromSQLite(userId: string) {
         db.getFirstAsync<any>('SELECT * FROM notification_settings WHERE userId = ?;', [userId]),
         db.getAllAsync<any>('SELECT key, value FROM app_config;')
       ]);
+
+      // Run self-healing pruning AFTER hydration snapshot reads are complete to avoid database locks during read operations
+      try {
+        const releaseSelfHealing = await sqliteLock.acquire();
+        try {
+          const pruned = await db.runAsync(`
+            DELETE FROM cards_metadata
+            WHERE id IN (
+              SELECT id FROM (
+                SELECT id,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY title, folderId
+                    ORDER BY CASE WHEN substr(id, 15, 1) = '5' THEN 0 ELSE 1 END, updatedAt DESC
+                  ) AS rn
+                FROM cards_metadata
+                WHERE topic IN ('Operating Systems', 'Computer Networks', 'Quant')
+                   OR folderId IN (SELECT id FROM folders WHERE parentFolderId IN ('f4944c6e-f81a-52d5-ac46-c2d04056462e', '38ecba9d-004b-58eb-93b6-323767a4f3e9', '3ac92035-d04e-5d30-a358-9197846728e5'))
+              )
+              WHERE rn > 1
+            );
+          `);
+          // Also clean orphaned content and progress rows
+          await db.runAsync(`DELETE FROM cards_content WHERE cardId NOT IN (SELECT id FROM cards_metadata);`);
+          await db.runAsync(`DELETE FROM card_progress WHERE cardId NOT IN (SELECT id FROM cards_metadata);`);
+          
+          // Self-healing: Remove deprecated Trial 2 folder and its cards
+          const trialFolderId = '78f25ebf-e82b-428c-afd9-06ba11a78248';
+          await db.runAsync('DELETE FROM folders WHERE id = ?;', [trialFolderId]);
+          await db.runAsync('DELETE FROM cards_metadata WHERE folderId = ?;', [trialFolderId]);
+          await db.runAsync('DELETE FROM cards_content WHERE cardId NOT IN (SELECT id FROM cards_metadata);');
+          await db.runAsync('DELETE FROM card_progress WHERE cardId NOT IN (SELECT id FROM cards_metadata);');
+
+          console.log('[SQLite Self-Healing] Pruned duplicate OS/CN/Quant cards and deprecated Trial 2 folder/cards after snapshot load.');
+        } finally {
+          releaseSelfHealing();
+        }
+      } catch (err: any) {
+        console.warn('[SQLite Self-Healing Warning] Pruning duplicates failed:', err.message);
+      }
 
       // Query local-only pinned folders
       let pinnedFolderIds: string[] = [];
@@ -1498,6 +1502,7 @@ export async function loadStateFromSQLite(userId: string) {
       // DEFERRED PATH: Load card metadata asynchronously (600+ cards - heavy!)
       const cardsMetaPromise = new Promise<Record<string, any>>((resolve) => {
         const loadCardMetadata = async () => {
+          console.time('[SQLite Bridge] loadCardMetadata');
           try {
             const release = await sqliteLock.acquire();
             try {
@@ -1546,13 +1551,7 @@ export async function loadStateFromSQLite(userId: string) {
                 }
                 
                 // Yield to avoid blocking
-                await new Promise(r => {
-                  if (typeof requestIdleCallback !== 'undefined') {
-                    requestIdleCallback(() => r(undefined), { timeout: 50 });
-                  } else {
-                    setTimeout(() => r(undefined), 0);
-                  }
-                });
+                await deterministicYield();
               }
               
               resolve(cardsById);
@@ -1562,15 +1561,13 @@ export async function loadStateFromSQLite(userId: string) {
           } catch (err: any) {
             console.error('[SQLite Bridge Error] Failed loading card metadata:', err.message);
             resolve({});
+          } finally {
+            console.timeEnd('[SQLite Bridge] loadCardMetadata');
           }
         };
         
-        // Schedule on idle or defer with 100ms delay max
-        if (typeof requestIdleCallback !== 'undefined') {
-          requestIdleCallback(loadCardMetadata, { timeout: 100 });
-        } else {
-          setTimeout(loadCardMetadata, 50);
-        }
+        // Execute synchronously to avoid scheduling latency/failures during critical bootstrap
+        loadCardMetadata();
       });
 
       let notificationSettings: any = null;

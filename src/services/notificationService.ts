@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
+import { DSA_REMINDER_POOL, BREAKUP_MESSAGE, NotificationTemplate } from './notificationPool';
 
 let notificationQueuePromise: Promise<any> = Promise.resolve();
 
@@ -8,6 +9,46 @@ async function runSerialized<T>(action: () => Promise<T>): Promise<T> {
   const nextPromise = notificationQueuePromise.then(action);
   notificationQueuePromise = nextPromise.catch(() => {});
   return nextPromise;
+}
+
+function getWeightedRandomTemplates(count: number): NotificationTemplate[] {
+  const pool = [...DSA_REMINDER_POOL];
+  const selected: NotificationTemplate[] = [];
+
+  const weights: Record<string, number> = {
+    friend: 35,
+    mentor: 25,
+    coach: 20,
+    future: 15,
+    roast: 2.5,
+    pattern: 2.5,
+  };
+
+  for (let step = 0; step < count; step++) {
+    if (pool.length === 0) break;
+
+    let totalWeight = 0;
+    for (const item of pool) {
+      totalWeight += weights[item.persona] || 1;
+    }
+
+    const r = Math.random() * totalWeight;
+    let sum = 0;
+    let selectedIndex = 0;
+
+    for (let i = 0; i < pool.length; i++) {
+      sum += weights[pool[i].persona] || 1;
+      if (r <= sum) {
+        selectedIndex = i;
+        break;
+      }
+    }
+
+    selected.push(pool[selectedIndex]);
+    pool.splice(selectedIndex, 1);
+  }
+
+  return selected;
 }
 
 // Configure default notification handler for foreground notifications
@@ -62,31 +103,8 @@ export async function scheduleDailyReminder(hour: number, minute: number): Promi
   if (Platform.OS === 'web') return null;
 
   try {
-    // 1. Clear any previously scheduled daily notifications
-    await cancelDailyReminder();
-
-    // 2. Verify permissions first
-    const hasPermission = await requestPermissionsAsync();
-    if (!hasPermission) return null;
-
-    // 3. Schedule recurring daily reminder
-    const identifier = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Ready for a quick review?',
-        body: 'Spend two minutes reinforcing today\'s core data structure and algorithm concepts.',
-        sound: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour,
-        minute,
-        channelId: 'dsa-reminders',
-      } as any,
-    });
-
-    console.log(`[NotificationService] Daily reminder scheduled at ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} (ID: ${identifier})`);
-    return identifier;
+    await scheduleReminders(true, hour, minute, 'daily', []);
+    return 'dsa-daily-reminder-1';
   } catch (err: any) {
     console.error('[NotificationService] Failed to schedule daily reminder:', err.message);
     return null;
@@ -136,15 +154,27 @@ export async function scheduleStreakWarning(streakCount: number, hour = 21, minu
 }
 
 /**
- * Cancels the daily review reminder.
+ * Cancels all scheduled daily reminders (including the 7 randomized slots and 1 breakup slot).
  */
 export async function cancelDailyReminder(): Promise<void> {
   if (Platform.OS === 'web') return;
   try {
+    for (let i = 1; i <= 8; i++) {
+      await Notifications.cancelScheduledNotificationAsync(`dsa-daily-reminder-${i}`);
+    }
+
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
     for (const notification of scheduled) {
       const title = notification.content.title;
-      if (title && (title.includes('daily DSA review') || title.includes('Ready for a quick review'))) {
+      const id = notification.identifier;
+      if (
+        (id && id.startsWith('dsa-daily-reminder-')) ||
+        (title && (
+          title.includes('daily DSA review') || 
+          title.includes('Ready for a quick review') ||
+          title.includes('This is goodbye. For now.')
+        ))
+      ) {
         await Notifications.cancelScheduledNotificationAsync(notification.identifier);
         console.log(`[NotificationService] Cancelled daily reminder: ${notification.identifier}`);
       }
@@ -218,22 +248,50 @@ export async function scheduleReminders(
       let daysToSchedule: number[] = [];
 
       if (frequency === 'daily') {
-        // Schedule single daily reminder
-        const identifier = await Notifications.scheduleNotificationAsync({
+        const templates = getWeightedRandomTemplates(7);
+
+        for (let i = 1; i <= 7; i++) {
+          const template = templates[i - 1];
+          const triggerDate = new Date();
+          triggerDate.setDate(triggerDate.getDate() + i);
+          triggerDate.setHours(hour, minute, 0, 0);
+
+          await Notifications.scheduleNotificationAsync({
+            identifier: `dsa-daily-reminder-${i}`,
+            content: {
+              title: template.title,
+              body: template.body,
+              sound: true,
+              priority: Notifications.AndroidNotificationPriority.HIGH,
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: triggerDate,
+              channelId: 'dsa-reminders',
+            } as any,
+          });
+          console.log(`[NotificationService] Scheduled daily slot ${i} for ${triggerDate.toISOString()} - "${template.title}"`);
+        }
+
+        const breakupDate = new Date();
+        breakupDate.setDate(breakupDate.getDate() + 8);
+        breakupDate.setHours(hour, minute, 0, 0);
+
+        await Notifications.scheduleNotificationAsync({
+          identifier: `dsa-daily-reminder-8`,
           content: {
-            title: 'Ready for a quick review?',
-            body: 'Spend two minutes reinforcing today\'s core data structure and algorithm concepts.',
+            title: BREAKUP_MESSAGE.title,
+            body: BREAKUP_MESSAGE.body,
             sound: true,
             priority: Notifications.AndroidNotificationPriority.HIGH,
           },
           trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DAILY,
-            hour,
-            minute,
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: breakupDate,
             channelId: 'dsa-reminders',
           } as any,
         });
-        console.log(`[NotificationService] Daily reminder scheduled at ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} (ID: ${identifier})`);
+        console.log(`[NotificationService] Scheduled breakup notification for ${breakupDate.toISOString()}`);
         return;
       } else if (frequency === 'three_days') {
         // Use customDays if provided and not empty, otherwise default to Monday, Thursday, Sunday [2, 5, 1]

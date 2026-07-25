@@ -2999,8 +2999,10 @@ export async function bootstrapHydrateFromSQLite(
   const authStore = require('./useAuthStore').useAuthStore;
   const capturedGenId = authStore.getState().sessionGenerationId;
 
+  console.time('[Store Hydration] bootstrapHydrateFromSQLite');
   try {
-    const { isSQLiteAvailable } = require('../utils/sqliteDatabase');
+    try {
+      const { isSQLiteAvailable } = require('../utils/sqliteDatabase');
     const { whenDatabaseReady, markAppReady } = require('../utils/appBootstrapGate');
     const { interactionScheduler } = require('../utils/interactionScheduler');
 
@@ -3009,6 +3011,17 @@ export async function bootstrapHydrateFromSQLite(
       console.log('[Zustand SQLite Hydration] Waiting for database readiness...');
       await whenDatabaseReady();
       console.log('[Zustand SQLite Hydration] Database ready. Proceeding with loading snapshot.');
+
+      // Diagnostic folders query log
+      try {
+        const { getDatabase } = require('../utils/sqliteDatabase');
+        const db = getDatabase();
+        const start = Date.now();
+        const rows = await db.getAllAsync('SELECT * FROM folders WHERE userId = ?', [activeUserId]);
+        console.log(`[Bootstrap] folders query took ${Date.now() - start}ms | rows: ${rows.length}`);
+      } catch (err: any) {
+        console.error(`[Bootstrap] diagnostic folders query failed:`, err.message);
+      }
 
       // Stage 2: Load relational partitions from SQLite snapshot
       const { loadStateFromSQLite } = require('../utils/sqliteSyncBridge');
@@ -3294,8 +3307,11 @@ export async function bootstrapHydrateFromSQLite(
       finalState.triggerSync();
     });
 
-  } catch (sqlErr: any) {
-    console.error('[Zustand SQLite Hydration Error] Setup failed:', sqlErr.message);
-    usePlaylistStateStore.setState({ bootstrapStatus: 'failed' });
+    } catch (sqlErr: any) {
+      console.error('[Zustand SQLite Hydration Error] Setup failed:', sqlErr.message);
+      usePlaylistStateStore.setState({ bootstrapStatus: 'failed' });
+    }
+  } finally {
+    console.timeEnd('[Store Hydration] bootstrapHydrateFromSQLite');
   }
 }

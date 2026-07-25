@@ -587,6 +587,24 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
   const { user, login, logout } = useAuthStore();
   const isGuest = user?.id === 'guest-user';
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+
+  const handleSignOutPress = () => {
+    lightHaptic();
+    if (isGuest) {
+      handleAuthAction();
+    } else {
+      setShowSignOutConfirm(true);
+    }
+  };
+
+  const confirmSignOut = async () => {
+    setShowSignOutConfirm(false);
+    lightHaptic();
+    onClose();
+    await logout();
+  };
   const { triggerBackgroundSync } = useSyncEngine();
   const { 
     latestVersion, 
@@ -654,41 +672,31 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
     }
   };
 
-  const handleDeleteAccount = async () => {
+  const handleDeleteAccount = () => {
     lightHaptic();
-    Alert.alert(
-      "Delete Account",
-      "Are you sure you want to permanently delete your account? This will erase all your progress, custom playlists, folders, streaks, and account details. This action cannot be undone.",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setIsAuthenticating(true);
-              const { deleteAccount: apiDeleteAccount } = require('@/services/authService');
-              await apiDeleteAccount();
-              onClose();
-              await logout();
-              Toast.show({
-                type: 'success',
-                text1: 'Account Deleted',
-                text2: 'Your account has been successfully removed.',
-              });
-            } catch (err: any) {
-              console.error('[SettingsOverlay] Delete account error:', err.message);
-              Alert.alert("Error", "Failed to delete account. Please try again later.");
-            } finally {
-              setIsAuthenticating(false);
-            }
-          }
-        }
-      ]
-    );
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteAccount = async () => {
+    setShowDeleteConfirm(false);
+    lightHaptic();
+    try {
+      setIsAuthenticating(true);
+      const { deleteAccount: apiDeleteAccount } = require('@/services/authService');
+      await apiDeleteAccount();
+      onClose();
+      await logout();
+      Toast.show({
+        type: 'success',
+        text1: 'Account Deleted',
+        text2: 'Your account has been successfully removed.',
+      });
+    } catch (err: any) {
+      console.error('[SettingsOverlay] Delete account error:', err.message);
+      Alert.alert("Error", "Failed to delete account. Please try again later.");
+    } finally {
+      setIsAuthenticating(false);
+    }
   };
 
   const handleShareApp = async () => {
@@ -941,34 +949,322 @@ export const MySpaceSettingsOverlay = React.memo(({ isOpen, onClose }: MySpaceSe
 
                   {/* Sign Out on the Right */}
                   <TouchableOpacity
-                    onPress={handleAuthAction}
+                    onPress={handleSignOutPress}
                     activeOpacity={0.8}
                     disabled={isAuthenticating}
                     style={[
                       styles.authButton,
                       {
                         flex: 1,
-                        backgroundColor: addAlpha(palette.error, palette.isDark ? 0.08 : 0.05),
-                        borderColor: addAlpha(palette.error, palette.isDark ? 0.20 : 0.15),
+                        backgroundColor: palette.inputBg,
+                        borderColor: palette.border,
                         borderWidth: 1,
                       }
                     ]}
                   >
                     {isAuthenticating ? (
-                      <ActivityIndicator color={palette.error} />
+                      <ActivityIndicator color={palette.textSecondary} />
                     ) : (
                       <>
-                        <LogOut color={palette.error} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: palette.error }}>Sign Out</Text>
+                        <LogOut color={palette.textSecondary} size={16} strokeWidth={2.2} style={{ marginRight: 8 }} />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: palette.textSecondary }}>Sign Out</Text>
                       </>
                     )}
                   </TouchableOpacity>
                 </View>
               )}
             </View>
+
+            {/* Legal Links Footer */}
+            <View style={{
+              marginTop: 20,
+              marginBottom: 10,
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'row',
+              gap: 12,
+            }}>
+              <TouchableOpacity 
+                onPress={() => Linking.openURL('https://ree-wise-download-website.vercel.app/privacy')}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 11.5, fontWeight: '600', color: palette.textMuted, textDecorationLine: 'underline' }}>
+                  Privacy Policy
+                </Text>
+              </TouchableOpacity>
+
+              <Text style={{ fontSize: 11.5, color: palette.textMuted }}>•</Text>
+
+              <TouchableOpacity 
+                onPress={() => Linking.openURL('https://ree-wise-download-website.vercel.app/terms')}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 11.5, fontWeight: '600', color: palette.textMuted, textDecorationLine: 'underline' }}>
+                  Terms of Services
+                </Text>
+              </TouchableOpacity>
+            </View>
           </ScrollView>
         </Animated.View>
       </View>
+
+      {/* Custom Theme-Aware Sign Out Confirmation Modal */}
+      <Modal
+        transparent
+        visible={showSignOutConfirm}
+        animationType="fade"
+        onRequestClose={() => setShowSignOutConfirm(false)}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: palette.overlayBg,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 24,
+        }}>
+          <View style={{
+            width: '100%',
+            maxWidth: 320,
+            backgroundColor: palette.dialogBg,
+            borderRadius: 24,
+            padding: 24,
+            alignItems: 'center',
+            shadowColor: palette.shadow,
+            shadowOffset: { width: 0, height: 12 },
+            shadowOpacity: palette.isDark ? 0.30 : 0.15,
+            shadowRadius: 24,
+            elevation: 8,
+            borderWidth: 1,
+            borderColor: palette.border,
+          }}>
+            {/* Icon Container */}
+            <View style={{
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: addAlpha(palette.accent, 0.1),
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginBottom: 16,
+            }}>
+              <LogOut color={palette.accent} size={24} strokeWidth={2} />
+            </View>
+
+            {/* Title */}
+            <Text style={{
+              fontSize: 16,
+              fontWeight: '800',
+              color: palette.textPrimary,
+              textAlign: 'center',
+              marginBottom: 10,
+              letterSpacing: -0.2,
+            }}>
+              Sign Out
+            </Text>
+            
+            {/* Description Message */}
+            <Text style={{
+              fontSize: 12.5,
+              color: palette.textSecondary,
+              textAlign: 'center',
+              lineHeight: 18,
+              marginBottom: 22,
+            }}>
+              Are you sure you want to sign out?
+            </Text>
+
+            {/* Action Buttons Row */}
+            <View style={{
+              flexDirection: 'row',
+              gap: 12,
+              width: '100%',
+            }}>
+              {/* Cancel Button */}
+              <TouchableOpacity
+                onPress={() => {
+                  lightHaptic();
+                  setShowSignOutConfirm(false);
+                }}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  backgroundColor: palette.surface,
+                  borderRadius: 14,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: palette.border,
+                }}
+              >
+                <Text style={{
+                  fontSize: 13,
+                  fontWeight: '700',
+                  color: palette.textSecondary,
+                }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              {/* Confirm Sign Out Button */}
+              <TouchableOpacity
+                onPress={confirmSignOut}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  backgroundColor: palette.accent,
+                  borderRadius: 14,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  shadowColor: palette.accentGlow,
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 2,
+                }}
+              >
+                <Text style={{
+                  fontSize: 13,
+                  fontWeight: '700',
+                  color: palette.isDark ? palette.textPrimary : palette.surface,
+                }}>
+                  Sign Out
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Sleek Custom Theme-Aware Delete Account Confirmation Modal */}
+      <Modal
+        transparent
+        visible={showDeleteConfirm}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteConfirm(false)}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: palette.overlayBg,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 24,
+        }}>
+          <View style={{
+            width: '100%',
+            maxWidth: 320,
+            backgroundColor: palette.dialogBg,
+            borderRadius: 24,
+            padding: 24,
+            alignItems: 'center',
+            shadowColor: palette.shadow,
+            shadowOffset: { width: 0, height: 12 },
+            shadowOpacity: palette.isDark ? 0.30 : 0.15,
+            shadowRadius: 24,
+            elevation: 8,
+            borderWidth: 1,
+            borderColor: palette.border,
+          }}>
+            {/* Warning Icon Container */}
+            <View style={{
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: addAlpha(palette.error, 0.1),
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginBottom: 16,
+            }}>
+              <Trash2 color={palette.error} size={24} strokeWidth={2} />
+            </View>
+
+            {/* Title */}
+            <Text style={{
+              fontSize: 16,
+              fontWeight: '800',
+              color: palette.textPrimary,
+              textAlign: 'center',
+              marginBottom: 10,
+              letterSpacing: -0.2,
+            }}>
+              Delete Account
+            </Text>
+            
+            {/* Description Message */}
+            <Text style={{
+              fontSize: 12.5,
+              color: palette.textSecondary,
+              textAlign: 'center',
+              lineHeight: 18,
+              marginBottom: 22,
+            }}>
+              Are you sure you want to delete your account? All saved progress, playlists, and streak data will be permanently removed. This action cannot be undone.
+            </Text>
+
+            {/* Action Buttons Row */}
+            <View style={{
+              flexDirection: 'row',
+              gap: 12,
+              width: '100%',
+            }}>
+              {/* Cancel Button */}
+              <TouchableOpacity
+                onPress={() => {
+                  lightHaptic();
+                  setShowDeleteConfirm(false);
+                }}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  backgroundColor: palette.surface,
+                  borderRadius: 14,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: palette.border,
+                }}
+              >
+                <Text style={{
+                  fontSize: 13,
+                  fontWeight: '700',
+                  color: palette.textSecondary,
+                }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              {/* Destructive Delete Button */}
+              <TouchableOpacity
+                onPress={confirmDeleteAccount}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  height: 42,
+                  backgroundColor: palette.error,
+                  borderRadius: 14,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  shadowColor: palette.error,
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 2,
+                }}
+              >
+                <Text style={{
+                  fontSize: 13,
+                  fontWeight: '700',
+                  color: '#FFFFFF',
+                }}>
+                  Delete Account
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 });

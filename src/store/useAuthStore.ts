@@ -329,12 +329,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user: null,
         isAuthenticated: false,
         isLoading: false,
-        isAuthReady: false,
+        isAuthReady: true,
         isSessionExpired: false,
         isLoggingOut: false,
         sessionGenerationId: state.sessionGenerationId + 1,
       }));
       return;
+    }
+
+    // Wait for any active SQLite write queue operations to complete
+    try {
+      const { sqliteWriteManager } = require('../utils/sqliteWriteManager');
+      await Promise.race([
+        sqliteWriteManager.flush(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Pre-sync write queue flush timeout')), 3000))
+      ]);
+    } catch (err: any) {
+      console.warn('[AuthStore] Pre-sync write queue flush warning:', err.message);
     }
 
     // Check for pending unsynced work before destroying session
@@ -397,6 +408,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       console.warn('[AuthStore] Emergency analytics sync failed before logout:', analyticsErr);
     }
 
+    // Wait for emergency sync database writes to complete and clear the queue
+    try {
+      const { sqliteWriteManager } = require('../utils/sqliteWriteManager');
+      await Promise.race([
+        sqliteWriteManager.flush(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Post-sync write queue flush timeout')), 3000))
+      ]);
+      sqliteWriteManager.clear();
+    } catch (err: any) {
+      console.warn('[AuthStore] Post-sync write queue flush/clear warning:', err.message);
+      try {
+        const { sqliteWriteManager } = require('../utils/sqliteWriteManager');
+        sqliteWriteManager.clear();
+      } catch {}
+    }
+
     // Clear only in-memory/session state. SQLite rows are partitioned by userId and must remain
     // available so switching accounts does not mix or lose local Personal tab data.
     try {
@@ -441,7 +468,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user: null,
       isAuthenticated: false,
       isLoading: false,
-      isAuthReady: false,
+      isAuthReady: true,
       isSessionExpired: false,
       isLoggingOut: false,
       sessionGenerationId: state.sessionGenerationId + 1,

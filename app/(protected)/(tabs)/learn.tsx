@@ -249,6 +249,11 @@ function LearnScreenContent() {
   
   const [isTransitionReady, setIsTransitionReady] = useState(true);
 
+  const foldersById = usePlaylistStateStore(s => s.foldersById);
+  useEffect(() => {
+    console.log('[LearnScreen] mounted. foldersById count:', Object.keys(foldersById).length);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       interactionScheduler.registerInteraction(); // UI priority block
@@ -791,7 +796,7 @@ function LearnScreenContent() {
       phase,
       isTransitionReady,
       search,
-      quotesListLength: quotesList?.length,
+      quotesListLength: globalQuotesList?.length,
       selectedQuoteId: selectedQuote?._id,
       showAuthor,
       seniorModalVisible,
@@ -881,7 +886,7 @@ function LearnScreenContent() {
 
         </View>
 
-        {/* Section Header Row softly fades and slides upward */}
+        {/* Section Header Row softly fades and slides upward
         <Animated.View style={contentAnimatedStyle}>
           <View style={styles.sectionHeaderRow}>
             <View />
@@ -902,6 +907,7 @@ function LearnScreenContent() {
             )}
           </View>
         </Animated.View>
+        */}
 
         {/* Render collections list with staggered drag-chain momentum effects directly in ScrollView to avoid parent clipping and fade delays */}
         <View style={styles.collectionsList}>

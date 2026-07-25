@@ -680,10 +680,13 @@ export function useSyncEngine() {
           setSyncProgress(100, 'Completed');
 
           // Dismiss first-time sync gate overlay immediately so layout navigation triggers
+          console.log('[SyncEngine] commitStateSwap: dismissing overlay');
           usePlaylistStateStore.setState({ isFirstTimeSyncInProgress: false });
 
           // Yield massive data swap to the interaction manager to allow layout transition to render cleanly
+          console.log('[SyncEngine] commitStateSwap: queuing state swap via InteractionManager');
           InteractionManager.runAfterInteractions(() => {
+            console.log('[SyncEngine] InteractionManager callback fired — committing nextState');
             const nextHydratedPlaylists: Record<string, boolean> = {};
             Object.keys(shadowPlaylists).forEach((pId) => {
               nextHydratedPlaylists[pId] = true;
@@ -705,6 +708,7 @@ export function useSyncEngine() {
               nextState.fullPlaylistCards = nextFullPlaylistCards;
               nextState.hydratedPlaylistCardCounts = nextHydratedPlaylistCardCounts;
             }
+            console.log('[SyncEngine] nextState foldersById count:', Object.keys(nextState.foldersById ?? {}).length);
             usePlaylistStateStore.setState(nextState);
             if (typeof (global as any).dumpInstrumentState === 'function') {
               (global as any).dumpInstrumentState('11. commitStateSwap completes');

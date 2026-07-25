@@ -183,6 +183,19 @@ export class SQLiteWriteManager {
   private async processQueue(): Promise<void> {
     if (this.executing || this.queue.length === 0) return;
 
+    // Serialize hydration and writes: defer writes until bootstrap completes or fails
+    try {
+      const { usePlaylistStateStore } = require('../store/usePlaylistStateStore');
+      const bootstrapStatus = usePlaylistStateStore.getState().bootstrapStatus;
+      if (bootstrapStatus !== 'completed' && bootstrapStatus !== 'failed') {
+        console.log(`[WriteManager] Deferring write — bootstrap in progress (status: ${bootstrapStatus})`);
+        setTimeout(() => this.processQueue(), 500);
+        return;
+      }
+    } catch (err: any) {
+      console.warn('[WriteManager] Failed to check bootstrapStatus:', err.message);
+    }
+
     this.executing = true;
     let db = getDatabase();
 
